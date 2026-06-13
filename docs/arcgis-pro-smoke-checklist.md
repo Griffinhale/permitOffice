@@ -38,7 +38,7 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 - [ ] Approve a case. The affected district family repaints (base
       `district_type`, prosperity overlay, identity overlay) and any new/updated
       feature shows. Log shows `[REBUILD] ... mode=district-readd ...` and, with
-      perf enabled, `experiment_district-ring=...`.
+      perf enabled, `ring_redraw=...`.
 - [ ] Advance a week (or let the deadline fire). Districts whose state changed
       repaint; converted/contested districts show their new fill + name.
 - [ ] Confirm the board never goes blank / lines-only after an action. The visible
@@ -92,25 +92,17 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 - [ ] Let the week advance to a configured checkpoint. Confirm the log includes
       `[REBUILD] targeted=['PermitDistricts'] mode=district-readd dirty=districts`.
 - [ ] Record timings for a normal decision and a checkpoint tick:
-      `experiment_district-ring`, `feature_PermitPoints_ring_refresh` /
+      `ring_redraw`, `feature_PermitPoints_ring_refresh` /
       `feature_PermitPoints_ring_rehydrate`, and total `rebuild`. If the ring
       path reports a warning and falls back, record `remove`, `add`, `refresh`
       too.
 
-## 11. Redraw experiments
-- [ ] Default path: leave **Redraw Experiment = None** and confirm district-dirty
-      redraws use `district-ring` in the perf log.
-- [ ] Volatile overlay experiment: keep as a probe only. Confirm whether it still
-      drops non-overlay districts; do not promote unless the full board remains
-      visible.
-- [ ] ArcGIS alternative-path experiment: test definition query swap, layer-file
-      apply, CIM renderer edit, in-memory layer, and apply-symbology-from-layer.
-      Record whether each path reloads changed visual state correctly.
-- [ ] Pre-drawn visibility swap experiment: confirm it is still fast, but reject
-      it as default if district symbology stays stale.
-- [ ] `predrawn-swap-refresh`: keep as a bug probe only. It was fast during play
-      on 2026-06-08, but the completed/closed map showed red/gray board-wide
-      corruption afterward.
+## 11. Retired redraw probes
+- [ ] Confirm the public toolbox has no **Redraw Experiment** or benchmark
+      parameter.
+- [ ] If live redraw looks wrong, reproduce with the production ring path first.
+      Use `docs/failed-experiments.md` and `docs/redraw-experiment-notes.md`
+      before reviving any retired probe.
 - [ ] `district-ring`: current promoted path. Confirm point features still
       appear/update after approvals while the district board keeps correct
       type/identity/prosperity visuals.

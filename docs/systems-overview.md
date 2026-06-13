@@ -31,10 +31,9 @@ The codebase is split so the game is testable without ArcGIS Pro.
 - `turns.py` - turn advancement, scorecards, audit results, deadlines.
 - `systems.py` - projects, feature lifecycle, economy, networks, hazards, housing.
 - `helpers.py` - district math, population, stakeholder heat, effect math.
-- `cache_keys.py`, `dirty.py`, `futures.py`, `materialized.py` - stable cache
-  hashing, generation tokens, dirty scopes, speculative one-ply decision
-  futures, and materialized-view cache records. These are ArcPy-free cache data;
-  they never replace the GDB as persistence.
+- `cache_keys.py`, `dirty.py`, `futures.py` - stable cache hashing, generation
+  tokens, dirty scopes, and speculative one-ply decision futures. These are
+  ArcPy-free cache data; they never replace the GDB as persistence.
 - `expiration.py`, `type_pressure.py`, `buyouts.py`, `city_detail.py` - unattended
   item policy, hidden district-type ledger, buyout transitions, civic texture.
 

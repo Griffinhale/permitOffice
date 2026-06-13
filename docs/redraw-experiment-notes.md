@@ -65,16 +65,16 @@ default behavior until the close-state red/gray rendering bug is understood.
 - Support layers now use matching point/line/zone rings. Existing visible support
   slots first try cheap `RefreshLayer`; failures fall back to ring rehydrate and
   then to legacy remove/add.
-- The older `predrawn-rehydrate` path remains useful as a diagnostic fallback, but
-  it is no longer the promoted path because live runs showed slower support-layer
-  churn and occasional stale/incomplete visual behavior.
+- The older `predrawn-rehydrate` path is now retired from runtime code. Its notes
+  remain useful historical evidence, but live fallback is the narrow legacy
+  remove/add/refresh path after a ring failure.
 - Future-cache data is speculative only. Real decisions still resolve against
   current state, write the GDB once, then drive map work from the actual
   `DecisionResult` plus cache hints.
 
 ### Perf labels to watch
 
-- `experiment_district-ring` - total ring redraw path.
+- `ring_redraw` - total ring redraw path.
 - `RefreshLayer` - district slot refresh after visibility swap.
 - `feature_PermitPoints_ring_refresh` - cheap support-ring refresh path.
 - `feature_PermitPoints_ring_rehydrate` - fallback support-ring rehydrate path.

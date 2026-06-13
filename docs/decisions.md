@@ -182,3 +182,31 @@ and text legibility. **Rejected/deferred:** retuning the refusal curve and
 round-robin counter-bidding (want live feedback first); persisting a
 ledger-snapshot RNG key (still unnecessary — the side stream is keyed by the
 stable pairing).
+
+### ADR-15 - ArcPy stays main-thread; pure workers are allowed
+**Decision:** ArcPy cursor work, GDB writes, map/layer operations, and Tk widget
+mutation stay on the main Tk/ArcPy thread. Worker threads may run only
+ArcPy-free pure-Python work after the main thread has already captured row data
+into dataclasses/dicts/lists. Any worker path must have timeout/error fallback
+and must never touch `arcpy`, Tk widgets, or live layer objects.
+**Why:** live Pro testing showed ArcPy-bound worker probes can freeze or behave
+unpredictably, while pure dashboard/cache computation is safe when fed copied
+row snapshots.
+**Rejected:** threaded ArcPy reads/writes/map refresh; making worker results
+authoritative persistence; GP-selectable threading diagnostics in the public
+tool.
+
+### ADR-16 - Display-ring redraw is production, not an experiment
+**Decision:** the promoted district/support display-ring redraw path is normal
+production behavior. The public toolbox exposes no redraw experiment dropdown or
+benchmark runner; `district-ring` remains only as an internal perf label and
+layer-ring concept. Failures fall back narrowly to the legacy remove/add/refresh
+path for live ArcGIS safety.
+**Why:** the ring path is the measured correctness-safe strategy: it prepares a
+hidden slot from current GDB truth, applies symbology, swaps visibility only
+after success, and avoids accepting stale symbology or blank boards as
+performance wins.
+**Rejected:** keeping `predrawn-rehydrate` selectable; retaining GP-facing
+redraw experiment controls; pure visibility swap, volatile overlay, and SDK
+display-cache probes as runtime options. Details live in
+`docs/failed-experiments.md` and `docs/redraw-experiment-notes.md`.

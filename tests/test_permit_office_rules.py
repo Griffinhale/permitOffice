@@ -2642,41 +2642,33 @@ def test_arcpy_toolbox_schema_declares_governance_fields_without_new_feature_cla
     assert '"PermitZones"' in combined_text
 
 
-def test_arcpy_toolbox_exposes_redraw_experiment_dropdown_parameter():
-    """Verify redraw experiments are selectable from the Geoprocessing pane."""
+def test_arcpy_toolbox_hides_experiment_and_diagnostic_parameters():
+    """Verify public GP parameters stay focused on launching the game."""
 
     toolbox_dir = Path(__file__).parents[1] / "toolbox"
     toolbox_text = (toolbox_dir / "arcpy_permit_office.pyt").read_text()
     schema_text = (toolbox_dir / "permit_office_arcgis" / "schema.py").read_text()
 
-    assert "P_REDRAW_EXPERIMENT = 3" in schema_text
-    assert 'displayName="Redraw Experiment"' in toolbox_text
-    assert 'datatype="GPString"' in toolbox_text
-    assert "p_redraw.filter.type = \"ValueList\"" in toolbox_text
+    assert "P_WORKSPACE = 0" in schema_text
+    assert "P_OUTPUT = 1" in schema_text
+    assert "P_PERF = 2" in schema_text
     for option in (
-        "None",
-        "district-ring",
-        "predrawn-rehydrate",
+        "P_REDRAW_EXPERIMENT",
+        "P_REDRAW_BENCHMARK_RUNS",
+        "P_STARTUP_EXPERIMENT",
     ):
-        assert f'"{option}"' in toolbox_text
+        assert option not in schema_text
     for removed in (
-        "volatile-overlay",
-        "predrawn-swap",
-        "predrawn-swap-refresh",
-        "predrawn-rehydrate-smart-features",
-        "predrawn-rehydrate-style-cache",
-        "predrawn-rehydrate-template-style",
-        "predrawn-rehydrate-refresh-hidden-first",
-        "predrawn-rehydrate-refresh-visible-first",
-        "hybrid-rehydrate-districts-swap-points",
-        "alt-refresh",
-        "alt-definition-query",
-        "alt-visibility",
-        "alt-cim",
-        "alt-symbology",
-        "alt-make-feature-layer",
+        "Redraw Experiment",
+        "redraw_experiment",
+        "Redraw Benchmark Runs",
+        "redraw_benchmark_runs",
+        "Startup/Threading Diagnostics",
+        "startup_threading_diagnostics",
+        "predrawn-rehydrate",
+        "threaded-cache",
     ):
-        assert f'"{removed}"' not in toolbox_text
+        assert removed not in toolbox_text
 
 
 def test_arcpy_toolbox_evicts_stale_permit_office_modules_before_reload():
@@ -2689,51 +2681,39 @@ def test_arcpy_toolbox_evicts_stale_permit_office_modules_before_reload():
     assert '"permit_office",' in toolbox_text
     assert '"permit_office_arcgis",' in toolbox_text
     assert "sys.modules.pop(_module_name, None)" in toolbox_text
-    assert "os.environ[REDRAW_EXPERIMENT_ENV] = redraw_experiment" in toolbox_text
 
 
-def test_arcpy_toolbox_exposes_redraw_benchmark_runs_parameter():
-    """Verify redraw benchmark runs are selectable from the Geoprocessing pane."""
+def test_arcpy_toolbox_execute_uses_three_parameter_contract():
+    """Verify execute indexes only workspace/output/perf after cleanup."""
 
     toolbox_dir = Path(__file__).parents[1] / "toolbox"
     toolbox_text = (toolbox_dir / "arcpy_permit_office.pyt").read_text()
-    schema_text = (toolbox_dir / "permit_office_arcgis" / "schema.py").read_text()
 
-    assert "P_REDRAW_BENCHMARK_RUNS = 4" in schema_text
-    assert 'displayName="Redraw Benchmark Runs"' in toolbox_text
-    assert 'name="redraw_benchmark_runs"' in toolbox_text
-    assert 'datatype="GPLong"' in toolbox_text
-    assert "p_benchmark.value = 0" in toolbox_text
-    assert "run_redraw_benchmark(paths, messages, benchmark_runs)" in toolbox_text
+    assert "parameters[P_WORKSPACE]" in toolbox_text
+    assert "parameters[P_PERF]" in toolbox_text
+    assert "P_OUTPUT" in toolbox_text
+    assert "parameters[P_REDRAW_EXPERIMENT]" not in toolbox_text
+    assert "parameters[P_REDRAW_BENCHMARK_RUNS]" not in toolbox_text
+    assert "parameters[P_STARTUP_EXPERIMENT]" not in toolbox_text
+    assert "return [p_workspace, p_output, p_perf]" in toolbox_text
 
 
-def test_redraw_benchmark_keeps_only_plausible_contenders():
-    """Verify the benchmark harness is pruned to candidates worth timing live."""
+def test_dashboard_uses_production_redraw_names_not_experiment_harness():
+    """Verify promoted ring redraw is no longer routed through experiment naming."""
 
     dashboard_text = (Path(__file__).parents[1] / "toolbox" / "permit_office_arcgis" / "dashboard.py").read_text()
 
-    for option in (
-        '("default", "")',
-        '("district-ring", "district-ring")',
-        '("predrawn-rehydrate", "predrawn-rehydrate")',
+    assert "apply_ring_redraw" in dashboard_text
+    for retired in (
+        "REDRAW_EXPERIMENT_ENV",
+        "REDRAW_BENCHMARK_VARIANTS",
+        "run_redraw_benchmark",
+        "_configured_redraw_experiment",
+        "_default_redraw_experiment",
+        "STARTUP_EXPERIMENT",
+        "normalize_startup_experiment",
     ):
-        assert option in dashboard_text
-    for loser in (
-        '("volatile-overlay", "volatile-overlay")',
-        '("predrawn-swap", "predrawn-swap")',
-        '("predrawn-swap-refresh", "predrawn-swap-refresh")',
-        '("predrawn-rehydrate-smart-features", "predrawn-rehydrate-smart-features")',
-        '("predrawn-rehydrate-template-style", "predrawn-rehydrate-template-style")',
-        '("predrawn-rehydrate-refresh-hidden-first", "predrawn-rehydrate-refresh-hidden-first")',
-        '("hybrid-rehydrate-districts-swap-points", "hybrid-rehydrate-districts-swap-points")',
-        '("alt-refresh", "alt-refresh")',
-        '("alt-definition-query", "alt-definition-query")',
-        '("alt-visibility", "alt-visibility")',
-        '("alt-cim", "alt-cim")',
-        '("alt-symbology", "alt-symbology")',
-        '("alt-make-feature-layer", "alt-make-feature-layer")',
-    ):
-        assert loser not in dashboard_text
+        assert retired not in dashboard_text
 
 
 def test_active_permit_office_files_stay_under_line_budget():

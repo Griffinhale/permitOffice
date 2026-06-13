@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from toolbox.permit_office import cache_keys, dirty, futures, materialized
+from toolbox.permit_office import cache_keys, dirty, futures
 from toolbox import arcpy_permit_office_rules as rules
 
 
@@ -94,16 +94,6 @@ def test_dirty_bitsets_round_trip_cell_ids_and_layer_names():
 
     assert index.from_bits(bits) == ("D0000", "D0001")
     assert dirty.layer_names_from_bits(dirty.layer_bits_from_names(["points", "districts", "unknown"])) == ("districts", "points")
-
-
-def test_materialized_view_reuses_matching_dependency_hash_and_invalidates_changes():
-    cache = materialized.MaterializedViewCache()
-    generation = cache_keys.GenerationToken("game-1", 1, 0, 1)
-
-    cache.put("audit", "hash-a", generation, {"grade": "PASS"})
-
-    assert cache.get("audit", "hash-a", generation) == {"grade": "PASS"}
-    assert cache.get("audit", "hash-b", generation) is None
 
 
 def test_future_snapshot_is_isolated_from_authoritative_objects():

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 import traceback
-import os
 import threading
 from concurrent import futures as concurrent_futures
 from copy import deepcopy
@@ -32,7 +31,7 @@ from .geometry import (
     proposal_visible_map,
     refresh_all,
     remove_outputs_from_map,
-    run_redraw_experiment,
+    apply_ring_redraw,
     select_case_context,
     selected_cell_ids,
     seed_city_features,
@@ -79,63 +78,29 @@ WORK_WEEK_DAYS = (
 )
 WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
 MIDWEEK_MAP_REDRAW_DAYS = frozenset((2, 4))
-REDRAW_EXPERIMENT_ENV = "PERMIT_OFFICE_REDRAW_EXPERIMENT"
-DEFAULT_REDRAW_EXPERIMENT = "district-ring"
-REDRAW_BENCHMARK_VARIANTS = (
-    ("default", ""),
-    ("district-ring", "district-ring"),
-    ("predrawn-rehydrate", "predrawn-rehydrate"),
-)
-STARTUP_EXPERIMENT_ENV = "PERMIT_OFFICE_STARTUP_EXPERIMENT"
-STARTUP_EXPERIMENT_NONE = "None"
-STARTUP_EXPERIMENT_THREADED_CACHE = "threaded-cache"
-STARTUP_EXPERIMENT_THREADED_ARCPY_READ_PROBE = "threaded-arcpy-read-probe"
-STARTUP_EXPERIMENTS = frozenset(
-    (
-        STARTUP_EXPERIMENT_NONE,
-        STARTUP_EXPERIMENT_THREADED_CACHE,
-    )
-)
-STARTUP_EXPERIMENT_TIMEOUT_SECONDS = 1.0
+PURE_WORKER_TIMEOUT_SECONDS = 1.0
 STARTUP_SESSION_DELAY_MS = 50
-_startup_probe_state = threading.local()
+_pure_worker_state = threading.local()
 
 
-def normalize_startup_experiment(value):
-    """Return a supported startup/threading experiment name."""
+def _pure_worker_active():
+    """Return True while an ArcPy-free worker is active."""
 
-    text = str(value or "").strip()
-    if not text or text == STARTUP_EXPERIMENT_NONE:
-        return STARTUP_EXPERIMENT_NONE
-    if text in STARTUP_EXPERIMENTS:
-        return text
-    return STARTUP_EXPERIMENT_NONE
+    return bool(getattr(_pure_worker_state, "active", False))
 
 
-def _startup_probe_active():
-    """Return True while running the opt-in worker probe."""
+def _run_pure_worker(fn):
+    """Run one ArcPy-free worker while marking thread-local worker state."""
 
-    return bool(getattr(_startup_probe_state, "active", False))
-
-
-def _startup_worker_active():
-    """Return True while any startup diagnostic worker is running."""
-
-    return _startup_probe_active()
-
-
-def _run_startup_worker(fn):
-    """Run one diagnostic worker while marking thread-local worker state."""
-
-    _startup_probe_state.active = True
+    _pure_worker_state.active = True
     try:
         return fn()
     finally:
-        _startup_probe_state.active = False
+        _pure_worker_state.active = False
 
 
-def _startup_cache_probe(state, districts, items, active_features, saved_game):
-    """Exercise pure model/cache precompute against current rows off Tk."""
+def _pure_startup_precompute(state, districts, items, active_features, saved_game):
+    """Precompute the pure dashboard model from already-read row snapshots."""
 
     build_desk_model(
         state,
@@ -148,7 +113,7 @@ def _startup_cache_probe(state, districts, items, active_features, saved_game):
         audit_grade="PASS",
         game_active=saved_game,
     )
-    return "cache"
+    return "dashboard-model"
 
 
 def prepare_dashboard_session(paths, seed, messages, resume=True):
@@ -281,8 +246,6 @@ class DashboardController:
         seed,
         messages,
         offer_fresh_start=False,
-        startup_experiment=STARTUP_EXPERIMENT_NONE,
-        benchmark_runs=0,
     ):
         """Wire paths, the district layer name, the run seed, and GP messages.
 
@@ -298,11 +261,9 @@ class DashboardController:
         self.seed = seed
         self.messages = messages
         self._offer_fresh_start = offer_fresh_start
-        self._startup_experiment = normalize_startup_experiment(startup_experiment)
-        self._startup_experiment_ran = False
         self._startup_session_prepared = False
         self._startup_session_scheduled = False
-        self._benchmark_runs = benchmark_runs
+        self._pure_precompute_ran = False
         self.status_text = ""
         self._status_hold_until = 0.0
         self.selected_item_id = ""
@@ -333,30 +294,39 @@ class DashboardController:
         self._command_index = 0
         self._future_cache = None
 
-    def _run_startup_experiment_once(self, state, districts, items, active_features, saved_game):
-        """Run the opt-in startup/threading diagnostic and fall back silently."""
+    def _run_pure_precompute_once(self, state, districts, items, active_features, saved_game):
+        """Run ArcPy-free startup precompute from main-thread row snapshots."""
 
-        experiment = self._startup_experiment
-        if self._startup_experiment_ran or experiment == STARTUP_EXPERIMENT_NONE:
+        if self._pure_precompute_ran:
             return
-        self._startup_experiment_ran = True
+        self._pure_precompute_ran = True
         started = time.perf_counter()
         executor = concurrent_futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="permit-startup")
         active_future = None
+        state_snapshot = deepcopy(state)
+        districts_snapshot = deepcopy(districts)
+        items_snapshot = deepcopy(items)
+        active_features_snapshot = deepcopy(active_features)
         try:
             active_future = executor.submit(
-                _run_startup_worker,
-                lambda: _startup_cache_probe(state, districts, items, active_features, saved_game),
+                _run_pure_worker,
+                lambda: _pure_startup_precompute(
+                    state_snapshot,
+                    districts_snapshot,
+                    items_snapshot,
+                    active_features_snapshot,
+                    saved_game,
+                ),
             )
-            result = active_future.result(timeout=STARTUP_EXPERIMENT_TIMEOUT_SECONDS)
+            result = active_future.result(timeout=PURE_WORKER_TIMEOUT_SECONDS)
             elapsed = time.perf_counter() - started
-            _log(self.messages, "STARTUP", f"{experiment} probe={result} elapsed={elapsed:.3f}")
+            _log(self.messages, "STARTUP", f"pure worker precompute={result} elapsed={elapsed:.3f}")
         except concurrent_futures.TimeoutError:
             if active_future is not None:
                 active_future.cancel()
-            _warn(self.messages, "STARTUP", f"{experiment} timed out; falling back to synchronous startup")
+            _warn(self.messages, "STARTUP", "pure worker precompute timed out; continuing synchronously")
         except Exception as exc:
-            _warn(self.messages, "STARTUP", f"{experiment} failed: {exc}; falling back to synchronous startup")
+            _warn(self.messages, "STARTUP", f"pure worker precompute failed: {exc}; continuing synchronously")
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
 
@@ -385,13 +355,12 @@ class DashboardController:
             return
         self._startup_session_prepared = True
         with perf_session("startup_session", self.messages):
-            if self._startup_experiment != STARTUP_EXPERIMENT_NONE:
-                with perf_block("startup_experiment"):
-                    state, districts, items, active_features, offering_fresh = self._resolve_session_state(
-                        None, None, None, None
-                    )
-                    saved_game = has_saved_game(self.paths) and not offering_fresh
-                    self._run_startup_experiment_once(state, districts, items, active_features, saved_game)
+            with perf_block("pure_precompute"):
+                state, districts, items, active_features, offering_fresh = self._resolve_session_state(
+                    None, None, None, None
+                )
+                saved_game = has_saved_game(self.paths) and not offering_fresh
+                self._run_pure_precompute_once(state, districts, items, active_features, saved_game)
             with perf_block("active_map"):
                 ensure_active_map(self.messages)
             with perf_block("saved_game_probe"):
@@ -403,8 +372,6 @@ class DashboardController:
                 return
             with perf_block("dashboard_session"):
                 self.seed = prepare_dashboard_session(self.paths, self.seed, self.messages, resume=True)
-            with perf_block("redraw_benchmark"):
-                run_redraw_benchmark(self.paths, self.messages, self._benchmark_runs)
 
     def open(self):
         try:
@@ -1217,7 +1184,6 @@ class DashboardController:
                 layer_names=layer_names_for_plan(hydrated_plan) or layer_names,
                 dirty_scope=DIRTY_DISTRICTS,
                 remove_scope_override=set(hydrated_plan.remove_readd_names),
-                redraw_experiment="district-ring" if hydrated_plan.requires_district_rehydrate else None,
             )
         else:
             rebuild_output_layers(self.paths, self.messages, layer_names=layer_names, dirty_scope=DIRTY_DISTRICTS)
@@ -1268,7 +1234,7 @@ class DashboardController:
                     grade, final_report = self._record_final_audit_receipt(state, districts, active_features, items)
                     report = f"Final audit already filed. Scorecard: {grade}."
                     command_finish(self.paths, command_id, "applied", report)
-                    rebuild_output_layers(self.paths, self.messages, remove_scope_override={DISTRICTS}, redraw_experiment="district-ring")
+                    rebuild_output_layers(self.paths, self.messages, remove_scope_override={DISTRICTS})
                     self.district_layer = DISTRICTS
                     self.status_var.set(report)
                     self._deadline_running = False
@@ -1296,7 +1262,6 @@ class DashboardController:
                     self.messages,
                     layer_names=redraw_layers,
                     remove_scope_override=redraw_layers,
-                    redraw_experiment="district-ring",
                 )
                 self.district_layer = DISTRICTS
                 prefix = "Auto-deadline: " if auto else ""
@@ -1373,13 +1338,6 @@ def _week_close_redraw_layers(generated_items):
         if layer:
             layers.add(layer)
     return frozenset(layers)
-REDRAW_BENCHMARK_SCOPES = (
-    ("districts", frozenset((DISTRICTS,)), DIRTY_DISTRICTS),
-    ("districts+points", frozenset((DISTRICTS, POINTS)), DIRTY_DISTRICTS),
-    ("all", None, None),
-)
-
-
 @dataclass(frozen=True)
 class RedrawPlan:
     """Concrete map work chosen for a dirty scope."""
@@ -1430,20 +1388,6 @@ def _normalize_layer_names(layer_names):
     return frozenset(layer_names)
 
 
-def _configured_redraw_experiment():
-    """Return the opt-in redraw experiment name, or an empty string."""
-
-    return os.environ.get(REDRAW_EXPERIMENT_ENV, "").strip()
-
-
-def _default_redraw_experiment(plan, force_readd=False):
-    """Return the promoted redraw path for production district refreshes."""
-
-    if force_readd or plan.mode != "district-readd":
-        return ""
-    return DEFAULT_REDRAW_EXPERIMENT
-
-
 def _redraw_plan(layer_names=None, force_readd=False, dirty_scope=None):
     """Return concrete map work for a dirty scope."""
 
@@ -1463,7 +1407,7 @@ def _redraw_plan(layer_names=None, force_readd=False, dirty_scope=None):
     return RedrawPlan("refresh-only", effective_names or frozenset())
 
 
-def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, dirty_scope=None, remove_scope_override=None, redraw_experiment=None):
+def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, dirty_scope=None, remove_scope_override=None):
     """Refresh (or, when forced, recreate) map layers after GDB edits.
 
     layer_names: optional iterable restricting the work to those names. None
@@ -1493,22 +1437,18 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
         scope = "all" if effective_layer_names is None else f"targeted={sorted(effective_layer_names)}"
         dirty = dirty_scope or "layers"
         _log(messages, "REBUILD", f"{scope} mode={mode} dirty={dirty}")
-        experiment = _configured_redraw_experiment() or redraw_experiment or _default_redraw_experiment(plan, force_readd=force_readd)
-        if experiment:
+        if plan.mode == "district-readd":
             remove_scope = set(remove_scope_override) if remove_scope_override is not None else None if plan.remove_scope is None else set(plan.remove_scope)
-            with perf_block(f"experiment_{experiment}"):
-                handled = run_redraw_experiment(
+            with perf_block("ring_redraw"):
+                handled = apply_ring_redraw(
                     paths,
                     messages,
-                    experiment,
                     layer_names=effective_layer_names,
                     remove_scope=remove_scope,
-                    dirty_scope=dirty_scope,
-                    mode=mode,
                 )
             if handled:
                 return plan
-            _warn(messages, "REBUILD", f"{experiment} failed; falling back to {mode}")
+            _warn(messages, "REBUILD", f"district-ring failed; falling back to {mode}")
         fallback_remove_scope = set(remove_scope_override) if remove_scope_override is not None else None if plan.remove_scope is None else set(plan.remove_scope)
         if fallback_remove_scope is not None or plan.mode == "force-readd":
             with perf_block("remove"):
@@ -1518,46 +1458,6 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
         with perf_block("refresh"):
             refresh_all(paths, messages, layer_names=effective_layer_names)
     return plan
-
-
-def run_redraw_benchmark(paths, messages, runs=1):
-    """Run repeatable redraw variants from the GP pane and log a scorecard."""
-
-    try:
-        count = max(0, int(runs or 0))
-    except (TypeError, ValueError):
-        count = 0
-    if count <= 0:
-        return
-    previous = os.environ.get(REDRAW_EXPERIMENT_ENV)
-    _log(
-        messages,
-        "BENCH",
-        f"start runs={count} variants={len(REDRAW_BENCHMARK_VARIANTS)} scopes={len(REDRAW_BENCHMARK_SCOPES)}",
-    )
-    try:
-        for variant_label, experiment in REDRAW_BENCHMARK_VARIANTS:
-            if experiment:
-                os.environ[REDRAW_EXPERIMENT_ENV] = experiment
-            else:
-                os.environ.pop(REDRAW_EXPERIMENT_ENV, None)
-            for scope_label, layer_names, dirty_scope in REDRAW_BENCHMARK_SCOPES:
-                scoped_layers = None if layer_names is None else set(layer_names)
-                for run_index in range(1, count + 1):
-                    started = time.perf_counter()
-                    rebuild_output_layers(paths, messages, layer_names=scoped_layers, dirty_scope=dirty_scope)
-                    elapsed = time.perf_counter() - started
-                    _log(
-                        messages,
-                        "BENCH",
-                        f"variant={variant_label} scope={scope_label} run={run_index} elapsed={elapsed:.3f}",
-                    )
-    finally:
-        if previous is None:
-            os.environ.pop(REDRAW_EXPERIMENT_ENV, None)
-        else:
-            os.environ[REDRAW_EXPERIMENT_ENV] = previous
-        _log(messages, "BENCH", "done")
 
 
 def _filed_report_text(result, districts=None):

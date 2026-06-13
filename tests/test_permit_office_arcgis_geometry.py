@@ -348,152 +348,13 @@ def test_ensure_active_map_opens_existing_map_when_no_active_map(monkeypatch):
     assert calls == ["open"]
 
 
-def test_redraw_experiment_predrawn_rehydrate_readds_hidden_snapshot_then_swaps(monkeypatch):
-    """Verify rehydrate refreshes one hidden snapshot from the GDB before swap."""
+def test_legacy_predrawn_rehydrate_helpers_are_retired():
+    """Verify the removed rehydrate probe no longer lives in production geometry."""
 
-    calls = []
-    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
-    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
-    layers = [active, idle]
-
-    def remove_layer(layer):
-        calls.append(("remove", layer.name))
-        layers.remove(layer)
-
-    def add_data(source):
-        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
-        layers.append(layer)
-        calls.append(("add", source))
-        return layer
-
-    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
-    fake = SimpleNamespace(
-        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
-        RefreshLayer=lambda name: calls.append(("refresh", name)),
-    )
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
-    messages = CapturingMessages()
-
-    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
-
-    assert handled is True
-    assert ("remove", "Permit Office Predrawn Idle") in calls
-    assert ("add", "districts") in calls
-    refreshed = next(layer for layer in layers if layer.name == "Permit Office Predrawn Idle")
-    assert active.visible is False
-    assert refreshed.visible is True
-    assert refreshed.definitionQuery == "1=1"
-    assert ("sym", "Permit Office Predrawn Idle", "districts") in calls
-    assert ("refresh", "Permit Office Predrawn Idle") in calls
-    assert any("path=predrawn-rehydrate status=ok" in line for line in messages.messages)
-
-
-def test_predrawn_rehydrate_logs_phase_timings(monkeypatch):
-    """Verify rehydrate reports the expensive ArcGIS phases separately."""
-
-    calls = []
-    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
-    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
-    layers = [active, idle]
-
-    def remove_layer(layer):
-        calls.append(("remove", layer.name))
-        layers.remove(layer)
-
-    def add_data(source):
-        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
-        layers.append(layer)
-        calls.append(("add", source))
-        return layer
-
-    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
-    fake = SimpleNamespace(
-        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
-        RefreshLayer=lambda name: calls.append(("refresh", name)),
-    )
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
-    messages = CapturingMessages()
-
-    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
-
-    assert handled is True
-    line = next(line for line in messages.messages if "path=predrawn-rehydrate status=ok" in line)
-    assert "find_snapshots=" in line
-    assert "remove_hidden=" in line
-    assert "addDataFromPath=" in line
-    assert "labels_symbology=" in line
-    assert "visibility_swap=" in line
-    assert "RefreshLayer=" in line
-
-
-def test_predrawn_rehydrate_seeds_only_visible_snapshot_when_missing(monkeypatch):
-    """Verify first predrawn seed avoids paying for an unused hidden district layer."""
-
-    calls = []
-    layers = []
-
-    def add_data(source):
-        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
-        layers.append(layer)
-        calls.append(("add", source))
-        return layer
-
-    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=lambda layer: layers.remove(layer), addDataFromPath=add_data)
-    fake = SimpleNamespace(
-        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
-        RefreshLayer=lambda name: calls.append(("refresh", name)),
-    )
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
-    messages = CapturingMessages()
-
-    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate", layer_names={geometry.DISTRICTS})
-
-    assert handled is True
-    assert [layer.name for layer in layers] == [geometry.PREDRAWN_ACTIVE_LAYER]
-    assert [layer.visible for layer in layers] == [True]
-    assert calls.count(("add", "districts")) == 1
-    assert ("refresh", geometry.PREDRAWN_ACTIVE_LAYER) in calls
-    assert any("path=predrawn-rehydrate status=seeded" in line for line in messages.messages)
-
-
-def test_predrawn_rehydrate_alternates_prepare_slot_when_visibility_is_stale(monkeypatch):
-    """Verify predrawn rehydrate does not keep refreshing Idle when Pro visibility lies."""
-
-    calls = []
-    active = SimpleNamespace(name=geometry.PREDRAWN_ACTIVE_LAYER, visible=True, definitionQuery="1=1", transparency=None)
-    idle = SimpleNamespace(name=geometry.PREDRAWN_IDLE_LAYER, visible=True, definitionQuery="1=1", transparency=None)
-    layers = [active, idle]
-
-    def remove_layer(layer):
-        calls.append(("remove", layer.name))
-        layers.remove(layer)
-
-    def add_data(source):
-        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
-        layers.append(layer)
-        calls.append(("add", source))
-        return layer
-
-    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
-    fake = SimpleNamespace(
-        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
-        RefreshLayer=lambda name: calls.append(("refresh", name)),
-    )
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
-    monkeypatch.setattr(geometry, "_PREDRAWN_REHYDRATE_LAST_TARGET", geometry.PREDRAWN_IDLE_LAYER)
-
-    handled = geometry.run_redraw_experiment(_paths(), CapturingMessages(), "predrawn-rehydrate", layer_names={geometry.DISTRICTS})
-
-    assert handled is True
-    assert ("remove", geometry.PREDRAWN_ACTIVE_LAYER) in calls
-    assert ("refresh", geometry.PREDRAWN_ACTIVE_LAYER) in calls
-    refreshed = next(layer for layer in layers if layer.name == geometry.PREDRAWN_ACTIVE_LAYER)
-    assert refreshed.visible is True
-    assert idle.visible is False
+    assert not hasattr(geometry, "run_redraw_experiment")
+    assert not hasattr(geometry, "_experiment_predrawn_rehydrate")
+    assert not hasattr(geometry, "PREDRAWN_ACTIVE_LAYER")
+    assert not hasattr(geometry, "PREDRAWN_IDLE_LAYER")
 
 
 def test_district_display_style_hash_is_stable():
@@ -524,56 +385,16 @@ def test_prepare_district_display_layer_can_skip_style_when_hash_matches(monkeyp
     assert layer.definitionQuery == "1=1"
 
 
-def test_redraw_experiment_reports_failure_to_caller(monkeypatch):
-    """Verify callers can fall back when a live redraw probe fails."""
+def test_apply_ring_redraw_reports_failure_to_caller(monkeypatch):
+    """Verify callers can fall back when production ring redraw fails."""
 
     messages = CapturingMessages()
-    monkeypatch.setattr(geometry, "_active_map", lambda: (_ for _ in ()).throw(RuntimeError("map unavailable")))
+    monkeypatch.setattr(geometry, "ensure_active_map", lambda messages: (_ for _ in ()).throw(RuntimeError("map unavailable")))
 
-    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
+    handled = geometry.apply_ring_redraw(_paths(), messages, layer_names={geometry.DISTRICTS})
 
     assert handled is False
-    assert any("name=predrawn-rehydrate failed: map unavailable" in line for line in messages.warnings)
-
-
-def test_predrawn_rehydrate_refreshes_feature_layers_in_scope(monkeypatch):
-    """Verify rehydrate variants still redraw non-district layers in scope."""
-
-    calls = []
-    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
-    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
-    points = SimpleNamespace(name=geometry.POINTS, visible=True)
-    layers = [active, idle, points]
-
-    def remove_layer(layer):
-        layers.remove(layer)
-
-    def add_data(source):
-        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
-        layers.append(layer)
-        return layer
-
-    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
-    fake = SimpleNamespace(
-        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
-        RefreshLayer=lambda name: calls.append(("refresh", name)),
-    )
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: None)
-    messages = CapturingMessages()
-
-    handled = geometry.run_redraw_experiment(
-        _paths(),
-        messages,
-        "predrawn-rehydrate",
-        layer_names={geometry.DISTRICTS, geometry.POINTS},
-        dirty_scope="districts",
-        mode="district-readd",
-    )
-
-    assert handled is True
-    assert ("refresh", "Permit Office Predrawn Idle") in calls
-    assert ("refresh", geometry.POINTS) in calls
+    assert any("ring redraw failed: map unavailable" in line for line in messages.warnings)
 
 
 def test_refresh_feature_scope_refreshes_without_readd_when_not_in_remove_scope(monkeypatch):
@@ -746,26 +567,25 @@ def test_feature_display_ring_refresh_failure_falls_back_to_rehydrate(monkeypatc
     assert calls == [("rehydrate", geometry.POINTS)]
 
 
-def test_redraw_experiment_district_ring_dispatches_to_ring(monkeypatch):
-    """Verify the retained ring experiment is the only non-legacy live probe."""
+def test_apply_ring_redraw_dispatches_to_district_ring(monkeypatch):
+    """Verify production redraw dispatches to the district ring."""
 
     calls = []
     monkeypatch.setattr(
         geometry,
-        "_experiment_district_ring",
-        lambda paths, messages, name, layer_names, remove_scope=None: calls.append((name, layer_names, remove_scope)),
+        "_apply_district_ring_redraw",
+        lambda paths, messages, layer_names, remove_scope=None: calls.append((layer_names, remove_scope)),
     )
 
-    handled = geometry.run_redraw_experiment(
+    handled = geometry.apply_ring_redraw(
         _paths(),
         CapturingMessages(),
-        "district-ring",
         layer_names={geometry.DISTRICTS, geometry.POINTS},
         remove_scope={geometry.DISTRICTS},
     )
 
     assert handled is True
-    assert calls == [("district-ring", {geometry.DISTRICTS, geometry.POINTS}, {geometry.DISTRICTS})]
+    assert calls == [({geometry.DISTRICTS, geometry.POINTS}, {geometry.DISTRICTS})]
 
 
 def test_district_ring_styles_slots_with_base_district_symbology(monkeypatch):
@@ -793,7 +613,7 @@ def test_district_ring_styles_slots_with_base_district_symbology(monkeypatch):
     monkeypatch.setattr(geometry, "arcpy", fake)
     monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
 
-    handled = geometry.run_redraw_experiment(_paths(), CapturingMessages(), "district-ring", layer_names={geometry.DISTRICTS})
+    handled = geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.DISTRICTS})
 
     assert handled is True
     assert ("sym", "Permit Office Predrawn 1", "districts") in calls
@@ -807,11 +627,9 @@ def test_district_ring_hides_base_district_family_layers(monkeypatch):
     base = SimpleNamespace(name=geometry.DISTRICTS, visible=True, definitionQuery="", transparency=None)
     prosperity = SimpleNamespace(name=geometry.DISTRICT_PROSPERITY, visible=True, definitionQuery="", transparency=None)
     identity = SimpleNamespace(name=geometry.DISTRICT_IDENTITY, visible=True, definitionQuery="", transparency=None)
-    legacy_active = SimpleNamespace(name=geometry.PREDRAWN_ACTIVE_LAYER, visible=True, definitionQuery="1=1", transparency=None)
-    legacy_idle = SimpleNamespace(name=geometry.PREDRAWN_IDLE_LAYER, visible=True, definitionQuery="1=1", transparency=None)
     visible = SimpleNamespace(name="Permit Office Predrawn 0", visible=True, definitionQuery="1=1", transparency=None)
     hidden = SimpleNamespace(name="Permit Office Predrawn 1", visible=False, definitionQuery="1=1", transparency=None)
-    layers = [base, prosperity, identity, legacy_active, legacy_idle, visible, hidden]
+    layers = [base, prosperity, identity, visible, hidden]
 
     def remove_layer(layer):
         layers.remove(layer)
@@ -829,27 +647,13 @@ def test_district_ring_hides_base_district_family_layers(monkeypatch):
     monkeypatch.setattr(geometry, "arcpy", fake)
     monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
 
-    handled = geometry.run_redraw_experiment(_paths(), CapturingMessages(), "district-ring", layer_names={geometry.DISTRICTS})
+    handled = geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.DISTRICTS})
 
     assert handled is True
     assert base.visible is False
     assert prosperity.visible is False
     assert identity.visible is False
-    assert legacy_active.visible is False
-    assert legacy_idle.visible is False
     assert sum(1 for layer in layers if getattr(layer, "name", "").startswith("Permit Office Predrawn") and layer.visible) == 1
-
-
-def test_predrawn_rehydrate_does_not_treat_ring_slots_as_legacy_snapshots():
-    """Verify switching experiments does not let legacy rehydrate steal ring slots."""
-
-    active = SimpleNamespace(name="Permit Office Predrawn Active")
-    idle = SimpleNamespace(name="Permit Office Predrawn Idle")
-    ring_slot = SimpleNamespace(name="Permit Office Predrawn 1")
-
-    assert geometry._is_district_snapshot(active) is True
-    assert geometry._is_district_snapshot(idle) is True
-    assert geometry._is_district_snapshot(ring_slot) is False
 
 
 def test_remove_outputs_removes_predrawn_district_layers_on_full_cleanup(monkeypatch):

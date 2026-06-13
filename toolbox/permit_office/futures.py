@@ -81,7 +81,6 @@ class EvaluatedState:
 
     state_hash: str
     legal_actions: tuple[tuple[str, str], ...] = ()
-    materialized_views: dict[str, Any] = field(default_factory=dict)
     outgoing_future_nodes: dict[tuple[str, str], DecisionFutureNode] = field(default_factory=dict)
 
 

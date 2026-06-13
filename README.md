@@ -109,9 +109,8 @@ By default (no **Game Workspace** chosen) the tool creates or resumes
 `permit_office.gdb` under the ArcGIS project's `data/` folder; set the optional
 **Game Workspace** parameter to use a specific geodatabase or folder instead. The
 geodatabase *is* the save file and remains authoritative. Speculative decision
-futures and materialized views are cache data only; they are rebuilt from the
-GDB and never replace it as persistence. The generated `.gdb` is local state and
-should not be committed.
+futures are cache data only; they are rebuilt from the GDB and never replace it
+as persistence. The generated `.gdb` is local state and should not be committed.
 
 ### Run Pure Python Tests
 
@@ -127,7 +126,7 @@ do not replace a live ArcGIS Pro smoke test.
 - `toolbox/arcpy_permit_office.pyt` - ArcGIS Pro toolbox entrypoint.
 - `toolbox/permit_office/` - ArcPy-free gameplay rules, catalogs, decisions,
   turn advancement, audits, city systems, cache keys, dirty scopes, speculative
-  future nodes, and materialized-view cache primitives.
+  future nodes.
 - `toolbox/permit_office_arcgis/` - ArcPy/Tkinter adapter: schema, geodatabase
   store helpers, geometry operations, symbology, dashboard command flow,
   hydrated redraw planning, and district/support display rings.
@@ -158,8 +157,8 @@ The current ArcGIS redraw path uses a small **district display ring** plus
 support-feature rings for points/lines/zones. Real decisions still resolve
 against current GDB-backed state and write the GDB once; redraw planning then
 uses dirty scopes and cache hints to refresh only the relevant display layers.
-The older `predrawn-rehydrate` path remains a diagnostic fallback, not the
-default.
+If the display ring fails, the toolbox falls back to the older remove/add/refresh
+path for live ArcGIS safety.
 
 The next public-readiness work is focused on evidence and balance: running the
 live ArcGIS Pro smoke test (`docs/arcgis-pro-smoke-checklist.md`: workspace

@@ -88,7 +88,7 @@ ArcGIS does not repaint correctly or raises, it falls back to rehydrating a ring
 slot from the GDB, then to the legacy remove/add path. `force_readd=True` still
 does the full remove -> add -> refresh of every in-scope layer, used when the
 layer set or symbology changes (New Game) or when a ring path reports failure.
-Timings are visible under `PERMIT_OFFICE_PERF=1` as `experiment_district-ring`,
+Timings are visible under `PERMIT_OFFICE_PERF=1` as `ring_redraw`,
 with phase labels such as `feature_PermitPoints_ring_refresh` and
 `feature_PermitPoints_ring_rehydrate`.
 

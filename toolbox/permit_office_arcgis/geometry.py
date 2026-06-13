@@ -22,12 +22,9 @@ from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYM
 DISTRICT_PROSPERITY = "District Prosperity"
 DISTRICT_IDENTITY = "District Identity"
 PREDRAWN_LAYER_PREFIX = "Permit Office Predrawn"
-PREDRAWN_ACTIVE_LAYER = "Permit Office Predrawn Active"
-PREDRAWN_IDLE_LAYER = "Permit Office Predrawn Idle"
 PREDRAWN_POINTS_PREFIX = "Permit Office Predrawn Points"
 PREDRAWN_LINES_PREFIX = "Permit Office Predrawn Lines"
 PREDRAWN_ZONES_PREFIX = "Permit Office Predrawn Zones"
-_PREDRAWN_REHYDRATE_LAST_TARGET = ""
 
 # District geometry is fixed for the life of a game (only attributes change), so
 # the SHAPE@ pull — the most expensive field on the districts table — is memoized
@@ -979,10 +976,10 @@ def _layers_by_name(active_map):
     return {getattr(layer, "name", ""): layer for layer in active_map.listLayers()}
 
 
-def _log_experiment(messages, name, path, status, started, detail=""):
+def _log_redraw(messages, path, status, started, detail=""):
     elapsed = time.perf_counter() - started
     suffix = f" {detail}" if detail else ""
-    _log(messages, "EXPERIMENT", f"name={name} path={path} status={status} elapsed={elapsed:.3f}{suffix}")
+    _log(messages, "REDRAW", f"path={path} status={status} elapsed={elapsed:.3f}{suffix}")
 
 
 class _PhaseTimer:
@@ -997,16 +994,6 @@ class _PhaseTimer:
 
     def summary(self):
         return " ".join(f"{name}={elapsed:.3f}" for name, elapsed in self.parts)
-
-
-def _get_or_add_layer(active_map, source, name):
-    layers = _layers_by_name(active_map)
-    layer = layers.get(name)
-    if layer is not None:
-        return layer, False
-    layer = active_map.addDataFromPath(source)
-    layer.name = name
-    return layer, True
 
 
 def _set_definition_query(layer, definition_query):
@@ -1043,28 +1030,6 @@ def _prepare_feature_display_layer(layer, messages, layer_key, definition_query=
     _tune_layer_visibility(layer, layer_key)
     _configure_labels(layer, layer_key)
     apply_simple_symbology(layer, layer_key, messages)
-
-
-def _seed_visible_predrawn_layer(paths, messages, active_map):
-    global _PREDRAWN_REHYDRATE_LAST_TARGET
-    layer, _added = _get_or_add_layer(active_map, paths["districts"], PREDRAWN_ACTIVE_LAYER)
-    layer.visible = True
-    _prepare_district_display_layer(layer, messages, "1=1")
-    _PREDRAWN_REHYDRATE_LAST_TARGET = PREDRAWN_ACTIVE_LAYER
-    return layer
-
-
-def _predrawn_snapshots(active_map):
-    return [layer for layer in _layers_by_name(active_map).values() if _is_district_snapshot(layer)]
-
-
-def _is_district_snapshot(layer):
-    name = getattr(layer, "name", "")
-    return (
-        name.startswith(PREDRAWN_LAYER_PREFIX)
-        and not name.startswith(PREDRAWN_POINTS_PREFIX)
-        and not _is_ring_slot_name(name)
-    )
 
 
 def _is_predrawn_district_layer_name(name):
@@ -1140,7 +1105,7 @@ def _rehydrate_feature_display_ring(paths, messages, layer_name):
         _hide_base_feature_layer(active_map, layer_name)
         return True
     except Exception as exc:
-        _warn(messages, "EXPERIMENT", f"feature-ring {layer_name} failed: {exc}")
+        _warn(messages, "REDRAW", f"feature-ring {layer_name} failed: {exc}")
         return False
 
 
@@ -1164,7 +1129,7 @@ def _refresh_visible_feature_display_ring(paths, messages, layer_name):
         arcpy.RefreshLayer(getattr(visible, "name", prefix))
         return True
     except Exception as exc:
-        _warn(messages, "EXPERIMENT", f"feature-ring refresh {layer_name} failed: {exc}")
+        _warn(messages, "REDRAW", f"feature-ring refresh {layer_name} failed: {exc}")
         return False
 
 
@@ -1201,71 +1166,12 @@ def _hide_base_feature_layer(active_map, layer_name):
                 pass
 
 
-def _predrawn_prepare_layer_name(snapshots):
-    """Choose the snapshot slot to rebuild without trusting ArcGIS visibility alone."""
-
-    hidden = next((layer for layer in snapshots if not bool(getattr(layer, "visible", True))), None)
-    if hidden is not None:
-        return getattr(hidden, "name", PREDRAWN_IDLE_LAYER), hidden
-    names = {getattr(layer, "name", ""): layer for layer in snapshots}
-    if PREDRAWN_ACTIVE_LAYER in names and PREDRAWN_IDLE_LAYER in names:
-        if _PREDRAWN_REHYDRATE_LAST_TARGET == PREDRAWN_IDLE_LAYER:
-            return PREDRAWN_ACTIVE_LAYER, names[PREDRAWN_ACTIVE_LAYER]
-        return PREDRAWN_IDLE_LAYER, names[PREDRAWN_IDLE_LAYER]
-    if PREDRAWN_ACTIVE_LAYER in names:
-        return PREDRAWN_IDLE_LAYER, None
-    if PREDRAWN_IDLE_LAYER in names:
-        return PREDRAWN_ACTIVE_LAYER, None
-    return PREDRAWN_IDLE_LAYER, None
-
-
-def _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_scope=None):
-    global _PREDRAWN_REHYDRATE_LAST_TARGET
-    started = time.perf_counter()
-    phases = _PhaseTimer()
-    active_map = _active_map()
-    if active_map is None:
-        _log_experiment(messages, name, "predrawn-rehydrate", "no-active-map", started)
-        return
-    snapshots = _predrawn_snapshots(active_map)
-    phases.mark("find_snapshots")
-    if not snapshots:
-        _seed_visible_predrawn_layer(paths, messages, active_map)
-        phases.mark("seed_visible_snapshot")
-        arcpy.RefreshLayer(PREDRAWN_ACTIVE_LAYER)
-        phases.mark("RefreshLayer")
-        _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
-        phases.mark("feature_layers")
-        _log_experiment(messages, name, "predrawn-rehydrate", "seeded", started, f"target={PREDRAWN_ACTIVE_LAYER!r} {phases.summary()}")
-        return
-    hidden_name, hidden = _predrawn_prepare_layer_name(snapshots)
-    if hidden is not None:
-        try:
-            active_map.removeLayer(hidden)
-        except Exception:
-            pass
-        phases.mark("remove_hidden")
-    layer, _added = _get_or_add_layer(active_map, paths["districts"], hidden_name)
-    phases.mark("addDataFromPath")
-    _prepare_district_display_layer(layer, messages, "1=1")
-    phases.mark("labels_symbology")
-    for snapshot in _predrawn_snapshots(active_map):
-        snapshot.visible = snapshot is layer
-    phases.mark("visibility_swap")
-    arcpy.RefreshLayer(hidden_name)
-    _PREDRAWN_REHYDRATE_LAST_TARGET = hidden_name
-    phases.mark("RefreshLayer")
-    _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
-    phases.mark("feature_layers")
-    _log_experiment(messages, name, "predrawn-rehydrate", "ok", started, f"target={hidden_name!r} {phases.summary()}")
-
-
-def _experiment_district_ring(paths, messages, name, layer_names, remove_scope=None):
+def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None):
     started = time.perf_counter()
     phases = _PhaseTimer()
     active_map = ensure_active_map(messages)
     if active_map is None:
-        _log_experiment(messages, name, "district-ring", "no-active-map", started)
+        _log_redraw(messages, "district-ring", "no-active-map", started)
         return
 
     def _copy_style(layer):
@@ -1279,29 +1185,21 @@ def _experiment_district_ring(paths, messages, name, layer_names, remove_scope=N
     phases.mark("hide_base_districts")
     _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
     phases.mark("feature_layers")
-    _log_experiment(messages, name, "district-ring", "ok", started, f"target={getattr(prepared, 'name', '')!r} {phases.summary()}")
+    _log_redraw(messages, "district-ring", "ok", started, f"target={getattr(prepared, 'name', '')!r} {phases.summary()}")
 
 
-def run_redraw_experiment(paths, messages, experiment, layer_names=None, remove_scope=None, dirty_scope=None, mode=None):
-    """Run a live redraw path without raising into gameplay.
+def apply_ring_redraw(paths, messages, layer_names=None, remove_scope=None):
+    """Apply production display-ring redraw without raising into gameplay.
 
     Returns True when the path handled the redraw request, or False when callers
     should fall back to the legacy remove/add/refresh path.
     """
 
-    name = str(experiment or "").strip()
     try:
-        if name == "district-ring":
-            _experiment_district_ring(paths, messages, name, layer_names, remove_scope=remove_scope)
-        elif name == "predrawn-rehydrate":
-            _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_scope=remove_scope)
-        else:
-            started = time.perf_counter()
-            refresh_all(paths, messages, layer_names=layer_names)
-            _log_experiment(messages, name, "fallback-refresh", "unknown", started)
+        _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=remove_scope)
         return True
     except Exception as exc:
-        _warn(messages, "EXPERIMENT", f"name={name} failed: {exc}")
+        _warn(messages, "REDRAW", f"ring redraw failed: {exc}")
         return False
 
 
