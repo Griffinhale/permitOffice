@@ -1404,7 +1404,7 @@ class PermitDeskView:
         """Draw the compact in-window start/help card."""
 
         ow = min(520, width - 80)
-        oh = min(260, height - 120)
+        oh = min(420, height - 120)
         x0 = (width - ow) // 2
         y0 = (height - oh) // 2
         x1 = x0 + ow
@@ -1416,13 +1416,17 @@ class PermitDeskView:
         c.create_text(x0 + 22, y0 + 23, text=title, anchor="w", fill=Palette.PAPER, font=self._font(15, "bold"))
         body_x0 = x0 + 26
         body_x1 = x1 - 26
-        y = y0 + 66
-        premise = "Run a 12-week civic desk: review applications, file decisions, and keep the office authorized."
-        y = _text_bottom(c, body_x0, y, premise, self._font(11), Palette.INK, width=body_x1 - body_x0) + 10
-        saved_copy = "New Game starts fresh; saved rows are replaced only after confirmation."
-        if not self.model.game_active:
-            saved_copy = "No active board is loaded here; New Game creates fresh Permit Office layers."
-        _text_bottom(c, body_x0, y, saved_copy, self._font(9), Palette.MUTED, width=body_x1 - body_x0)
+        sections = (
+            ("Symbology", "Shapes show geometry: circle point, line stroke, square zone. Swatches match district or culture color. Counts and ON mirror live map layers."),
+            ("Hotkeys", "V show, T retarget, I inspect, A approve, M mitigate, D deny, W end week, S scorecard, ? help."),
+            ("Stats", "Activity, trust, friction, exposure, and culture rows show current value plus week-over-week direction."),
+            ("Unknowns", "? means the office lacks evidence. Inspect File can reveal outcomes and replace unknown cards."),
+            ("Controls", "Disabled actions explain what is missing, such as AP, money, inspection state, or map selection."),
+        )
+        yy = y0 + 64
+        for section_title, text in sections:
+            c.create_text(body_x0, yy, text=section_title, anchor="nw", fill=Palette.INK, font=self._font(9, "bold"))
+            yy = _text_bottom(c, body_x0 + 92, yy, text, self._font(8), Palette.MUTED, width=body_x1 - body_x0 - 92) + 8
         bw = 150
         self._draw_session_button(c, body_x0, y1 - 58, body_x0 + bw, y1 - 22, "New Game", Palette.BLUE, self.callbacks.new_game)
         self._draw_session_button(c, body_x0 + bw + 12, y1 - 58, body_x0 + 2 * bw + 12, y1 - 22, "Help", Palette.MUTED, self.callbacks.show_help)

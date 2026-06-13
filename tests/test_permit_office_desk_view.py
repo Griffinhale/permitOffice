@@ -1799,8 +1799,43 @@ def test_session_menu_offers_manual_end_week_when_out_of_ap():
     assert ("advance_turn", ()) in callbacks.calls
 
 
+def test_session_menu_contains_help_and_session_commands_only():
+    """Verify the hamburger owns session actions and Help."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_menu_button(canvas, 720, 20, 760, 48)
+    view._draw_session_menu(canvas, 1300)
+
+    texts = _text_values(canvas)
+    assert "END WEEK" in texts
+    assert "NEW GAME" in texts
+    assert "SCORECARD" in texts
+    assert "HELP" in texts
+    assert "END GAME" in texts
+
+
+def test_help_overlay_describes_symbology_hotkeys_stats_and_unknowns():
+    """Verify Help is a compact dashboard reference, not a long manual."""
+
+    model = build_desk_model(rules.CityState(), {}, [], show_start_help=True)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_start_help_overlay(canvas, 1120, 860)
+
+    body = " ".join(str(text or "") for text in _text_values(canvas))
+    for phrase in ("Symbology", "Hotkeys", "Stats", "Unknowns", "Controls"):
+        assert phrase in body
+    for key in ("V", "T", "I", "A", "M", "D", "W", "S"):
+        assert key in body
+
+
 def test_start_help_overlay_is_short_start_card_with_primary_actions():
-    """Verify the start/help sheet is a compact start card, not the old long manual."""
+    """Verify the start/help sheet is a compact dashboard reference."""
 
     model = build_desk_model(rules.CityState(), {}, [], show_start_help=True)
     view, _callbacks = _view_for_drawing(model)
@@ -1811,10 +1846,10 @@ def test_start_help_overlay_is_short_start_card_with_primary_actions():
     texts = [str(text or "") for text in _text_values(canvas)]
     body = " ".join(texts)
     assert "PERMIT OFFICE" in texts
-    assert any("Run a 12-week civic desk" in text for text in texts)
     assert "NEW GAME" in texts
     assert "HELP" in texts
-    assert len([text for text in texts if len(text) > 80]) <= 1
+    for phrase in ("Symbology", "Hotkeys", "Stats", "Unknowns", "Controls"):
+        assert phrase in body
     assert "Score optimization" not in body
     assert "Show Proposed Feature" not in body
     assert "Unresolved cases forecast" not in body
