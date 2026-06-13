@@ -484,3 +484,24 @@ class TurnAdvanceResult:
     upkeep: int = 0
     net: int = 0
     audit: AuditResult | None = None
+
+
+@dataclass(frozen=True)
+class ThreatTrack:
+    """Public pressure track derived from hidden civic systems."""
+
+    label: str
+    score: int
+    tone: str
+    reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class OfficeStandingSummary:
+    """Institutional legitimacy gauge and report-ready movement reason."""
+
+    value: int
+    label: str
+    tone: str
+    movement: str = "held"
+    reason: str = "Standing held because permit conditions stayed within the office mandate."

@@ -9,6 +9,7 @@ from .profiles import *
 from .type_pressure import *
 from .expiration import *
 from .buyouts import *
+from .public_model import *
 from .turns import *
 from .decisions import *
 from .city_detail import *

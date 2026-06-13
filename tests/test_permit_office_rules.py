@@ -2331,6 +2331,102 @@ def test_audit_findings_include_money_features_services_and_violations():
     assert any(finding.source == "inspection" for finding in audit.findings)
 
 
+def test_pure_threat_tracks_translate_internal_pressure_fields():
+    """Verify hidden civic ledgers collapse into the four public threat tracks."""
+
+    profile = rules.DistrictProfile(
+        "D0000",
+        "Harbor Flats",
+        1400,
+        72,
+        35,
+        30,
+        55,
+        10,
+        "residential",
+        dissatisfaction={"renters": 3},
+        hazards={"fire": 3},
+        service_gap={"utilities": 42},
+        displacement={"renters": 3},
+    )
+    profile.buyout_pressure = 4
+    feature = rules.FeatureInstance("F-market", "vendor_market", status="degraded", condition=22, target_cell_ids=["D0000"])
+    state = rules.CityState(activity=73, friction=64, exposure=71, stakeholder_heat={"vendors": 3})
+
+    tracks = rules.derive_threat_tracks(state, {profile.cell_id: profile}, [feature], [])
+    by_label = {track.label: track for track in tracks}
+
+    assert set(by_label) == {"Public Anger", "Legal Exposure", "Service Failure", "Speculation Pressure"}
+    assert "city friction 64" in by_label["Public Anger"].reasons
+    assert "vendors heat 3" in by_label["Public Anger"].reasons
+    assert "city exposure 71" in by_label["Legal Exposure"].reasons
+    assert "fire band 3" in by_label["Legal Exposure"].reasons
+    assert "utilities gap 42" in by_label["Service Failure"].reasons
+    assert "maintenance due 1" in by_label["Service Failure"].reasons
+    assert "activity spike 73" in by_label["Speculation Pressure"].reasons
+    assert "renters displacement 3" in by_label["Speculation Pressure"].reasons
+    assert "buyout pressure 4" in by_label["Speculation Pressure"].reasons
+
+
+def test_office_standing_summary_explains_threat_threshold_review():
+    """Verify Office Standing is a legitimacy gauge with report-ready reasons."""
+
+    calm = rules.CityState(activity=60, trust=50, friction=20, exposure=20)
+    risky = rules.CityState(activity=60, trust=50, friction=20, exposure=72)
+    summary = rules.office_standing_summary(risky, previous_state=calm)
+
+    assert summary.value == 54
+    assert summary.label == "Authorized"
+    assert summary.movement == "slipped"
+    assert "Legal Exposure crossed a threshold" in summary.reason
+
+
+def test_district_cause_tags_hide_raw_ledgers_behind_map_labels():
+    """Verify map-facing labels describe causes without exposing raw counters."""
+
+    service = rules.DistrictProfile("D0000", "Gap Row", 1000, 45, 20, 35, 25, 20, "residential", service_gap={"utilities": 45})
+    speculation = rules.DistrictProfile("D0001", "Edge Row", 1000, 70, 20, 35, 25, 40, "mercantile", displacement={"renters": 3})
+    speculation.identity_state = "contested"
+    anger = rules.DistrictProfile("D0002", "Angry Row", 1000, 45, 65, 20, 25, 40, "residential", dissatisfaction={"homeowners": 3})
+    unsafe = rules.DistrictProfile("D0003", "Unsafe Row", 1000, 45, 20, 35, 75, 40, "industrial", hazards={"fire": 3})
+    stable = rules.DistrictProfile("D0004", "Anchor Row", 1000, 55, 15, 55, 15, 55, "civic")
+
+    assert rules.derive_district_tags(service) == ("Service Desert",)
+    assert "Speculation Front" in rules.derive_district_tags(speculation)
+    assert "Contested Edge" in rules.derive_district_tags(speculation)
+    assert rules.derive_district_tags(anger) == ("Anger Cluster",)
+    assert rules.derive_district_tags(unsafe) == ("Unsafe Corridor",)
+    assert rules.derive_district_tags(stable) == ("Stable Anchor",)
+
+
+def test_weekly_report_explains_office_standing_movement():
+    """Verify end-week reports explain institutional legitimacy movement."""
+
+    profile = rules.DistrictProfile("D0000", "Gap Row", 1400, 35, 25, 30, 75, 5, "residential")
+    rules.normalize_profile(profile)
+    feature = rules.FeatureInstance("F-failed", "utility_trench", status="failed", condition=0, target_cell_ids=["D0000"])
+    state = rules.CityState(turn=1, activity=60, trust=50, friction=20, exposure=20)
+
+    result = rules.advance_turn_result(state, [], {profile.cell_id: profile}, [feature])
+
+    assert "Office Standing" in result.report
+    assert any(phrase in result.report for phrase in ("Standing slipped", "Standing is under review"))
+    assert any(track in result.report for track in ("Legal Exposure", "Service Failure"))
+
+
+def test_weekly_report_includes_notable_district_tags():
+    """Verify weekly reports surface map-facing cause tags, not raw ledgers."""
+
+    profile = rules.DistrictProfile("D0000", "Gap Row", 1400, 35, 25, 30, 75, 5, "residential", service_gap={"utilities": 45})
+    state = rules.CityState(turn=1)
+
+    result = rules.advance_turn_result(state, [], {profile.cell_id: profile}, [])
+
+    assert "District tags:" in result.report
+    assert "Gap Row: Service Desert" in result.report
+    assert "utilities" not in result.report
+
+
 def test_audit_findings_name_districts_not_cell_ids():
     """Verify district risk findings read as names, keeping cell_id as the key."""
     profile = rules.DistrictProfile("D0000", "Harbor Flats", 1400, 35, 75, 30, 75, 5, "residential")

@@ -10,6 +10,7 @@ from .helpers import *
 from .expiration import resolve_unattended_item
 from .buyouts import resolve_buyout_round, resolve_contested_transitions
 from .type_pressure import read_type_ledger, write_type_ledger
+from .public_model import district_tag_report_sentence, snapshot_city_state, standing_report_sentence
 from .systems import (
     _advance_feature_lifecycle,
     _apply_recurring_economy,
@@ -169,6 +170,7 @@ def advance_turn_result(
 ) -> TurnAdvanceResult:
     """Advance unresolved cases, city systems, economy, incidents, and audits."""
 
+    previous_state = snapshot_city_state(state)
     if state.status == "complete" or state.turn > state.max_turns:
         if state.turn > state.max_turns:
             state.turn = state.max_turns
@@ -297,6 +299,8 @@ def advance_turn_result(
     population_text = f" Population drift {population_delta:+d}." if population_delta else ""
     incident_text = f" New civic incident file(s): {new_incidents}." if new_incidents else ""
     system_text = f" {' '.join(system_notes)}" if system_notes else ""
+    standing_text = standing_report_sentence(state, previous_state, districts, feature_list, items)
+    tag_text = district_tag_report_sentence(districts)
     audit_text = (
         f" Final audit: {audit.grade}."
         if state.status == "complete"
@@ -306,7 +310,7 @@ def advance_turn_result(
     )
     report = (
         f"{'Final week closed' if state.status == 'complete' else 'Advanced week'}. Carried {carried} item(s), expired {expired} item(s)."
-        f"{heat_text}{grievance_text}{violation_text}{feature_text}{economy_text}{population_text}{incident_text}{system_text}{audit_text}"
+        f"{heat_text}{grievance_text}{violation_text}{feature_text}{economy_text}{population_text}{incident_text}{system_text}{standing_text}{tag_text}{audit_text}"
     )
     state.last_report = report
     return TurnAdvanceResult(
