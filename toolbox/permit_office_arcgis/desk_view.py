@@ -471,9 +471,9 @@ class PermitDeskView:
         list_y0 = y0 + tab_h + 10
         available = max(260, y1 - list_y0)
         if available < 760:
-            key_h = min(340, max(280, int(available * 0.38)))
+            key_h = min(360, max(280, int(available * 0.40)))
         else:
-            key_h = min(520, max(320, int(available * 0.36)))
+            key_h = min(560, max(380, int(available * 0.47)))
         key_y0 = y1 - key_h
         key_y1 = y1
         list_box = (x0, list_y0, x1, key_y0 - 10)
@@ -888,7 +888,7 @@ class PermitDeskView:
         evidence_box = (body_x0, evidence_y0, body_x1, min(content_y1, evidence_y0 + evidence_h))
         action_y0 = evidence_box[3] + gap
         if hasattr(c, "_record"):
-            c._record("decision-info", (info_box[0], info_box[1], evidence_box[2], action_y0), {})
+            c._record("decision-info", (info_box[0], info_box[1], evidence_box[2], min(content_y1, action_y0 + 8)), {})
         self._draw_application_info_panel(c, info_box)
         self._draw_case_evidence_row(c, evidence_box)
         self._draw_case_controls(c, body_x0, action_y0, body_x1, min(content_y1, action_y0 + action_h))
@@ -1276,8 +1276,8 @@ class PermitDeskView:
             y += 18
             group_rows = tuple(self.model.district_group_rows)
             available = max(0, y1 - 14 - y)
-            row_gap = 8
-            row_h = 56 if len(group_rows) <= 4 else max(38, min(56, (available - row_gap * max(0, len(group_rows) - 1)) // max(1, len(group_rows))))
+            row_gap = 8 if len(group_rows) <= 4 else 6
+            row_h = 56 if len(group_rows) <= 4 else max(30, min(56, (available - row_gap * max(0, len(group_rows) - 1)) // max(1, len(group_rows))))
             for row in group_rows:
                 if y + row_h > y1 - 14:
                     break
@@ -1341,9 +1341,12 @@ class PermitDeskView:
             c._record("group-swatch", (x0 + 8, y + 10, x0 + 18, y + 20), {})
         c.create_rectangle(x0 + 8, y + 10, x0 + 18, y + 20, fill=row.swatch or Palette.LINE, outline=Palette.LINE)
         c.create_text(x0 + 26, y + 5, text=self._fit_px(row.label, 8, "bold", (x1 - x0) // 2), anchor="nw", fill=Palette.INK, font=self._font(8, "bold"))
-        self._draw_sparkline(c, x1 - 96, y + 14, x1 - 22, min(y + row_h - 14, y + 38), row.points, tone)
+        spark_y0 = y + 12
+        spark_y1 = max(spark_y0 + 8, min(y + row_h - 8, y + 38))
+        self._draw_sparkline(c, x1 - 96, spark_y0, x1 - 22, spark_y1, row.points, tone)
         c.create_text(x1 - 8, y + 5, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(8, "bold"))
-        c.create_text(x0 + 26, y + 22, text=self._fit_px(row.detail, 7, "normal", x1 - x0 - 120), anchor="nw", fill=Palette.MUTED, font=self._font(7))
+        detail_y = y + (20 if row_h < 40 else 22)
+        c.create_text(x0 + 26, detail_y, text=self._fit_px(row.detail, 7, "normal", x1 - x0 - 120), anchor="nw", fill=Palette.MUTED, font=self._font(7))
         return y + row_h
 
     def _draw_sparkline(self, c, x0, y0, x1, y1, points, color):
@@ -1727,9 +1730,9 @@ def _folder_key_top(rail_box):
     list_y0 = y0 + 38 + 10
     available = max(260, y1 - list_y0)
     if available < 760:
-        key_h = min(340, max(280, int(available * 0.38)))
+        key_h = min(360, max(280, int(available * 0.40)))
     else:
-        key_h = min(520, max(320, int(available * 0.36)))
+        key_h = min(560, max(380, int(available * 0.47)))
     return y1 - key_h
 
 

@@ -1115,6 +1115,28 @@ def test_hybrid_layout_gives_unified_map_key_legible_block():
     assert "OVERLAYS" in texts
 
 
+def test_left_rail_gives_map_key_skeleton_weight_without_starving_inbox():
+    """Verify the map key reads as the larger lower rail block from the skeleton."""
+
+    rows = [
+        rules.DocketItem(f"T{n:02d}", "street_vendor_compact", f"Application Case {n}", "POINT", 1)
+        for n in range(1, 9)
+    ]
+    _item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, rows, "T01")
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
+
+    assert 380 <= map_key[3] - map_key[1] <= 460
+    assert len(docket_boxes) >= 4
+    assert map_key[1] - max(bbox[3] for bbox in docket_boxes) <= 80
+
+
 def test_tall_workspace_splits_left_rail_between_inbox_and_map_cheat_sheet():
     """Verify tall ArcGIS windows do not hide map-state meaning in the right rail."""
 
@@ -1872,6 +1894,35 @@ def test_city_pulse_draws_sparklines_and_group_swatches():
     assert any(kind == "group-swatch" for kind, _args, _kwargs in canvas.created)
 
 
+def test_city_pulse_fits_every_represented_group_at_dashboard_height():
+    """Verify district group cards compress instead of clipping represented groups."""
+
+    item, districts = _vendor_case()
+    for idx, district_type in enumerate(("residential", "industrial", "civic", "academic", "natural", "housing")):
+        profile = rules.DistrictProfile(
+            f"D30{idx}",
+            f"{district_type.title()} District",
+            800,
+            activity=44,
+            friction=22 + idx,
+            trust=40,
+            exposure=25,
+            services=43,
+            district_type=district_type,
+        )
+        districts[profile.cell_id] = rules.normalize_profile(profile)
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_ledger_rail(canvas, (0, 0, 300, 620))
+
+    swatches = [args for kind, args, _kwargs in canvas.created if kind == "group-swatch"]
+    assert len(swatches) == len(model.district_group_rows)
+    assert all(swatches[idx][1] >= swatches[idx - 1][3] for idx in range(1, len(swatches)))
+    assert swatches[-1][3] <= 606
+
+
 def test_city_pulse_focuses_on_graphs_not_map_state_key():
     """Verify the right pane leaves map symbology to the unified map key."""
 
@@ -1927,6 +1978,36 @@ def test_filed_reports_keep_attribute_table_under_report_and_pulse():
     report = next(args for kind, args, _kwargs in canvas.created if kind == "report-detail")
     pulse = next(args for kind, args, _kwargs in canvas.created if kind == "city-pulse")
     assert table[1] > report[3]
+    assert table[3] >= 880
+
+
+def test_filed_reports_attribute_table_aligns_with_map_key_top():
+    """Verify Filed Reports keeps the bottom table aligned to the left cheat sheet."""
+
+    item, districts = _vendor_case()
+    tabs = (ReportTab("week-1", "Week Closed", "week", "week", False, "Week one report."),)
+    model = build_desk_model(
+        rules.CityState(),
+        districts,
+        [item],
+        item.item_id,
+        report_tabs=tabs,
+        selected_report_id="week-1",
+        selected_desk_tab="reports",
+    )
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+
+    view._draw(1120, 900)
+
+    table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
+    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    pulse = next(args for kind, args, _kwargs in canvas.created if kind == "city-pulse")
+
+    assert abs(table[1] - map_key[1]) <= 4
+    assert table[0] > map_key[2]
+    assert table[0] < pulse[0] < table[2]
     assert table[3] >= 880
 
 
