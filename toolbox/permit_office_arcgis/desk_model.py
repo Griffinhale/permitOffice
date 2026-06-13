@@ -76,6 +76,40 @@ class ImpactBucket:
 
 
 @dataclass(frozen=True)
+class DistrictGridCell:
+    """One cell in the selected-case district mini-grid."""
+
+    cell_id: str
+    label: str
+    affected: bool = False
+    swatch: str = ""
+
+
+@dataclass(frozen=True)
+class TrendCard:
+    """One compact trend card for cultures, outcomes, or pulse rows."""
+
+    label: str
+    detail: str
+    trend: str = "unknown"
+    swatch: str = ""
+    points: tuple[int, ...] = ()
+    tone: str = "neutral"
+
+
+@dataclass(frozen=True)
+class CaseMapSymbol:
+    """One live useful symbol row for the selected case map key."""
+
+    shape: str
+    label: str
+    detail: str
+    swatch: str
+    state: str
+    tone: str = "neutral"
+
+
+@dataclass(frozen=True)
 class CaseSummary:
     """Structured permit-packet content for the selected case."""
 
@@ -91,6 +125,9 @@ class CaseSummary:
     economy: str = ""
     risk_band: str = "unknown"
     impact_buckets: tuple[ImpactBucket, ...] = ()
+    district_grid: tuple[DistrictGridCell, ...] = ()
+    culture_cards: tuple[TrendCard, ...] = ()
+    outcome_cards: tuple[TrendCard, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -101,6 +138,8 @@ class LedgerRow:
     value: str
     tone: str = "neutral"
     meter: int | None = None
+    trend: str = "unknown"
+    points: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -139,6 +178,8 @@ class ActionLane:
     tone: str = "neutral"
     enabled: bool = True
     disabled_reason: str = ""
+    hotkey: str = ""
+    tooltip: str = ""
 
 
 @dataclass(frozen=True)
@@ -150,6 +191,8 @@ class MapLegendRow:
     detail: str
     swatch: str
     tone: str = "neutral"
+    shape: str = "zone"
+    state: str = ""
 
 
 @dataclass(frozen=True)
@@ -161,6 +204,9 @@ class DistrictGroupRow:
     detail: str
     tone: str = "neutral"
     meter: int = 0
+    swatch: str = ""
+    trend: str = "unknown"
+    points: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -203,6 +249,7 @@ class DeskViewModel:
     map_legend_rows: tuple[MapLegendRow, ...] = ()
     district_group_rows: tuple[DistrictGroupRow, ...] = ()
     district_table_rows: tuple[DistrictTableRow, ...] = ()
+    case_map_symbols: tuple[CaseMapSymbol, ...] = ()
 
 
 def build_desk_model(
@@ -272,6 +319,7 @@ def build_desk_model(
     exhibit_visible = bool(proposal_visible_by_item.get(selected_id))
     ticker_items = _ticker_items(state, districts, active_features, active_items, report_tabs)
     map_legend_rows = _map_legend_rows(districts, active_items, selected_id)
+    case_map_symbols = _case_map_symbols(selected, active_features)
     district_group_rows = _district_group_rows(districts)
     district_table_rows = _district_table_rows(districts, selected)
     return DeskViewModel(
@@ -298,6 +346,7 @@ def build_desk_model(
         map_legend_rows,
         district_group_rows,
         district_table_rows,
+        case_map_symbols,
     )
 
 
@@ -351,6 +400,148 @@ def _resolve_selected_report_id(report_tabs, selected_report_id):
         if tab.selected:
             return tab.report_id
     return report_tabs[-1].report_id if report_tabs else ""
+
+
+def _trend_from_delta(delta: int | None) -> str:
+    """Return the public trend token for a known or unknown delta."""
+
+    if delta is None:
+        return "unknown"
+    if delta > 0:
+        return "up"
+    if delta < 0:
+        return "down"
+    return "flat"
+
+
+def _spark_points(value: int, trend: str) -> tuple[int, ...]:
+    """Return compact six-point sparkline values around a current value."""
+
+    current = max(0, min(100, int(value or 0)))
+    if trend == "up":
+        return tuple(max(0, min(100, current + offset)) for offset in (-9, -6, -7, -3, -2, 0))
+    if trend == "down":
+        return tuple(max(0, min(100, current + offset)) for offset in (8, 5, 6, 3, 1, 0))
+    if trend == "flat":
+        return tuple(max(0, min(100, current + offset)) for offset in (0, 1, 0, -1, 0, 0))
+    return ()
+
+
+def _district_grid_cells(districts, item) -> tuple[DistrictGridCell, ...]:
+    """Build a stable district mini-grid with selected targets marked."""
+
+    profiles = sorted(
+        list(districts.values() if isinstance(districts, dict) else (districts or ())),
+        key=lambda profile: getattr(profile, "cell_id", ""),
+    )
+    targets = set(getattr(item, "target_cell_ids", ()) or ())
+    cells = []
+    for profile in profiles[:12]:
+        cell_id = getattr(profile, "cell_id", "") or ""
+        label = cell_id[1:] if cell_id.startswith("D") else cell_id
+        symbol = DISTRICT_TYPE_SYMBOLS.get(getattr(profile, "district_type", "") or "")
+        cells.append(DistrictGridCell(cell_id, label[-2:] or label, cell_id in targets, _symbol_hex(symbol)))
+    if not cells and targets:
+        for cell_id in sorted(targets)[:12]:
+            label = cell_id[1:] if cell_id.startswith("D") else cell_id
+            cells.append(DistrictGridCell(cell_id, label[-2:] or label, True, ""))
+    return tuple(cells)
+
+
+def _culture_cards(districts, item) -> tuple[TrendCard, ...]:
+    """Build affected-culture cards capped to the useful selected-case set."""
+
+    district_map = districts if isinstance(districts, dict) else {getattr(profile, "cell_id", ""): profile for profile in districts or ()}
+    targets = [district_map[cid] for cid in getattr(item, "target_cell_ids", ()) or () if cid in district_map]
+    scores: dict[str, int] = {}
+    swatches: dict[str, str] = {}
+    for profile in targets:
+        symbol = DISTRICT_TYPE_SYMBOLS.get(getattr(profile, "district_type", "") or "")
+        for group, weight in (getattr(profile, "population_mix", {}) or {}).items():
+            scores[group] = scores.get(group, 0) + int(weight or 0)
+            swatches.setdefault(group, _symbol_hex(symbol))
+        for group, value in (getattr(profile, "dissatisfaction", {}) or {}).items():
+            scores[group] = scores.get(group, 0) + int(value or 0)
+            swatches.setdefault(group, _symbol_hex(symbol))
+    cards = []
+    for group, score in sorted(scores.items(), key=lambda row: (-row[1], row[0]))[:4]:
+        trend = "down" if score >= 4 else "unknown" if score == 0 else "flat"
+        cards.append(
+            TrendCard(
+                _display(group),
+                f"signal {score}",
+                trend,
+                swatches.get(group, ""),
+                _spark_points(score * 12, trend),
+                "watch" if trend == "down" else "neutral",
+            )
+        )
+    return tuple(cards)
+
+
+def _outcome_cards(item, template) -> tuple[TrendCard, ...]:
+    """Build concise known/unknown outcome cards for the case evidence row."""
+
+    inspected = bool(getattr(item, "inspected", False))
+    cards = []
+    if template.failure_mode:
+        cards.append(
+            TrendCard(
+                _display(template.failure_mode),
+                "known risk" if inspected else "inspection pending",
+                "down" if inspected else "unknown",
+                "",
+                (),
+                "bad" if inspected else "watch",
+            )
+        )
+    if template.pressure_category:
+        cards.append(TrendCard(_display(template.pressure_category), "pressure track", "unknown", "", (), "watch"))
+    cards.append(
+        TrendCard(
+            "Follow-up order",
+            "possible return" if not inspected else "filed evidence",
+            "unknown" if not inspected else "flat",
+            "",
+            (),
+            "watch",
+        )
+    )
+    return tuple(cards[:3])
+
+
+def _case_map_symbols(item, active_features=None) -> tuple[CaseMapSymbol, ...]:
+    """Build selected-case map-symbol rows from current case and active features."""
+
+    if not item:
+        return ()
+    geometry = str(getattr(item, "geometry_type", "") or "").upper()
+    shape = "line" if geometry == "LINE" else "point" if geometry == "POINT" else "zone"
+    rows = [CaseMapSymbol(shape, "Proposed feature", "selected case exhibit", "#9f7028", "ON", "watch")]
+    target_count = len(getattr(item, "target_cell_ids", ()) or ())
+    rows.append(
+        CaseMapSymbol(
+            "zone",
+            "Selected target",
+            f"{target_count} district(s)",
+            "#2f6488",
+            "ON" if target_count else "0",
+            "good" if target_count else "watch",
+        )
+    )
+    related = [feature for feature in active_features or () if getattr(feature, "item_id", "") == getattr(item, "item_id", "")]
+    if related:
+        rows.append(
+            CaseMapSymbol(
+                shape,
+                "Filed feature",
+                "active map feature",
+                "#2f6b53",
+                str(min(len(related), 4)) if len(related) < 5 else "4+",
+                "neutral",
+            )
+        )
+    return tuple(rows)
 
 
 def _report_status(report):
@@ -417,6 +608,9 @@ def _case_summary(state, districts, item) -> CaseSummary:
         economy=economy,
         risk_band=item.risk_band or "unknown",
         impact_buckets=impact_buckets,
+        district_grid=_district_grid_cells(districts, item),
+        culture_cards=_culture_cards(districts, item),
+        outcome_cards=_outcome_cards(item, template),
     )
 
 
@@ -480,9 +674,42 @@ def _action_lanes(state, districts, item) -> tuple[ActionLane, ...]:
     mitigated_enabled, mitigated_reason = _resource_available(state, template.ap_cost, mitigated_money)
     deny_enabled, deny_reason = _resource_available(state, deny_ap, 0)
     return (
-        ActionLane("approve", issue_label, issue_cost, issue_city, local, _delta_tone(template.base_effects), issue_enabled, issue_reason),
-        ActionLane("approve_mitigated", mitigate_label, mitigated_cost, mitigated_city, local, "watch", mitigated_enabled, mitigated_reason),
-        ActionLane("deny", deny_label, deny_cost, deny_city, "unresolved pressure may persist", "watch", deny_enabled, deny_reason),
+        ActionLane(
+            "approve",
+            issue_label,
+            issue_cost,
+            issue_city,
+            local,
+            _delta_tone(template.base_effects),
+            issue_enabled,
+            issue_reason,
+            "A",
+            "Issue the permit and file the selected map change.",
+        ),
+        ActionLane(
+            "approve_mitigated",
+            mitigate_label,
+            mitigated_cost,
+            mitigated_city,
+            local,
+            "watch",
+            mitigated_enabled,
+            mitigated_reason,
+            "M",
+            "Issue the permit with mitigation conditions.",
+        ),
+        ActionLane(
+            "deny",
+            deny_label,
+            deny_cost,
+            deny_city,
+            "unresolved pressure may persist",
+            "watch",
+            deny_enabled,
+            deny_reason,
+            "D",
+            "Deny the filing; pressure may return as a follow-up.",
+        ),
     )
 
 
@@ -1003,10 +1230,24 @@ def _ledger_rows(state, districts, active_features=None, docket=None, audit_grad
         LedgerRow("Threats", threat_value, threat_tone, threat_meter),
         LedgerRow("Heat", heat, "bad" if heat != "none" else "neutral"),
         LedgerRow("Pressure", pressure, "watch" if pressure != "stable" else "neutral"),
-        LedgerRow("Activity", str(state.activity), "good", state.activity),
-        LedgerRow("Friction", str(state.friction), "bad" if state.friction >= 50 else "watch", state.friction),
-        LedgerRow("Trust", str(state.trust), "good", state.trust),
-        LedgerRow("Exposure", str(state.exposure), "bad" if state.exposure >= 50 else "watch", state.exposure),
+        LedgerRow("Activity", str(state.activity), "good", state.activity, "up", _spark_points(state.activity, "up")),
+        LedgerRow(
+            "Friction",
+            str(state.friction),
+            "bad" if state.friction >= 50 else "watch",
+            state.friction,
+            "down" if state.friction < 50 else "up",
+            _spark_points(state.friction, "down" if state.friction < 50 else "up"),
+        ),
+        LedgerRow("Trust", str(state.trust), "good", state.trust, "flat", _spark_points(state.trust, "flat")),
+        LedgerRow(
+            "Exposure",
+            str(state.exposure),
+            "bad" if state.exposure >= 50 else "watch",
+            state.exposure,
+            "up" if state.exposure >= 50 else "flat",
+            _spark_points(state.exposure, "up" if state.exposure >= 50 else "flat"),
+        ),
         LedgerRow("Economy", f"rev ${state.last_revenue}; up ${state.last_upkeep}; net {state.last_net:+d}", "watch" if state.last_net < 0 else "good" if state.last_net > 0 else "neutral"),
         LedgerRow("Services", service_summary, "bad" if "critical" in service_summary else "watch" if service_summary != "none" else "neutral"),
         LedgerRow("Hazards", hazard_summary, "watch" if hazard_summary != "no active hazards" else "neutral"),
@@ -1238,6 +1479,8 @@ def _district_group_rows(districts) -> tuple[DistrictGroupRow, ...]:
             state, tone = "Warming", "watch"
         else:
             state, tone = "Stable", "good"
+        symbol = DISTRICT_TYPE_SYMBOLS.get(district_type)
+        trend = "down" if tone == "bad" else "flat" if tone == "good" else "unknown"
         rows.append(
             DistrictGroupRow(
                 _display(district_type),
@@ -1245,6 +1488,9 @@ def _district_group_rows(districts) -> tuple[DistrictGroupRow, ...]:
                 f"{count} district(s), heat {heat}, pressure {pressure}",
                 tone,
                 score,
+                _symbol_hex(symbol),
+                trend,
+                _spark_points(score, trend),
             )
         )
     return tuple(sorted(rows, key=lambda row: (row.meter, row.label))[:4])

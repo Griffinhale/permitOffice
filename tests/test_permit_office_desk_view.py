@@ -461,6 +461,47 @@ def test_build_desk_model_adds_decision_lanes_for_selected_case():
     assert "0 AP" in lanes["deny"].cost
 
 
+def test_case_summary_exposes_evidence_grid_cultures_and_outcomes():
+    """Verify selected cases expose presentation-ready evidence widgets."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    assert model.case.district_grid
+    assert any(cell.cell_id == "D0000" and cell.affected for cell in model.case.district_grid)
+    assert model.case.culture_cards
+    assert all(card.trend in {"up", "down", "flat", "unknown"} for card in model.case.culture_cards)
+    assert model.case.outcome_cards
+    assert any(card.trend == "unknown" for card in model.case.outcome_cards)
+
+
+def test_action_lanes_include_hotkeys_and_tooltip_copy():
+    """Verify action cards carry command clarity without view inference."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(ap=0, money=60), districts, [item], item.item_id)
+    lanes = {lane.action_id: lane for lane in model.action_lanes}
+
+    assert lanes["approve"].hotkey == "A"
+    assert lanes["approve_mitigated"].hotkey == "M"
+    assert lanes["deny"].hotkey == "D"
+    assert lanes["approve"].tooltip
+    assert lanes["approve"].disabled_reason == "Needs 1 AP"
+
+
+def test_visible_map_symbols_are_filtered_to_selected_case_context():
+    """Verify case map symbols expose shape, swatch, and live state."""
+
+    item, districts = _vendor_case()
+    item.geometry_type = "POLYGON"
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    rows = model.case_map_symbols
+    assert rows
+    assert {row.shape for row in rows} <= {"point", "line", "zone"}
+    assert any(row.state in {"ON", "0", "1", "2", "3", "4+"} for row in rows)
+
+
 def test_action_lanes_name_primary_threat_for_deny_and_issue():
     """Verify action previews use threat-track language before commitment."""
 
