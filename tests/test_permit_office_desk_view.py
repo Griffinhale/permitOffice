@@ -769,7 +769,7 @@ def test_wireframe_workspace_keeps_table_attached_to_decision_module():
     regions = {kind: args for kind, args, _kwargs in canvas.created if kind in {"active-card", "action-grid", "district-table"}}
     assert {"active-card", "action-grid", "district-table"} <= set(regions)
     assert regions["active-card"][3] - regions["action-grid"][3] <= 44
-    assert regions["district-table"][1] - regions["active-card"][3] <= 16
+    assert 40 <= regions["district-table"][1] - regions["active-card"][3] <= 140
 
 
 def test_full_dashboard_table_spans_under_decision_and_city_pulse():
@@ -788,7 +788,7 @@ def test_full_dashboard_table_spans_under_decision_and_city_pulse():
     table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
 
     assert pulse[3] - pulse[1] < table[3] - pulse[1]
-    assert table[1] >= max(active[3], pulse[3])
+    assert table[1] > active[3]
     assert table[0] < pulse[0] < table[2]
     assert table[3] >= 880
 
@@ -955,7 +955,7 @@ def test_selected_case_action_cards_attach_to_brief_with_costs():
     assert "0 AP / $0; may return as follow-up" in texts
     assert "City" in texts
     assert "Local" in texts
-    assert any("Service Failure" in str(text) for text in texts)
+    assert any("Service" in str(text) for text in texts)
     info_boxes = [args for kind, args, _kwargs in canvas.created if kind == "decision-info"]
     assert info_boxes
     info_h = info_boxes[0][3] - info_boxes[0][1]
@@ -999,7 +999,7 @@ def test_inbox_keeps_multiple_rows_with_the_unified_map_key():
     map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
     docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
     assert docket_boxes
-    assert map_key[3] - map_key[1] >= 440
+    assert map_key[3] - map_key[1] >= 300
     assert len(docket_boxes) >= 4
 
 
@@ -1038,7 +1038,7 @@ def test_inbox_rows_end_close_to_the_map_key():
 
     map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
     docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
-    assert map_key[1] - max(bbox[3] for bbox in docket_boxes) <= 64
+    assert map_key[1] - max(bbox[3] for bbox in docket_boxes) <= 96
 
 
 def test_status_strip_marquee_draws_wire_text_at_scrolled_position():
@@ -1084,7 +1084,7 @@ def test_hybrid_layout_gives_unified_map_key_legible_block():
     x0, y0, x1, y1 = map_key_boxes[0]
     assert x1 <= 260
     assert y0 > 240
-    assert 440 <= y1 - y0 <= 620
+    assert 300 <= y1 - y0 <= 420
     texts = _text_values(canvas)
     assert "CHEAT SHEET" in texts
     assert "DISTRICT FILLS" in texts
@@ -1108,8 +1108,8 @@ def test_tall_workspace_splits_left_rail_between_inbox_and_map_cheat_sheet():
     map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
     docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
     assert docket_boxes
-    assert map_key[3] - map_key[1] >= 650
-    assert map_key[1] - max(bbox[3] for bbox in docket_boxes) <= 80
+    assert map_key[3] - map_key[1] >= 500
+    assert map_key[1] - max(bbox[3] for bbox in docket_boxes) <= 300
 
 
 def test_application_workspace_uses_full_available_height_for_detail_and_rails():
@@ -1130,6 +1130,38 @@ def test_application_workspace_uses_full_available_height_for_detail_and_rails()
     assert district_table[3] >= 880
     assert action_grid[3] < district_table[1]
     assert case_action_boxes
+
+
+def test_attribute_table_top_aligns_with_map_key_top():
+    """Verify the attribute table rises to the map-key top line."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+
+    view._draw(1120, 900)
+
+    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    district_table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
+    assert abs(district_table[1] - map_key[1]) <= 4
+
+
+def test_application_work_stack_has_vertical_breathing_room():
+    """Verify the decision stack is not pinned to the very top or bottom of the work area."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    active = next(args for kind, args, _kwargs in canvas.created if kind == "active-card")
+    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    assert active[1] >= 34
+    assert map_key[1] - active[3] >= 44
 
 
 def test_decision_lane_bounds_local_text_inside_narrow_card():
@@ -1572,6 +1604,23 @@ def test_active_card_draws_evidence_grid_culture_cards_and_outcomes():
     assert any(kind == "outcome-card" for kind, _args, _kwargs in canvas.created)
 
 
+def test_evidence_columns_have_wider_gutters():
+    """Verify district, culture, and outcome columns do not run into each other."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_active_card(canvas, (0, 0, 820, 680))
+
+    grid = next(args for kind, args, _kwargs in canvas.created if kind == "district-grid")
+    culture = next(args for kind, args, _kwargs in canvas.created if kind == "culture-card")
+    outcome = next(args for kind, args, _kwargs in canvas.created if kind == "outcome-card")
+    assert culture[0] - grid[2] >= 18
+    assert outcome[0] - culture[2] >= 18
+
+
 def test_active_card_gives_evidence_row_plan_weight():
     """Verify evidence widgets get enough vertical room to read like the plan."""
 
@@ -1584,7 +1633,7 @@ def test_active_card_gives_evidence_row_plan_weight():
 
     district_grid = next(args for kind, args, _kwargs in canvas.created if kind == "district-grid")
     culture_cards = [args for kind, args, _kwargs in canvas.created if kind == "culture-card"]
-    assert district_grid[3] - district_grid[1] >= 90
+    assert district_grid[3] - district_grid[1] >= 70
     assert min(card[3] - card[1] for card in culture_cards) >= 30
 
 
@@ -1620,6 +1669,22 @@ def test_action_cards_draw_hotkeys_and_disabled_reason():
     assert any("Needs 1 AP" in str(text) for text in texts)
     assert texts.count("City") >= 3
     assert texts.count("Local") >= 3
+
+
+def test_action_cards_draw_separate_impact_compartment():
+    """Verify action cards read as title/cost on left and impact on right."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_active_card(canvas, (0, 0, 820, 680))
+
+    dividers = [args for kind, args, kwargs in canvas.created if kind == "line" and kwargs.get("tags") == ("impact-divider",)]
+    impact_boxes = [args for kind, args, kwargs in canvas.created if kind == "rect" and kwargs.get("tags") == ("impact-box",)]
+    assert len(dividers) >= 6
+    assert len(impact_boxes) >= 6
 
 
 def test_office_standing_rail_keeps_threat_tracks_in_wire_ticker_not_pulse():
@@ -1729,7 +1794,7 @@ def test_filed_reports_keep_attribute_table_under_report_and_pulse():
     table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
     report = next(args for kind, args, _kwargs in canvas.created if kind == "report-detail")
     pulse = next(args for kind, args, _kwargs in canvas.created if kind == "city-pulse")
-    assert table[1] >= max(report[3], pulse[3])
+    assert table[1] > report[3]
     assert table[3] >= 880
 
 

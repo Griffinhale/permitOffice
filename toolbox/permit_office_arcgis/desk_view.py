@@ -437,17 +437,21 @@ class PermitDeskView:
 
         self._draw_folder_rail(c, rail_box, rows, active_id)
         external_table = getattr(self, "_external_attribute_table", None)
+        key_y0 = _folder_key_top(rail_box)
+        work_y0 = detail_box[1] + 26
         if external_table:
-            top_y1, table_y0, table_y1, table_x1 = external_table
-            work_box = (detail_box[0], detail_box[1], detail_box[2], min(detail_box[3], top_y1 - 12))
+            _top_y1, _table_y0, table_y1, table_x1 = external_table
+            table_y0 = key_y0
+            work_box = (detail_box[0], work_y0, detail_box[2], min(detail_box[3], table_y0 - 44))
             table_box = (detail_box[0], table_y0, table_x1, table_y1)
         else:
             panel_h = panel_y1 - panel_y0
             work_h = min(max(390, int(panel_h * 0.52)), 520)
             table_min_h = min(190, max(138, int(panel_h * 0.18)))
             work_h = min(work_h, max(300, panel_h - table_min_h - gap))
-            work_box = (detail_box[0], detail_box[1], detail_box[2], detail_box[1] + work_h)
-            table_box = (detail_box[0], work_box[3] + gap, detail_box[2], panel_y1)
+            table_y0 = key_y0
+            work_box = (detail_box[0], work_y0, detail_box[2], min(detail_box[1] + work_h, table_y0 - 44))
+            table_box = (detail_box[0], table_y0, detail_box[2], panel_y1)
         if self.model.selected_desk_tab == "reports":
             self._draw_report_detail_card(c, work_box)
         else:
@@ -469,9 +473,9 @@ class PermitDeskView:
         list_y0 = y0 + tab_h + 10
         available = max(260, y1 - list_y0)
         if available < 760:
-            key_h = min(360, max(260, int(available * 0.45)))
+            key_h = min(340, max(280, int(available * 0.38)))
         else:
-            key_h = min(720, max(500, int(available * 0.50)))
+            key_h = min(520, max(320, int(available * 0.36)))
         key_y0 = y1 - key_h
         key_y1 = y1
         list_box = (x0, list_y0, x1, key_y0 - 10)
@@ -611,7 +615,7 @@ class PermitDeskView:
 
         rows = list(self.model.map_legend_rows)
         selected = [row for row in rows if row.group == "Selection" and row.label == "Selected target"][:1]
-        compact = (y1 - y0) < 260
+        compact = (y1 - y0) < 420
         features = (
             selected
             + _legend_subset(rows, "PermitPoints", ("Proposed", "Maintained", "Special Interest"))
@@ -851,6 +855,17 @@ class PermitDeskView:
             info_h = min(max(190, int(available * 0.42)), 260)
             evidence_h = min(max(140, int(available * 0.24)), 170)
             action_h = min(max(170, int(available * 0.34)), 218)
+            overflow = (info_h + evidence_h + action_h + (2 * gap)) - available
+            if overflow > 0:
+                take = min(overflow, max(0, evidence_h - 110))
+                evidence_h -= take
+                overflow -= take
+            if overflow > 0:
+                take = min(overflow, max(0, info_h - 160))
+                info_h -= take
+                overflow -= take
+            if overflow > 0:
+                action_h = max(150, action_h - overflow)
         info_box = (body_x0, content_y0, body_x1, min(content_y1, content_y0 + info_h))
         evidence_y0 = info_box[3] + gap
         evidence_box = (body_x0, evidence_y0, body_x1, min(content_y1, evidence_y0 + evidence_h))
@@ -901,7 +916,7 @@ class PermitDeskView:
         case = self.model.case
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.PAPER_ALT, outline=Palette.LINE)
         pad = 10
-        gap = 8
+        gap = 22
         col_w = max(100, (x1 - x0 - (2 * pad) - (2 * gap)) // 3)
         columns = (
             ("AFFECTED DISTRICTS", x0 + pad, x0 + pad + col_w),
@@ -949,8 +964,10 @@ class PermitDeskView:
             c.create_text(x0, y0 + 4, text="Unknown", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
             return
         gap = 5
-        row_h = max(30, min(42, (y1 - y0 - gap * (min(len(cards), 3) - 1)) // max(1, min(len(cards), 3))))
-        for index, card in enumerate(cards[:3]):
+        available_h = max(1, y1 - y0)
+        visible = max(1, min(len(cards), 3, (available_h + gap) // 35))
+        row_h = max(30, min(42, (available_h - gap * (visible - 1)) // max(1, visible)))
+        for index, card in enumerate(cards[:visible]):
             yy = y0 + index * (row_h + gap)
             if yy >= y1:
                 break
@@ -1125,31 +1142,35 @@ class PermitDeskView:
         tone = color if enabled else Palette.MUTED
         c.create_rectangle(x0, y0, x1, y1, fill=fill, outline=outline, width=2 if hover else 1)
         c.create_rectangle(x0, y0, x0 + 4, y1, fill=tone, outline="")
-        label_w = x1 - x0 - (52 if hotkey else 24)
+        impact_w = max(70, min(128, int((x1 - x0) * 0.32)))
+        impact_x0 = max(x0 + 92, x1 - impact_w)
+        c.create_line(impact_x0, y0 + 7, impact_x0, y1 - 7, fill=Palette.LINE, tags=("impact-divider",))
+        c.create_rectangle(impact_x0 + 6, y0 + 10, x1 - 8, y1 - 10, fill=Palette.PAPER_ALT if enabled else Palette.PAPER, outline=Palette.LINE, tags=("impact-box",))
+        label_w = impact_x0 - x0 - 24
         c.create_text(x0 + 12, y0 + 8, text=self._fit_px(label, 9, "bold", label_w), anchor="nw", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(9, "bold"))
         if hotkey:
-            hk_x0 = x1 - 26
-            c.create_rectangle(hk_x0, y0 + 7, x1 - 8, y0 + 25, fill=Palette.PAPER_ALT, outline=Palette.LINE)
-            c.create_text((hk_x0 + x1 - 8) // 2, y0 + 10, text=hotkey, anchor="n", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(7, "bold"))
-        c.create_text(x0 + 12, y0 + 27, text=cost, anchor="nw", fill=tone, font=self._font(8, "bold"), width=x1 - x0 - 24)
+            hk_x0 = impact_x0 - 28
+            c.create_rectangle(hk_x0, y0 + 7, impact_x0 - 8, y0 + 25, fill=Palette.PAPER_ALT, outline=Palette.LINE)
+            c.create_text((hk_x0 + impact_x0 - 8) // 2, y0 + 10, text=hotkey, anchor="n", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(7, "bold"))
+        c.create_text(x0 + 12, y0 + 31, text=cost, anchor="nw", fill=tone, font=self._font(8, "bold"), width=label_w)
+        impact_label_x = impact_x0 + 14
+        impact_w_text = max(48, x1 - impact_label_x - 14)
         if isinstance(detail, tuple):
             city, local = detail
-            label_w = 34
-            detail_w = max(40, x1 - x0 - label_w - 28)
-            c.create_text(x0 + 12, y0 + 45, text="City", anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
-            c.create_text(x0 + 12 + label_w, y0 + 45, text=self._fit_px(city, 7, "normal", detail_w), anchor="nw", fill=Palette.INK, font=self._font(7), width=detail_w)
-            local_y = y0 + 64 if y1 - y0 >= 78 else y0 + 60
-            c.create_text(x0 + 12, local_y, text="Local", anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
-            c.create_text(x0 + 12 + label_w, local_y, text=self._fit_px(local, 7, "normal", detail_w), anchor="nw", fill=Palette.INK, font=self._font(7), width=detail_w)
+            c.create_text(impact_label_x, y0 + 16, text="City", anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
+            c.create_text(impact_label_x, y0 + 29, text=self._fit_px(city, 7, "normal", impact_w_text), anchor="nw", fill=Palette.INK, font=self._font(7), width=impact_w_text)
+            local_y = y0 + 50 if y1 - y0 >= 78 else y0 + 46
+            c.create_text(impact_label_x, local_y, text="Local", anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
+            c.create_text(impact_label_x, local_y + 13, text=self._fit_px(local, 7, "normal", impact_w_text), anchor="nw", fill=Palette.INK, font=self._font(7), width=impact_w_text)
             if not enabled and disabled_reason:
-                c.create_text(x1 - 10, y1 - 17, text=self._fit_px(disabled_reason, 7, "normal", max(52, x1 - x0 - 24)), anchor="ne", fill=Palette.MUTED, font=self._font(7))
+                c.create_text(x0 + 12, y1 - 17, text=self._fit_px(disabled_reason, 7, "normal", label_w), anchor="nw", fill=Palette.MUTED, font=self._font(7))
         elif y1 - y0 >= 68:
             detail_lines = _fit_lines(detail, max(16, (x1 - x0 - 24) // 7), 3)
-            c.create_text(x0 + 12, y0 + 44, text="\n".join(detail_lines), anchor="nw", fill=Palette.MUTED, font=self._font(7), width=x1 - x0 - 24)
+            c.create_text(impact_label_x, y0 + 18, text="\n".join(detail_lines), anchor="nw", fill=Palette.MUTED, font=self._font(7), width=impact_w_text)
             if not enabled and disabled_reason:
-                c.create_text(x1 - 10, y1 - 17, text=self._fit_px(disabled_reason, 7, "normal", max(52, x1 - x0 - 24)), anchor="ne", fill=Palette.MUTED, font=self._font(7))
+                c.create_text(x0 + 12, y1 - 17, text=self._fit_px(disabled_reason, 7, "normal", label_w), anchor="nw", fill=Palette.MUTED, font=self._font(7))
         elif tooltip:
-            c.create_text(x0 + 12, y1 - 18, text=self._fit_px(tooltip, 7, "normal", x1 - x0 - 24), anchor="nw", fill=Palette.MUTED, font=self._font(7))
+            c.create_text(impact_label_x, y1 - 18, text=self._fit_px(tooltip, 7, "normal", impact_w_text), anchor="nw", fill=Palette.MUTED, font=self._font(7))
         if enabled:
             self._add_target("case-action", label, (x0, y0, x1, y1), callback)
 
@@ -1647,6 +1668,19 @@ def _deadline_day_time(value):
     day = tokens[0] if tokens else ""
     time = next((token for token in reversed(tokens) if ":" in token), tokens[-1] if tokens else "")
     return day, time
+
+
+def _folder_key_top(rail_box):
+    """Return the map-key top used by the folder rail."""
+
+    _x0, y0, _x1, y1 = rail_box
+    list_y0 = y0 + 38 + 10
+    available = max(260, y1 - list_y0)
+    if available < 760:
+        key_h = min(340, max(280, int(available * 0.38)))
+    else:
+        key_h = min(520, max(320, int(available * 0.36)))
+    return y1 - key_h
 
 
 def _legend_subset(rows, group, labels):
