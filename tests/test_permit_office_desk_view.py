@@ -712,12 +712,15 @@ def test_hybrid_application_workspace_draws_folder_rail_with_map_key_below_inbox
     assert "INBOX" in texts
     assert "DECISION BRIEF" in texts
     assert "MAP KEY" in texts
-    assert "CASE LAYERS" in texts
-    assert "Proposed feature" in texts
+    assert "CHEAT SHEET" in texts
+    assert "FEATURES" in texts
+    assert "DISTRICT FILLS" in texts
+    assert "OVERLAYS" in texts
+    assert "Proposed" in texts
+    assert "Road" in texts
+    assert "Mercantile" in texts
+    assert "Service Gap" in texts
     assert "Selected target" in texts
-    assert "ON" in texts
-    assert "PermitPoints" not in texts
-    assert "PermitZones" not in texts
     assert "display_state" not in texts
     assert "PermitDistricts" not in texts
     assert "District Type" not in texts
@@ -731,7 +734,7 @@ def test_hybrid_application_workspace_draws_folder_rail_with_map_key_below_inbox
     inbox_targets = [bbox for _ident, bbox in docket_targets]
     assert map_key[0] < 250
     assert map_key[1] > max(bbox[3] for bbox in inbox_targets)
-    assert 160 <= map_key[3] - map_key[1] <= 260
+    assert 240 <= map_key[3] - map_key[1] <= 360
     assert ("desk-tab", "Applications") in [(kind, ident) for kind, ident, _bbox, _callback in view._click_targets]
     assert ("desk-tab", "Filed Reports") in [(kind, ident) for kind, ident, _bbox, _callback in view._click_targets]
 
@@ -790,8 +793,8 @@ def test_full_dashboard_table_spans_under_decision_and_city_pulse():
     assert table[3] >= 880
 
 
-def test_full_dashboard_left_folder_rail_uses_compact_case_key_above_table():
-    """Verify the left rail uses a compact case key instead of running past the table."""
+def test_full_dashboard_left_folder_rail_runs_single_map_cheat_sheet():
+    """Verify the left rail owns the map state cheat sheet."""
 
     item, districts = _vendor_case()
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
@@ -804,8 +807,10 @@ def test_full_dashboard_left_folder_rail_uses_compact_case_key_above_table():
     map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
     table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
     assert map_key[0] < table[0]
-    assert map_key[3] < table[3] - 20
-    assert 170 <= map_key[3] - map_key[1] <= 280
+    assert map_key[3] >= table[3] - 20
+    texts = _text_values(canvas)
+    assert "CHEAT SHEET" in texts
+    assert "MAP STATE" not in texts
 
 
 def test_map_key_draws_contents_style_point_line_and_area_glyphs():
@@ -855,7 +860,7 @@ def test_filed_reports_workspace_uses_history_list_and_detail_panel():
 
 
 def test_city_pulse_draws_standing_stat_grid_wire_and_district_groups():
-    """Verify right rail uses standing, stats, group health, and map state without ticker duplication."""
+    """Verify right rail uses standing, stats, and group graphs without ticker duplication."""
 
     item, districts = _vendor_case()
     model = build_desk_model(rules.CityState(activity=55, trust=42, friction=35, exposure=28), districts, [item], item.item_id)
@@ -867,13 +872,11 @@ def test_city_pulse_draws_standing_stat_grid_wire_and_district_groups():
     texts = _text_values(canvas)
     assert "OFFICE STANDING" in texts
     assert "DISTRICT GROUPS" in texts
-    assert "MAP STATE" in texts
-    assert "PermitDistricts" in texts
-    assert "district_type" in texts
-    assert "District display" in texts
-    assert "display_state" in texts
-    assert "Prosperity" in texts
-    assert "Community" in texts
+    assert "MAP STATE" not in texts
+    assert "PermitDistricts" not in texts
+    assert "district_type" not in texts
+    assert "District display" not in texts
+    assert "display_state" not in texts
     assert "WIRE" not in texts
     assert "WIRE QUEUE" not in texts
     assert "Latest city signals driving current risk." not in texts
@@ -979,8 +982,8 @@ def test_decision_actions_are_not_duplicated_in_bottom_utility_row():
     assert max(bbox[3] - bbox[1] for bbox in action_boxes.values()) <= 180
 
 
-def test_inbox_keeps_multiple_rows_with_the_compact_case_layer_key():
-    """Verify the compact case-layer key leaves room for the inbox list."""
+def test_inbox_keeps_multiple_rows_with_the_unified_map_key():
+    """Verify the unified map key does not starve the inbox list."""
 
     rows = [
         rules.DocketItem(f"T{n:02d}", "street_vendor_compact", f"Case {n}", "POINT", 1)
@@ -996,7 +999,7 @@ def test_inbox_keeps_multiple_rows_with_the_compact_case_layer_key():
     map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
     docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
     assert docket_boxes
-    assert 170 <= map_key[3] - map_key[1] <= 260
+    assert map_key[3] - map_key[1] >= 440
     assert len(docket_boxes) >= 4
 
 
@@ -1066,8 +1069,8 @@ def test_status_strip_marquee_draws_wire_text_at_scrolled_position():
     assert second_wire < first_wire
 
 
-def test_hybrid_layout_caps_case_layer_key_for_legibility():
-    """Verify the folder rail gives the case-layer key a compact legible block."""
+def test_hybrid_layout_gives_unified_map_key_legible_block():
+    """Verify the folder rail gives the unified map key a legible block."""
 
     item, districts = _vendor_case()
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
@@ -1081,15 +1084,15 @@ def test_hybrid_layout_caps_case_layer_key_for_legibility():
     x0, y0, x1, y1 = map_key_boxes[0]
     assert x1 <= 260
     assert y0 > 240
-    assert 170 <= y1 - y0 <= 260
+    assert 440 <= y1 - y0 <= 620
     texts = _text_values(canvas)
-    assert "CASE LAYERS" in texts
-    assert "Proposed feature" in texts
-    assert "PermitPoints" not in texts
+    assert "CHEAT SHEET" in texts
+    assert "DISTRICT FILLS" in texts
+    assert "OVERLAYS" in texts
 
 
-def test_tall_workspace_keeps_case_layer_key_attached_to_inbox():
-    """Verify tall ArcGIS windows keep the compact case key near the inbox."""
+def test_tall_workspace_splits_left_rail_between_inbox_and_map_cheat_sheet():
+    """Verify tall ArcGIS windows do not hide map-state meaning in the right rail."""
 
     rows = [
         rules.DocketItem(f"T{n:02d}", "street_vendor_compact", f"Application Case {n}", "POINT", 1)
@@ -1105,7 +1108,7 @@ def test_tall_workspace_keeps_case_layer_key_attached_to_inbox():
     map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
     docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
     assert docket_boxes
-    assert 170 <= map_key[3] - map_key[1] <= 280
+    assert map_key[3] - map_key[1] >= 650
     assert map_key[1] - max(bbox[3] for bbox in docket_boxes) <= 80
 
 
@@ -1123,7 +1126,7 @@ def test_application_workspace_uses_full_available_height_for_detail_and_rails()
     district_table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
     action_grid = next(args for kind, args, _kwargs in canvas.created if kind == "action-grid")
     case_action_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "case-action"]
-    assert 170 <= map_key[3] - map_key[1] <= 280
+    assert map_key[3] >= 880
     assert district_table[3] >= 880
     assert action_grid[3] < district_table[1]
     assert case_action_boxes
@@ -1581,8 +1584,23 @@ def test_active_card_gives_evidence_row_plan_weight():
 
     district_grid = next(args for kind, args, _kwargs in canvas.created if kind == "district-grid")
     culture_cards = [args for kind, args, _kwargs in canvas.created if kind == "culture-card"]
-    assert district_grid[3] - district_grid[1] >= 120
-    assert min(card[3] - card[1] for card in culture_cards) >= 38
+    assert district_grid[3] - district_grid[1] >= 90
+    assert min(card[3] - card[1] for card in culture_cards) >= 30
+
+
+def test_active_card_gives_brief_info_larger_than_evidence_row():
+    """Verify the decision narrative remains the dominant top section."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_active_card(canvas, (0, 0, 820, 680))
+
+    info = next(args for kind, args, _kwargs in canvas.created if kind == "app-info")
+    grid = next(args for kind, args, _kwargs in canvas.created if kind == "district-grid")
+    assert info[3] - info[1] > grid[3] - grid[1]
 
 
 def test_action_cards_draw_hotkeys_and_disabled_reason():
@@ -1600,6 +1618,8 @@ def test_action_cards_draw_hotkeys_and_disabled_reason():
     assert "M" in texts
     assert "D" in texts
     assert any("Needs 1 AP" in str(text) for text in texts)
+    assert texts.count("City") >= 3
+    assert texts.count("Local") >= 3
 
 
 def test_office_standing_rail_keeps_threat_tracks_in_wire_ticker_not_pulse():
@@ -1655,6 +1675,23 @@ def test_city_pulse_draws_sparklines_and_group_swatches():
     assert any(kind == "group-swatch" for kind, _args, _kwargs in canvas.created)
 
 
+def test_city_pulse_focuses_on_graphs_not_map_state_key():
+    """Verify the right pane leaves map symbology to the unified map key."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_ledger_rail(canvas, (0, 0, 300, 700))
+
+    texts = _text_values(canvas)
+    sparkline_boxes = [args for kind, args, _kwargs in canvas.created if kind == "sparkline"]
+    assert "MAP STATE" not in texts
+    assert sparkline_boxes
+    assert max(box[2] - box[0] for box in sparkline_boxes) >= 58
+
+
 def test_city_pulse_labels_right_rail_as_office_context():
     """Verify the right rail matches the plan framing."""
 
@@ -1667,6 +1704,33 @@ def test_city_pulse_labels_right_rail_as_office_context():
 
     texts = _text_values(canvas)
     assert "OFFICE CONTEXT" in texts
+
+
+def test_filed_reports_keep_attribute_table_under_report_and_pulse():
+    """Verify Filed Reports keeps the live district table attached under the work area."""
+
+    item, districts = _vendor_case()
+    tabs = (ReportTab("week-1", "Week Closed", "week", "week", False, "Week one report."),)
+    model = build_desk_model(
+        rules.CityState(),
+        districts,
+        [item],
+        item.item_id,
+        report_tabs=tabs,
+        selected_report_id="week-1",
+        selected_desk_tab="reports",
+    )
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+
+    view._draw(1120, 900)
+
+    table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
+    report = next(args for kind, args, _kwargs in canvas.created if kind == "report-detail")
+    pulse = next(args for kind, args, _kwargs in canvas.created if kind == "city-pulse")
+    assert table[1] >= max(report[3], pulse[3])
+    assert table[3] >= 880
 
 
 def test_map_key_draws_shape_matched_case_symbols():

@@ -11,6 +11,7 @@ from .desk_model import (
     HEADLINE_METRICS,
     DeskCallbacks,
     DeskViewModel,
+    MapLegendRow,
     ReceiptModel,
     ReportTab,
     build_desk_model,
@@ -26,6 +27,7 @@ MIN_DESK_W = 1120
 MIN_DESK_H = 860
 FEATURE_KEY_GROUPS = ("Selection", "PermitPoints", "PermitLines", "PermitZones")
 MAP_STATE_KEY_GROUPS = ("PermitDistricts", "District display", "Prosperity", "Community")
+MAP_CHEAT_GROUPS = ("MapCheat",)
 LEGEND_GROUP_FIELDS = {
     "PermitDistricts": "district_type",
     "District display": "display_state",
@@ -309,7 +311,7 @@ class PermitDeskView:
         workspace_x0 = margin
         workspace_x1 = health_x0 - gap
 
-        external_table = bool(self.model.docket_rows) and self.model.selected_desk_tab == "applications"
+        external_table = bool(self.model.docket_rows) and self.model.selected_desk_tab in ("applications", "reports")
         if external_table:
             body_h = body_y1 - body_y0
             table_h = min(330, max(220, int(body_h * 0.28)))
@@ -434,23 +436,23 @@ class PermitDeskView:
         detail_box = (rail_box[2] + gap, panel_y0, x1, panel_y1)
 
         self._draw_folder_rail(c, rail_box, rows, active_id)
-        if self.model.selected_desk_tab == "reports":
-            self._draw_report_detail_card(c, detail_box)
+        external_table = getattr(self, "_external_attribute_table", None)
+        if external_table:
+            top_y1, table_y0, table_y1, table_x1 = external_table
+            work_box = (detail_box[0], detail_box[1], detail_box[2], min(detail_box[3], top_y1 - 12))
+            table_box = (detail_box[0], table_y0, table_x1, table_y1)
         else:
-            external_table = getattr(self, "_external_attribute_table", None)
-            if external_table:
-                top_y1, table_y0, table_y1, table_x1 = external_table
-                active_box = (detail_box[0], detail_box[1], detail_box[2], min(detail_box[3], top_y1 - 12))
-                table_box = (detail_box[0], table_y0, table_x1, table_y1)
-            else:
-                panel_h = panel_y1 - panel_y0
-                active_h = min(max(390, int(panel_h * 0.52)), 520)
-                table_min_h = min(190, max(138, int(panel_h * 0.18)))
-                active_h = min(active_h, max(300, panel_h - table_min_h - gap))
-                active_box = (detail_box[0], detail_box[1], detail_box[2], detail_box[1] + active_h)
-                table_box = (detail_box[0], active_box[3] + gap, detail_box[2], panel_y1)
-            self._draw_active_card(c, active_box)
-            self._draw_district_attribute_table(c, table_box)
+            panel_h = panel_y1 - panel_y0
+            work_h = min(max(390, int(panel_h * 0.52)), 520)
+            table_min_h = min(190, max(138, int(panel_h * 0.18)))
+            work_h = min(work_h, max(300, panel_h - table_min_h - gap))
+            work_box = (detail_box[0], detail_box[1], detail_box[2], detail_box[1] + work_h)
+            table_box = (detail_box[0], work_box[3] + gap, detail_box[2], panel_y1)
+        if self.model.selected_desk_tab == "reports":
+            self._draw_report_detail_card(c, work_box)
+        else:
+            self._draw_active_card(c, work_box)
+        self._draw_district_attribute_table(c, table_box)
 
     def _draw_folder_rail(self, c, box, rows, active_id):
         """Draw folder tabs, inbox/history list, and map key in one left rail."""
@@ -466,26 +468,19 @@ class PermitDeskView:
 
         list_y0 = y0 + tab_h + 10
         available = max(260, y1 - list_y0)
-        if apps_selected:
-            key_h = min(260, max(170, int(available * 0.24)))
-        elif available < 760:
+        if available < 760:
             key_h = min(360, max(260, int(available * 0.45)))
         else:
             key_h = min(720, max(500, int(available * 0.50)))
-        if apps_selected:
-            desired_list_h = min(y1 - list_y0 - key_h - 10, max(260, min(620, 50 + len(rows) * 108)))
-            key_y0 = min(y1 - key_h, list_y0 + desired_list_h + 10)
-            key_y1 = min(y1, key_y0 + key_h)
-        else:
-            key_y0 = y1 - key_h
-            key_y1 = y1
+        key_y0 = y1 - key_h
+        key_y1 = y1
         list_box = (x0, list_y0, x1, key_y0 - 10)
         key_box = (x0, key_y0, x1, key_y1)
         if reports_selected:
             self._draw_history_rail(c, list_box)
         else:
             self._draw_inbox_rail(c, list_box, rows, active_id)
-        self._draw_map_key_rail(c, key_box, groups=("Selection",) if apps_selected else FEATURE_KEY_GROUPS)
+        self._draw_map_key_rail(c, key_box, groups=MAP_CHEAT_GROUPS)
 
     def _draw_inbox_rail(self, c, box, rows, active_id):
         """Draw the compact left docket rail."""
@@ -576,7 +571,12 @@ class PermitDeskView:
         if hasattr(c, "_record"):
             c._record("map-key", (x0, y0, x1, y1), {})
         c.create_text(x0 + 12, y0 + 14, text=title, anchor="nw", fill=Palette.INK, font=self._font(10, "bold"))
+        cheat_rows = set(groups or ()) == set(MAP_CHEAT_GROUPS)
         case_rows = set(groups or ()) == {"Selection"} and bool(self.model.case_map_symbols)
+        if cheat_rows:
+            c.create_text(x1 - 12, y0 + 16, text="CHEAT SHEET", anchor="ne", fill=Palette.MUTED, font=self._font(7, "bold"))
+            self._draw_map_cheat_sheet(c, x0 + 12, y0 + 48, x1 - 12, y1 - 10)
+            return
         if case_rows:
             c.create_text(x1 - 12, y0 + 16, text="CASE LAYERS", anchor="ne", fill=Palette.MUTED, font=self._font(7, "bold"))
         c.create_line(x0 + 12, y0 + 38, x1 - 12, y0 + 38, fill=Palette.LINE)
@@ -605,6 +605,48 @@ class PermitDeskView:
                 last_group = group
             self._draw_map_key_row(c, x0 + 12, y, x1 - 12, row)
             y += 31
+
+    def _draw_map_cheat_sheet(self, c, x0, y0, x1, y1):
+        """Draw one player-facing map symbology cheat sheet."""
+
+        rows = list(self.model.map_legend_rows)
+        selected = [row for row in rows if row.group == "Selection" and row.label == "Selected target"][:1]
+        compact = (y1 - y0) < 260
+        features = (
+            selected
+            + _legend_subset(rows, "PermitPoints", ("Proposed", "Maintained", "Special Interest"))
+            + _legend_subset(rows, "PermitLines", ("Road",))
+            + _legend_subset(rows, "PermitZones", ("Active",))
+        )
+        fills = _legend_subset(rows, "PermitDistricts", ("Residential", "Mercantile", "Industrial", "Civic", "Academic", "Natural"))
+        overlays = (
+            _legend_subset(rows, "District display", ("Service Gap", "Civic Incident", "Local Grievance"))
+            + _legend_subset(rows, "Prosperity", ("Stable",))
+            + _legend_subset(rows, "Community", ("Stable Identity", "Contested Buyout"))
+        )
+        if compact:
+            features = selected + _legend_subset(rows, "PermitPoints", ("Proposed",)) + _legend_subset(rows, "PermitLines", ("Road",))
+        feature_limit, fill_limit, overlay_limit = (3, 3, 2) if compact else (6, 6, 6)
+        sections = (
+            ("FEATURES", tuple(_friendly_legend_row(row) for row in features[:feature_limit])),
+            ("DISTRICT FILLS", tuple(_friendly_legend_row(row) for row in fills[:fill_limit])),
+            ("OVERLAYS", tuple(_friendly_legend_row(row) for row in overlays[:overlay_limit])),
+        )
+        heading_h = 13 if compact else 18
+        row_h = 18 if compact else 25
+        section_gap = 3 if compact else 7
+        y = y0
+        for title, section_rows in sections:
+            if y + heading_h > y1:
+                break
+            c.create_text(x0, y, text=title, anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
+            y += heading_h
+            for row in section_rows:
+                if y + row_h > y1:
+                    break
+                self._draw_map_key_row(c, x0, y, x1, row)
+                y += row_h
+            y += section_gap
 
     def _draw_map_key_row(self, c, x0, y0, x1, row):
         """Draw one bounded legend row with swatch, label, and detail."""
@@ -751,6 +793,8 @@ class PermitDeskView:
         """Draw the selected filed report using the same center-detail structure."""
 
         x0, y0, x1, y1 = box
+        if hasattr(c, "_record"):
+            c._record("report-detail", (x0, y0, x1, y1), {})
         tabs = list(self.model.report_tabs or ())
         selected_report = next((tab for tab in tabs if tab.report_id == self.model.selected_report_id), tabs[-1] if tabs else None)
         _shadow_rect(c, x0 + 4, y0 + 5, x1 + 4, y1 + 5)
@@ -804,8 +848,8 @@ class PermitDeskView:
             info_h = max(62, min(90, available - (2 * gap) - min_action_h - evidence_h))
             action_h = max(120, available - (2 * gap) - info_h - evidence_h)
         else:
-            info_h = min(max(130, int(available * 0.32)), 190)
-            evidence_h = min(max(164, int(available * 0.30)), 190)
+            info_h = min(max(190, int(available * 0.42)), 260)
+            evidence_h = min(max(140, int(available * 0.24)), 170)
             action_h = min(max(170, int(available * 0.34)), 218)
         info_box = (body_x0, content_y0, body_x1, min(content_y1, content_y0 + info_h))
         evidence_y0 = info_box[3] + gap
@@ -1088,9 +1132,7 @@ class PermitDeskView:
             c.create_rectangle(hk_x0, y0 + 7, x1 - 8, y0 + 25, fill=Palette.PAPER_ALT, outline=Palette.LINE)
             c.create_text((hk_x0 + x1 - 8) // 2, y0 + 10, text=hotkey, anchor="n", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(7, "bold"))
         c.create_text(x0 + 12, y0 + 27, text=cost, anchor="nw", fill=tone, font=self._font(8, "bold"), width=x1 - x0 - 24)
-        if not enabled and disabled_reason:
-            c.create_text(x0 + 12, y1 - 18, text=self._fit_px(disabled_reason, 7, "normal", x1 - x0 - 24), anchor="nw", fill=Palette.MUTED, font=self._font(7))
-        elif isinstance(detail, tuple):
+        if isinstance(detail, tuple):
             city, local = detail
             label_w = 34
             detail_w = max(40, x1 - x0 - label_w - 28)
@@ -1099,9 +1141,13 @@ class PermitDeskView:
             local_y = y0 + 64 if y1 - y0 >= 78 else y0 + 60
             c.create_text(x0 + 12, local_y, text="Local", anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
             c.create_text(x0 + 12 + label_w, local_y, text=self._fit_px(local, 7, "normal", detail_w), anchor="nw", fill=Palette.INK, font=self._font(7), width=detail_w)
+            if not enabled and disabled_reason:
+                c.create_text(x1 - 10, y1 - 17, text=self._fit_px(disabled_reason, 7, "normal", max(52, x1 - x0 - 24)), anchor="ne", fill=Palette.MUTED, font=self._font(7))
         elif y1 - y0 >= 68:
             detail_lines = _fit_lines(detail, max(16, (x1 - x0 - 24) // 7), 3)
             c.create_text(x0 + 12, y0 + 44, text="\n".join(detail_lines), anchor="nw", fill=Palette.MUTED, font=self._font(7), width=x1 - x0 - 24)
+            if not enabled and disabled_reason:
+                c.create_text(x1 - 10, y1 - 17, text=self._fit_px(disabled_reason, 7, "normal", max(52, x1 - x0 - 24)), anchor="ne", fill=Palette.MUTED, font=self._font(7))
         elif tooltip:
             c.create_text(x0 + 12, y1 - 18, text=self._fit_px(tooltip, 7, "normal", x1 - x0 - 24), anchor="nw", fill=Palette.MUTED, font=self._font(7))
         if enabled:
@@ -1153,22 +1199,17 @@ class PermitDeskView:
         c.create_line(inner_x0, y, inner_x1, y, fill=Palette.LINE)
         y += 12
 
-        # Core-metric breakdown remains available, but compressed into a 2x2 stat grid.
         pulse = [by_label[name] for name in ("Activity", "Trust", "Friction", "Exposure") if name in by_label]
         if pulse:
-            y = self._draw_pulse_grid(c, inner_x0, inner_x1, y, pulse) + 14
+            y = self._draw_pulse_grid(c, inner_x0, inner_x1, y, pulse) + 18
 
-        if self.model.district_group_rows and y < y1 - 178:
+        if self.model.district_group_rows and y < y1 - 70:
             c.create_text(inner_x0, y, text="DISTRICT GROUPS", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
             y += 18
             for row in self.model.district_group_rows[:4]:
-                if y + 38 > y1 - 190:
+                if y + 52 > y1 - 14:
                     break
                 y = self._draw_group_row(c, inner_x0, inner_x1, y, row) + 8
-
-        if y < y1 - 90:
-            y += 8
-            self._draw_map_state_key(c, inner_x0, y, inner_x1, y1 - 12)
 
     def _draw_map_state_key(self, c, x0, y0, x1, y1):
         """Draw district and map-state symbology in the right rail."""
@@ -1206,7 +1247,7 @@ class PermitDeskView:
 
         gap = 8
         cell_w = max(80, (x1 - x0 - gap) // 2)
-        cell_h = 52
+        cell_h = 68
         for index, row in enumerate(rows[:4]):
             cx0 = x0 + (index % 2) * (cell_w + gap)
             cy0 = y + (index // 2) * (cell_h + gap)
@@ -1215,23 +1256,24 @@ class PermitDeskView:
             c.create_rectangle(cx0, cy0, cx1, cy0 + cell_h, fill=Palette.PAPER_ALT, outline=Palette.LINE)
             c.create_text(cx0 + 8, cy0 + 7, text=row.label.upper(), anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
             c.create_text(cx1 - 8, cy0 + 7, text=_clip(row.value, 8), anchor="ne", fill=tone, font=self._font(10, "bold"))
-            self._draw_sparkline(c, cx0 + 8, cy0 + 29, cx1 - 28, cy0 + 43, row.points, tone)
-            c.create_text(cx1 - 8, cy0 + 30, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(9, "bold"))
+            self._draw_sparkline(c, cx0 + 8, cy0 + 34, cx1 - 14, cy0 + 54, row.points, tone)
+            c.create_text(cx1 - 8, cy0 + 54, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(8, "bold"))
         return y + (cell_h * 2) + gap
 
     def _draw_group_row(self, c, x0, x1, y, row):
         """Draw one district group health row."""
 
         tone = _tone_color(row.tone)
-        c.create_rectangle(x0, y, x1, y + 34, fill=Palette.PAPER_ALT, outline=Palette.LINE)
+        row_h = 46
+        c.create_rectangle(x0, y, x1, y + row_h, fill=Palette.PAPER_ALT, outline=Palette.LINE)
         if hasattr(c, "_record"):
             c._record("group-swatch", (x0 + 8, y + 10, x0 + 18, y + 20), {})
         c.create_rectangle(x0 + 8, y + 10, x0 + 18, y + 20, fill=row.swatch or Palette.LINE, outline=Palette.LINE)
         c.create_text(x0 + 26, y + 5, text=self._fit_px(row.label, 8, "bold", (x1 - x0) // 2), anchor="nw", fill=Palette.INK, font=self._font(8, "bold"))
-        self._draw_sparkline(c, x1 - 62, y + 10, x1 - 22, y + 24, row.points, tone)
+        self._draw_sparkline(c, x1 - 86, y + 12, x1 - 22, y + 30, row.points, tone)
         c.create_text(x1 - 8, y + 5, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(8, "bold"))
-        c.create_text(x0 + 26, y + 20, text=self._fit_px(row.detail, 7, "normal", x1 - x0 - 90), anchor="nw", fill=Palette.MUTED, font=self._font(7))
-        return y + 34
+        c.create_text(x0 + 26, y + 20, text=self._fit_px(row.detail, 7, "normal", x1 - x0 - 110), anchor="nw", fill=Palette.MUTED, font=self._font(7))
+        return y + row_h
 
     def _draw_sparkline(self, c, x0, y0, x1, y1, points, color):
         """Draw a compact static sparkline from 0-100 point values."""
@@ -1605,6 +1647,66 @@ def _deadline_day_time(value):
     day = tokens[0] if tokens else ""
     time = next((token for token in reversed(tokens) if ":" in token), tokens[-1] if tokens else "")
     return day, time
+
+
+def _legend_subset(rows, group, labels):
+    """Return legend rows from a group in a specific public order."""
+
+    lookup = {(row.group, row.label): row for row in rows}
+    return [lookup.get((group, label), _fallback_legend_row(group, label)) for label in labels]
+
+
+def _fallback_legend_row(group, label):
+    """Return a stable cheat-sheet row for possible map states not currently visible."""
+
+    colors = {
+        "Residential": "#d8c17a",
+        "Mercantile": "#d9b15f",
+        "Industrial": "#a8aba8",
+        "Civic": "#8fb8db",
+        "Academic": "#b59ad8",
+        "Natural": "#9ec798",
+        "Service Gap": "#2f7fb6",
+        "Civic Incident": "#c94646",
+        "Local Grievance": "#9f4f65",
+        "Stable": "#9dafaa",
+        "Stable Identity": "#d8e1de",
+        "Contested Buyout": "#bf4e54",
+    }
+    group_detail = {
+        "PermitDistricts": "base district fill",
+        "District display": "district pressure overlay",
+        "Prosperity": "district prosperity outline",
+        "Community": "identity overlay",
+    }
+    return MapLegendRow(group, label, group_detail.get(group, "map symbol"), colors.get(label, "#9dafaa"), "neutral")
+
+
+def _friendly_legend_row(row):
+    """Replace internal layer-field detail with player-facing cheat-sheet copy."""
+
+    details = {
+        ("Selection", "Selected target"): "outlined district or edge",
+        ("PermitPoints", "Proposed"): "pending point feature",
+        ("PermitPoints", "Maintained"): "existing support point",
+        ("PermitPoints", "Special Interest"): "notable point risk",
+        ("PermitLines", "Road"): "line feature or route",
+        ("PermitZones", "Active"): "filled zoning footprint",
+        ("PermitDistricts", "Residential"): "housing district fill",
+        ("PermitDistricts", "Mercantile"): "market district fill",
+        ("PermitDistricts", "Industrial"): "industry district fill",
+        ("PermitDistricts", "Civic"): "office/service district fill",
+        ("PermitDistricts", "Academic"): "campus district fill",
+        ("PermitDistricts", "Natural"): "reserve district fill",
+        ("District display", "Service Gap"): "needs utility/service attention",
+        ("District display", "Civic Incident"): "new civic incident overlay",
+        ("District display", "Local Grievance"): "resident pressure overlay",
+        ("Prosperity", "Stable"): "prosperity outline",
+        ("Community", "Stable Identity"): "identity overlay",
+        ("Community", "Contested Buyout"): "conversion pressure overlay",
+    }
+    detail = details.get((row.group, row.label), row.detail)
+    return replace(row, detail=detail)
 
 
 def _fit_lines(value, line_width, max_lines):
