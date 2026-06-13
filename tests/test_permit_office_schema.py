@@ -120,11 +120,12 @@ def _sr_arcpy(active_map, sentinel, raise_err=False):
 
 
 def test_active_spatial_reference_uses_real_map_sr(monkeypatch):
-    """Verify a map with a real (WKID-bearing) SR is used as-is."""
+    """Verify a map with a real WKID is normalized to a fresh SR."""
     real = _sr(3857)
-    monkeypatch.setattr(schema, "arcpy", _sr_arcpy(SimpleNamespace(spatialReference=real), _sr(0)))
+    fresh = _sr(3857)
+    monkeypatch.setattr(schema, "arcpy", _sr_arcpy(SimpleNamespace(spatialReference=real), fresh))
 
-    assert schema.active_spatial_reference(None) is real
+    assert schema.active_spatial_reference(None) is fresh
 
 
 def test_active_spatial_reference_falls_back_on_unknown_sr(monkeypatch):
@@ -154,3 +155,88 @@ def test_active_spatial_reference_falls_back_on_error(monkeypatch):
     monkeypatch.setattr(schema, "arcpy", _sr_arcpy(None, sentinel, raise_err=True))
 
     assert schema.active_spatial_reference(None) is sentinel
+
+
+def test_active_spatial_reference_returns_fresh_wkid_sr(monkeypatch):
+    """Verify feature-class creation never receives the raw active-map SR."""
+
+    problematic = _sr(26910)
+    fresh = _sr(26910)
+    constructed = []
+    fake_arcpy = _sr_arcpy(SimpleNamespace(spatialReference=problematic), _sr(3857))
+    fake_arcpy.SpatialReference = lambda wkid: constructed.append(wkid) or fresh
+    monkeypatch.setattr(schema, "arcpy", fake_arcpy)
+
+    assert schema.active_spatial_reference(None) is fresh
+    assert constructed == [26910]
+
+
+def test_active_spatial_reference_unknown_uses_fresh_web_mercator(monkeypatch):
+    """Verify Unknown active-map SR falls back to a fresh Web Mercator object."""
+
+    fallback = _sr(3857)
+    constructed = []
+    fake_arcpy = _sr_arcpy(SimpleNamespace(spatialReference=_sr(0)), fallback)
+    fake_arcpy.SpatialReference = lambda wkid: constructed.append(wkid) or fallback
+    monkeypatch.setattr(schema, "arcpy", fake_arcpy)
+
+    assert schema.active_spatial_reference(None) is fallback
+    assert constructed == [3857]
+
+
+def test_ensure_feature_class_passes_fresh_spatial_reference_to_create(monkeypatch):
+    """Regression: ArcGIS Pro 3.3.2 crashes on the raw active-map SR object."""
+
+    problematic = _sr(26910)
+    fresh = _sr(26910)
+    created = []
+
+    def create_featureclass(gdb_path, name, geometry_type, spatial_reference=None):
+        created.append((gdb_path, name, geometry_type, spatial_reference))
+        assert spatial_reference is fresh
+        assert spatial_reference is not problematic
+
+    fake_arcpy = SimpleNamespace(
+        Exists=lambda _path: False,
+        ListFields=lambda _path: [],
+        management=SimpleNamespace(
+            CreateFeatureclass=create_featureclass,
+            AddField=lambda *_args, **_kwargs: None,
+        ),
+        SpatialReference=lambda wkid: fresh,
+    )
+    monkeypatch.setattr(schema, "arcpy", fake_arcpy)
+
+    schema.ensure_feature_class("C:/game.gdb", "PermitDistricts", "POLYGON", [], problematic, None)
+
+    assert created == [("C:/game.gdb", "PermitDistricts", "POLYGON", fresh)]
+
+
+def test_ensure_schema_fast_path_skips_field_scans_when_marker_current(monkeypatch):
+    """Verify a current schema marker avoids repeated ListFields scans."""
+
+    gdb_path = "C:/game.gdb"
+    paths = schema.schema_paths(gdb_path)
+    calls = []
+
+    class FakeSearchCursor:
+        def __init__(self, path, fields, where_clause=None):
+            assert path == paths["schema_meta"]
+            assert fields == ["key", "value_text"]
+            assert where_clause is None
+
+        def __enter__(self):
+            return iter([["other", "old"], [schema.SCHEMA_VERSION_KEY, schema.SCHEMA_VERSION]])
+
+        def __exit__(self, *_args):
+            return False
+
+    fake_arcpy = SimpleNamespace(
+        Exists=lambda path: calls.append(("exists", path)) or True,
+        ListFields=lambda _path: (_ for _ in ()).throw(AssertionError("fast path should not scan fields")),
+        da=SimpleNamespace(SearchCursor=FakeSearchCursor),
+    )
+    monkeypatch.setattr(schema, "arcpy", fake_arcpy)
+
+    assert schema.ensure_schema(gdb_path, None) == paths
+    assert ("exists", paths["districts"]) in calls

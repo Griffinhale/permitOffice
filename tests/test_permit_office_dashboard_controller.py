@@ -717,13 +717,15 @@ def test_scorecard_files_report_tab_without_dialog(monkeypatch):
 
 
 def test_dashboard_enforces_startup_geometry_after_window_maps():
-    """Verify startup sizing is reapplied after Tk/Windows maps the window."""
+    """Verify startup sizing claims the left half of the working display."""
 
     class FakeRoot:
         def __init__(self):
             self.calls = []
             self.width = 900
             self.height = 780
+            self.screen_width = 2560
+            self.screen_height = 1440
 
         def geometry(self, value=None):
             if value is not None:
@@ -741,6 +743,12 @@ def test_dashboard_enforces_startup_geometry_after_window_maps():
         def winfo_height(self):
             return self.height
 
+        def winfo_screenwidth(self):
+            return self.screen_width
+
+        def winfo_screenheight(self):
+            return self.screen_height
+
         def after(self, delay, callback):
             self.calls.append(("after", delay))
             callback()
@@ -751,8 +759,8 @@ def test_dashboard_enforces_startup_geometry_after_window_maps():
     dashboard._configure_dashboard_window(root)
 
     assert ("minsize", 1180, 860) in root.calls
-    assert ("geometry", "1360x1040") in root.calls
-    assert root.calls.count(("geometry", "1360x1040")) == 2
+    assert ("geometry", "1280x1400+0+0") in root.calls
+    assert root.calls.count(("geometry", "1280x1400+0+0")) == 2
 
 
 def test_selecting_application_tab_returns_to_applications_and_updates_map_context(monkeypatch):
@@ -1063,7 +1071,7 @@ def test_completed_game_reloads_inline_final_audit_receipt(monkeypatch):
     assert controller.view.model.report_tabs[-1].kind == "scorecard"
     rows_by_label = {row.label: row for row in controller.view.model.ledger_rows}
     assert rows_by_label["Week"].value == "12/12 CLOSED"
-    assert rows_by_label["Health"].label == "Health"
+    assert rows_by_label["Office Standing"].label == "Office Standing"
 
 
 def test_deadline_final_week_records_same_inline_final_audit_receipt(monkeypatch):
@@ -2095,6 +2103,88 @@ def test_prepare_dashboard_session_resume_adds_layers(monkeypatch):
     assert calls == ["add"]
 
 
+def test_deferred_startup_session_runs_layer_work_after_initial_render(monkeypatch):
+    """Verify dashboard can draw its first frame before map/session work."""
+
+    controller = dashboard.DashboardController({"districts": "districts", "state": "state", "docket": "docket"}, "district_layer", 2026, object())
+    state = rules.CityState(turn=5)
+    order = []
+
+    class FakeRoot:
+        def after_idle(self, callback):
+            order.append("idle")
+            callback()
+            return "idle-1"
+
+        def after(self, delay, callback):
+            order.append(("after", delay))
+            callback()
+            return "after-1"
+
+    class FakeView:
+        def render(self, model):
+            order.append("render")
+
+    controller.root = FakeRoot()
+    controller.view = FakeView()
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {})
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "proposal_visible_map", lambda paths: {})
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "ensure_active_map", lambda messages: order.append("active_map"))
+    monkeypatch.setattr(dashboard, "output_layers_present", lambda: True)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: order.append("add"))
+    monkeypatch.setattr(dashboard, "_row_count", lambda path: 5)
+
+    controller.reload()
+    controller.schedule_startup_session_preparation()
+
+    assert order.index("render") < order.index("active_map") < order.index("add")
+    assert order[:3] == ["render", "idle", ("after", dashboard.STARTUP_SESSION_DELAY_MS)]
+
+
+def test_deferred_startup_session_detects_fresh_start_after_first_frame(monkeypatch):
+    """Verify deferred map probe still flips saved-game/no-layer state safely."""
+
+    controller = dashboard.DashboardController({"districts": "districts", "state": "state", "docket": "docket"}, "district_layer", 2026, object())
+    state = rules.CityState(turn=4)
+    rendered_game_active = []
+
+    class FakeRoot:
+        def after_idle(self, callback):
+            callback()
+            return "idle-1"
+
+        def after(self, delay, callback):
+            assert delay == dashboard.STARTUP_SESSION_DELAY_MS
+            callback()
+            return "after-1"
+
+    class FakeView:
+        def render(self, model):
+            rendered_game_active.append(model.game_active)
+
+    controller.root = FakeRoot()
+    controller.view = FakeView()
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {"D0000": _profile("D0000")})
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "proposal_visible_map", lambda paths: {})
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "ensure_active_map", lambda messages: None)
+    monkeypatch.setattr(dashboard, "output_layers_present", lambda: False)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: (_ for _ in ()).throw(AssertionError("fresh start must not add layers")))
+
+    controller.reload()
+    controller.schedule_startup_session_preparation()
+
+    assert rendered_game_active == [True, False]
+    assert controller._offer_fresh_start is True
+
+
 def test_resolve_session_state_fresh_start_uses_defaults_without_reading_save(monkeypatch):
     """Verify fresh-start mode renders defaults and never reads the stale save."""
     controller = dashboard.DashboardController({}, "district_layer", 2026, object(), offer_fresh_start=True)
@@ -2128,3 +2218,319 @@ def test_resolve_session_state_normal_reads_persisted_rows(monkeypatch):
     assert offering is False
     assert state is sentinel
     assert districts == {"D0000": "x"} and items == ["item"] and features == ["feat"]
+
+
+def test_startup_experiment_parser_rejects_arcpy_worker_probe_after_live_freeze():
+    """Verify ArcPy-bound probes are not selectable after proving unsafe in Pro."""
+
+    assert dashboard.normalize_startup_experiment(None) == dashboard.STARTUP_EXPERIMENT_NONE
+    assert dashboard.normalize_startup_experiment("None") == dashboard.STARTUP_EXPERIMENT_NONE
+    assert dashboard.normalize_startup_experiment("threaded-cache") == "threaded-cache"
+    assert dashboard.normalize_startup_experiment("threaded-arcpy-read-probe") == dashboard.STARTUP_EXPERIMENT_NONE
+    assert dashboard.normalize_startup_experiment("surprise") == dashboard.STARTUP_EXPERIMENT_NONE
+
+
+def test_threaded_arcpy_read_probe_string_is_ignored_without_worker(monkeypatch):
+    """Verify stale ArcPy-threading selections fall back to safe startup."""
+
+    controller = dashboard.DashboardController(
+        {"state": "state", "districts": "districts", "docket": "docket"},
+        "district_layer",
+        2026,
+        object(),
+        startup_experiment="threaded-arcpy-read-probe",
+    )
+    calls = []
+
+    class BlockingExecutor:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("ArcPy probe must not start a worker")
+
+    controller.view = SimpleNamespace(render=lambda model: calls.append("render"))
+    monkeypatch.setattr(dashboard.concurrent_futures, "ThreadPoolExecutor", BlockingExecutor)
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: rules.CityState(turn=3))
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {})
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "proposal_visible_map", lambda paths: {})
+    monkeypatch.setattr(dashboard, "ensure_active_map", lambda messages: calls.append("active_map"))
+    monkeypatch.setattr(dashboard, "output_layers_present", lambda: True)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: calls.append("add"))
+    monkeypatch.setattr(dashboard, "_row_count", lambda path: 5)
+
+    controller.reload()
+    controller.prepare_startup_session()
+
+    assert controller._startup_experiment == dashboard.STARTUP_EXPERIMENT_NONE
+    assert calls == ["render", "active_map", "add"]
+
+
+def test_threaded_cache_precomputes_current_rows_in_worker_after_main_read(monkeypatch):
+    """Verify cache experiment reads rows on main and precomputes that model in worker."""
+
+    controller = dashboard.DashboardController(
+        {"state": "state", "districts": "districts", "docket": "docket"},
+        "district_layer",
+        2026,
+        object(),
+        startup_experiment="threaded-cache",
+    )
+    state = rules.CityState(turn=7)
+    reads = []
+    builds = []
+    renders = []
+
+    class FakeView:
+        def render(self, model):
+            assert not dashboard._startup_worker_active()
+            renders.append("render")
+
+    def fake_build(state_arg, districts_arg, items_arg, *args, **kwargs):
+        builds.append(("worker" if dashboard._startup_worker_active() else "main", state_arg.turn, dict(districts_arg)))
+        return SimpleNamespace(selected_item_id="", selected_report_id="", selected_desk_tab="")
+
+    controller.view = FakeView()
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: reads.append(("state", "worker" if dashboard._startup_worker_active() else "main")) or state)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: reads.append(("districts", "worker" if dashboard._startup_worker_active() else "main")) or {"D0000": _profile("D0000")})
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: reads.append(("docket", "worker" if dashboard._startup_worker_active() else "main")) or [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: reads.append(("features", "worker" if dashboard._startup_worker_active() else "main")) or [])
+    monkeypatch.setattr(dashboard, "proposal_visible_map", lambda paths: {})
+    monkeypatch.setattr(dashboard, "ensure_active_map", lambda messages: None)
+    monkeypatch.setattr(dashboard, "output_layers_present", lambda: True)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: None)
+    monkeypatch.setattr(dashboard, "_row_count", lambda path: 5)
+    monkeypatch.setattr(dashboard, "build_desk_model", fake_build)
+
+    controller.reload()
+    assert builds == [("main", 7, {"D0000": _profile("D0000")})]
+    assert renders == ["render"]
+
+    controller.prepare_startup_session()
+
+    assert all(thread_name == "main" for _kind, thread_name in reads)
+    assert ("worker", 7, {"D0000": _profile("D0000")}) in builds
+    assert ("main", 7, {"D0000": _profile("D0000")}) in builds
+
+
+def test_threaded_cache_worker_exception_falls_back_without_blocking_render(monkeypatch):
+    """Verify cache precompute errors are logged and normal render continues."""
+
+    controller = dashboard.DashboardController(
+        {"state": "state", "districts": "districts", "docket": "docket"},
+        "district_layer",
+        2026,
+        object(),
+        startup_experiment="threaded-cache",
+    )
+    warnings = []
+    renders = []
+
+    class FakeView:
+        def render(self, model):
+            assert not dashboard._startup_worker_active()
+            renders.append("render")
+
+    def fake_build(state_arg, districts_arg, items_arg, *args, **kwargs):
+        if dashboard._startup_worker_active():
+            raise RuntimeError("cache precompute failed")
+        return SimpleNamespace(selected_item_id="", selected_report_id="", selected_desk_tab="")
+
+    controller.view = FakeView()
+    monkeypatch.setattr(dashboard, "_warn", lambda messages, tag, text: warnings.append((tag, text)))
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: rules.CityState(turn=2))
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {})
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "proposal_visible_map", lambda paths: {})
+    monkeypatch.setattr(dashboard, "ensure_active_map", lambda messages: None)
+    monkeypatch.setattr(dashboard, "output_layers_present", lambda: True)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: None)
+    monkeypatch.setattr(dashboard, "_row_count", lambda path: 5)
+    monkeypatch.setattr(dashboard, "build_desk_model", fake_build)
+    monkeypatch.setattr(dashboard, "write_state", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("worker must not write")))
+
+    controller.reload()
+    assert renders == ["render"]
+
+    controller.prepare_startup_session()
+
+    assert renders == ["render"]
+    assert any("threaded-cache failed" in text for _tag, text in warnings)
+
+
+def test_threaded_arcpy_probe_no_longer_progresses_to_worker_read():
+    """Document the live finding: ArcPy reads stay on the main thread only."""
+
+    controller = dashboard.DashboardController(
+        {"state": "state", "districts": "districts", "docket": "docket"},
+        "district_layer",
+        2026,
+        object(),
+        startup_experiment="threaded-arcpy-read-probe",
+    )
+
+    assert controller._startup_experiment == dashboard.STARTUP_EXPERIMENT_NONE
+
+
+def test_rejected_threaded_arcpy_probe_does_not_delay_main_map_work(monkeypatch):
+    """Verify ignored ArcPy probe cannot block startup behind a worker."""
+
+    controller = dashboard.DashboardController(
+        {"state": "state", "districts": "districts", "docket": "docket"},
+        "district_layer",
+        2026,
+        object(),
+        startup_experiment="threaded-arcpy-read-probe",
+    )
+    events = []
+
+    class FakeExecutor:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("ignored ArcPy probe must not allocate a worker")
+
+    controller.view = SimpleNamespace(render=lambda model: None)
+    monkeypatch.setattr(dashboard.concurrent_futures, "ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: rules.CityState(turn=2))
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {})
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "proposal_visible_map", lambda paths: {})
+
+    def ensure_map(messages):
+        events.append("active_map")
+
+    monkeypatch.setattr(dashboard, "ensure_active_map", ensure_map)
+    monkeypatch.setattr(dashboard, "output_layers_present", lambda: True)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: events.append("add"))
+    monkeypatch.setattr(dashboard, "_row_count", lambda path: 5)
+
+    controller.prepare_startup_session()
+
+    assert events == ["active_map", "add"]
+
+
+def test_threaded_cache_probe_timeout_falls_back_to_synchronous_reload(monkeypatch):
+    """Verify startup probe timeout is captured without blocking normal reload."""
+
+    controller = dashboard.DashboardController(
+        {"state": "state", "districts": "districts", "docket": "docket"},
+        "district_layer",
+        2026,
+        object(),
+        startup_experiment="threaded-cache",
+    )
+    calls = []
+    warnings = []
+
+    class FakeFuture:
+        def result(self, timeout=None):
+            raise dashboard.concurrent_futures.TimeoutError()
+
+        def cancel(self):
+            calls.append("cancel")
+
+    class FakeExecutor:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def submit(self, worker, *args):
+            calls.append("submit")
+            return FakeFuture()
+
+        def shutdown(self, wait=False, cancel_futures=False):
+            calls.append(("shutdown", wait, cancel_futures))
+
+    class FakeView:
+        def render(self, model):
+            calls.append("render")
+
+    controller.view = FakeView()
+    monkeypatch.setattr(dashboard.concurrent_futures, "ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(dashboard, "_warn", lambda messages, tag, text: warnings.append((tag, text)))
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: rules.CityState(turn=2))
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {})
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "proposal_visible_map", lambda paths: {})
+    monkeypatch.setattr(dashboard, "ensure_active_map", lambda messages: None)
+    monkeypatch.setattr(dashboard, "output_layers_present", lambda: True)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: None)
+    monkeypatch.setattr(dashboard, "_row_count", lambda path: 5)
+
+    controller.reload()
+    assert calls == ["render"]
+
+    controller.prepare_startup_session()
+
+    assert "cancel" in calls
+    assert ("shutdown", False, True) in calls
+    assert "render" in calls
+    assert any("threaded-cache timed out" in text for _tag, text in warnings)
+
+
+def test_ticker_tick_scrolls_marquee_with_lightweight_view_update_without_row_reads(monkeypatch):
+    """Verify ambient ticker advances as a marquee without a full ArcGIS reload."""
+
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    updates = []
+    reloads = []
+    controller.status_text = ""
+    controller._deadline_running = False
+    controller.view = SimpleNamespace(
+        model=SimpleNamespace(ticker_items=("one", "two", "three"), deadline_text="", deadline_meter=0, deadline_running=False),
+        update_status_marquee=lambda offset: updates.append(offset),
+    )
+    controller.reload = lambda **kwargs: reloads.append(kwargs)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: (_ for _ in ()).throw(AssertionError("ticker must not read state rows")))
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: (_ for _ in ()).throw(AssertionError("ticker must not read docket rows")))
+
+    controller._ticker_tick()
+    controller._ticker_tick()
+    controller._ticker_tick()
+
+    assert updates == [dashboard.TICKER_STEP_PX, dashboard.TICKER_STEP_PX * 2, dashboard.TICKER_STEP_PX * 3]
+    assert reloads == []
+
+
+def test_ticker_tick_pauses_when_command_status_is_active():
+    """Verify command-specific status text wins over ambient ticker motion."""
+
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    updates = []
+    controller.status_text = "Decision filed."
+    controller._status_hold_until = dashboard.time.monotonic() + 10
+    controller.view = SimpleNamespace(
+        model=SimpleNamespace(ticker_items=("one", "two"), deadline_text="", deadline_meter=0, deadline_running=False),
+        update_status_marquee=lambda offset: updates.append(offset),
+    )
+
+    controller._ticker_tick()
+
+    assert updates == []
+    assert controller._ticker_index == 0
+
+
+def test_ticker_tick_resumes_after_transient_command_status_expires(monkeypatch):
+    """Verify command status ages out so the ambient ticker visibly rolls again."""
+
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    updates = []
+    now = 1000.0
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.status_var.set("New game started with seed 99.")
+    controller._status_hold_until = now - 0.1
+    controller.view = SimpleNamespace(
+        model=SimpleNamespace(ticker_items=("wire one", "wire two"), deadline_text="", deadline_meter=0, deadline_running=False),
+        update_status_marquee=lambda offset: updates.append(offset),
+    )
+    monkeypatch.setattr(dashboard.time, "monotonic", lambda: now)
+
+    controller._ticker_tick()
+
+    assert controller.status_text == ""
+    assert updates == [dashboard.TICKER_STEP_PX]

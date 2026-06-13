@@ -55,13 +55,20 @@ for _module_name in (
             sys.modules.pop(_module_name, None)
 
 from permit_office_arcgis import _perf
-from permit_office_arcgis.dashboard import DashboardController, REDRAW_EXPERIMENT_ENV, has_saved_game, prepare_dashboard_session, run_redraw_benchmark
-from permit_office_arcgis.geometry import ensure_active_map, output_layers_present
+from permit_office_arcgis.dashboard import (
+    DashboardController,
+    REDRAW_EXPERIMENT_ENV,
+    STARTUP_EXPERIMENT_ENV,
+    STARTUP_EXPERIMENT_NONE,
+    STARTUP_EXPERIMENT_THREADED_CACHE,
+    normalize_startup_experiment,
+)
 from permit_office_arcgis.schema import (
     P_OUTPUT,
     P_PERF,
     P_REDRAW_BENCHMARK_RUNS,
     P_REDRAW_EXPERIMENT,
+    P_STARTUP_EXPERIMENT,
     P_WORKSPACE,
     DISTRICTS,
     TOOLBOX_ALIAS,
@@ -139,7 +146,20 @@ class PermitOfficePrototype(object):
             direction="Input",
         )
         p_benchmark.value = 0
-        return [p_workspace, p_output, p_perf, p_redraw, p_benchmark]
+        p_startup = arcpy.Parameter(
+            displayName="Startup/Threading Diagnostics",
+            name="startup_threading_diagnostics",
+            datatype="GPString",
+            parameterType="Optional",
+            direction="Input",
+        )
+        p_startup.filter.type = "ValueList"
+        p_startup.filter.list = [
+            STARTUP_EXPERIMENT_NONE,
+            STARTUP_EXPERIMENT_THREADED_CACHE,
+        ]
+        p_startup.value = STARTUP_EXPERIMENT_NONE
+        return [p_workspace, p_output, p_perf, p_redraw, p_benchmark, p_startup]
 
     def execute(self, parameters, messages):
         """Open the dashboard against the resolved saved-game geodatabase."""
@@ -147,19 +167,31 @@ class PermitOfficePrototype(object):
         _perf.set_enabled(bool(parameters[P_PERF].value))
         redraw_experiment = str(parameters[P_REDRAW_EXPERIMENT].value or "").strip()
         benchmark_runs = int(parameters[P_REDRAW_BENCHMARK_RUNS].value or 0)
+        startup_experiment = normalize_startup_experiment(parameters[P_STARTUP_EXPERIMENT].value)
         if redraw_experiment and redraw_experiment != "None":
             os.environ[REDRAW_EXPERIMENT_ENV] = redraw_experiment
             messages.addMessage(f"[EXPERIMENT] selected {redraw_experiment}")
         else:
             os.environ.pop(REDRAW_EXPERIMENT_ENV, None)
-        gdb_path = resolve_workspace(parameters[P_WORKSPACE].value, messages)
-        paths = ensure_schema(gdb_path, messages)
-        ensure_active_map(messages)
-        # Detect an empty map BEFORE adding any layers: a save in this workspace
-        # with no Permit Office layers on the map opens to a fresh-start prompt
-        # instead of silently resuming the old board.
-        offer_fresh_start = has_saved_game(paths) and not output_layers_present()
-        seed = prepare_dashboard_session(paths, 2026, messages, resume=not offer_fresh_start)
-        run_redraw_benchmark(paths, messages, benchmark_runs)
-        DashboardController(paths, DISTRICTS, seed, messages, offer_fresh_start=offer_fresh_start).open()
+        if startup_experiment != STARTUP_EXPERIMENT_NONE:
+            os.environ[STARTUP_EXPERIMENT_ENV] = startup_experiment
+            messages.addMessage(f"[STARTUP] selected {startup_experiment}")
+        else:
+            os.environ.pop(STARTUP_EXPERIMENT_ENV, None)
+        with _perf.perf_session("startup", messages):
+            with _perf.perf_block("workspace"):
+                gdb_path = resolve_workspace(parameters[P_WORKSPACE].value, messages)
+            with _perf.perf_block("schema"):
+                paths = ensure_schema(gdb_path, messages)
+            seed = 2026
+        DashboardController(
+            paths,
+            DISTRICTS,
+            seed,
+            messages,
+            startup_experiment=startup_experiment,
+            # Deferred until after the dashboard frame renders:
+            # run_redraw_benchmark(paths, messages, benchmark_runs)
+            benchmark_runs=benchmark_runs,
+        ).open()
         arcpy.SetParameterAsText(P_OUTPUT, paths["districts"])

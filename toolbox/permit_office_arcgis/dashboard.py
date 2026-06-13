@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 import traceback
 import os
+import threading
+from concurrent import futures as concurrent_futures
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -20,10 +22,12 @@ from .geometry import (
     add_outputs_to_map,
     activate_proposal,
     case_proposal_visible,
+    ensure_active_map,
     ensure_case_proposal,
     hide_case_proposal,
     insert_or_replace_proposal,
     mark_proposals,
+    output_layers_present,
     proposal_spillover,
     proposal_visible_map,
     refresh_all,
@@ -61,8 +65,10 @@ from .redraw_plan import hydrate_decision_redraw_plan, layer_names_for_plan
 
 WEEK_DEADLINE_SECONDS = 150
 TIMER_TICK_MS = 1000
+TICKER_TICK_MS = 90
+TICKER_STEP_PX = 3
+STATUS_TEXT_HOLD_SECONDS = 6.0
 QUEUE_AUTOCLOSE_SECONDS = 2
-STARTUP_GEOMETRY = "1360x1040"
 STARTUP_MIN_SIZE = (1180, 860)
 WORK_WEEK_DAYS = (
     ("MON INTAKE", "New applications logged. Triage high-risk packets."),
@@ -80,6 +86,69 @@ REDRAW_BENCHMARK_VARIANTS = (
     ("district-ring", "district-ring"),
     ("predrawn-rehydrate", "predrawn-rehydrate"),
 )
+STARTUP_EXPERIMENT_ENV = "PERMIT_OFFICE_STARTUP_EXPERIMENT"
+STARTUP_EXPERIMENT_NONE = "None"
+STARTUP_EXPERIMENT_THREADED_CACHE = "threaded-cache"
+STARTUP_EXPERIMENT_THREADED_ARCPY_READ_PROBE = "threaded-arcpy-read-probe"
+STARTUP_EXPERIMENTS = frozenset(
+    (
+        STARTUP_EXPERIMENT_NONE,
+        STARTUP_EXPERIMENT_THREADED_CACHE,
+    )
+)
+STARTUP_EXPERIMENT_TIMEOUT_SECONDS = 1.0
+STARTUP_SESSION_DELAY_MS = 50
+_startup_probe_state = threading.local()
+
+
+def normalize_startup_experiment(value):
+    """Return a supported startup/threading experiment name."""
+
+    text = str(value or "").strip()
+    if not text or text == STARTUP_EXPERIMENT_NONE:
+        return STARTUP_EXPERIMENT_NONE
+    if text in STARTUP_EXPERIMENTS:
+        return text
+    return STARTUP_EXPERIMENT_NONE
+
+
+def _startup_probe_active():
+    """Return True while running the opt-in worker probe."""
+
+    return bool(getattr(_startup_probe_state, "active", False))
+
+
+def _startup_worker_active():
+    """Return True while any startup diagnostic worker is running."""
+
+    return _startup_probe_active()
+
+
+def _run_startup_worker(fn):
+    """Run one diagnostic worker while marking thread-local worker state."""
+
+    _startup_probe_state.active = True
+    try:
+        return fn()
+    finally:
+        _startup_probe_state.active = False
+
+
+def _startup_cache_probe(state, districts, items, active_features, saved_game):
+    """Exercise pure model/cache precompute against current rows off Tk."""
+
+    build_desk_model(
+        state,
+        districts,
+        items,
+        "",
+        "",
+        {},
+        active_features=active_features,
+        audit_grade="PASS",
+        game_active=saved_game,
+    )
+    return "cache"
 
 
 def prepare_dashboard_session(paths, seed, messages, resume=True):
@@ -139,20 +208,34 @@ def _configure_dashboard_window(root):
     is unavailable (e.g. a fake root in tests).
     """
 
+    geometry = _startup_geometry(root)
     root.minsize(*STARTUP_MIN_SIZE)
-    root.geometry(STARTUP_GEOMETRY)
+    root.geometry(geometry)
 
     def _enforce():
         try:
             root.update_idletasks()
             if root.winfo_width() < STARTUP_MIN_SIZE[0] or root.winfo_height() < STARTUP_MIN_SIZE[1]:
-                root.geometry(STARTUP_GEOMETRY)
+                root.geometry(geometry)
         except Exception:
             pass
     try:
         root.after(80, _enforce)
     except Exception:
         _enforce()
+
+
+def _startup_geometry(root):
+    """Return a left-half screen geometry with sane minimum dimensions."""
+
+    try:
+        screen_w = int(root.winfo_screenwidth())
+        screen_h = int(root.winfo_screenheight())
+    except Exception:
+        screen_w, screen_h = 2720, 1080
+    width = max(STARTUP_MIN_SIZE[0], screen_w // 2)
+    height = max(STARTUP_MIN_SIZE[1], screen_h - 40)
+    return f"{width}x{height}+0+0"
 
 
 class _StatusProxy:
@@ -171,7 +254,7 @@ class _StatusProxy:
     def set(self, value):
         """Store a coerced, non-None status string on the controller."""
 
-        self.controller.status_text = str(value or "")
+        self.controller._set_status_text(value)
 
     def get(self):
         """Return the controller's current status string."""
@@ -191,7 +274,16 @@ class DashboardController:
     bookkeeping that `reload()` re-derives from persisted rows.
     """
 
-    def __init__(self, paths, district_layer, seed, messages, offer_fresh_start=False):
+    def __init__(
+        self,
+        paths,
+        district_layer,
+        seed,
+        messages,
+        offer_fresh_start=False,
+        startup_experiment=STARTUP_EXPERIMENT_NONE,
+        benchmark_runs=0,
+    ):
         """Wire paths, the district layer name, the run seed, and GP messages.
 
         Initializes UI/session state (selection, report tabs, deadline timer,
@@ -206,7 +298,13 @@ class DashboardController:
         self.seed = seed
         self.messages = messages
         self._offer_fresh_start = offer_fresh_start
+        self._startup_experiment = normalize_startup_experiment(startup_experiment)
+        self._startup_experiment_ran = False
+        self._startup_session_prepared = False
+        self._startup_session_scheduled = False
+        self._benchmark_runs = benchmark_runs
         self.status_text = ""
+        self._status_hold_until = 0.0
         self.selected_item_id = ""
         self.last_receipt = None
         self.report_tabs = []
@@ -223,6 +321,9 @@ class DashboardController:
         self._deadline_started = 0.0
         self._deadline_after_id = None
         self._deadline_running = False
+        self._ticker_after_id = None
+        self._ticker_index = 0
+        self._ticker_offset_px = 0
         self._command_busy = False
         # Audit grade is expensive (scorecard + two deepcopies of 25 districts).
         # Cache it and recompute only when a write path marks it dirty, so
@@ -231,6 +332,79 @@ class DashboardController:
         self._grade_dirty = True
         self._command_index = 0
         self._future_cache = None
+
+    def _run_startup_experiment_once(self, state, districts, items, active_features, saved_game):
+        """Run the opt-in startup/threading diagnostic and fall back silently."""
+
+        experiment = self._startup_experiment
+        if self._startup_experiment_ran or experiment == STARTUP_EXPERIMENT_NONE:
+            return
+        self._startup_experiment_ran = True
+        started = time.perf_counter()
+        executor = concurrent_futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="permit-startup")
+        active_future = None
+        try:
+            active_future = executor.submit(
+                _run_startup_worker,
+                lambda: _startup_cache_probe(state, districts, items, active_features, saved_game),
+            )
+            result = active_future.result(timeout=STARTUP_EXPERIMENT_TIMEOUT_SECONDS)
+            elapsed = time.perf_counter() - started
+            _log(self.messages, "STARTUP", f"{experiment} probe={result} elapsed={elapsed:.3f}")
+        except concurrent_futures.TimeoutError:
+            if active_future is not None:
+                active_future.cancel()
+            _warn(self.messages, "STARTUP", f"{experiment} timed out; falling back to synchronous startup")
+        except Exception as exc:
+            _warn(self.messages, "STARTUP", f"{experiment} failed: {exc}; falling back to synchronous startup")
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    def schedule_startup_session_preparation(self):
+        """Schedule map/session preparation after the first dashboard frame."""
+
+        if self._startup_session_scheduled:
+            return
+        self._startup_session_scheduled = True
+
+        def _after_paint_delay():
+            try:
+                self.root.after(STARTUP_SESSION_DELAY_MS, self.prepare_startup_session)
+            except Exception:
+                self.prepare_startup_session()
+
+        try:
+            self.root.after_idle(_after_paint_delay)
+        except Exception:
+            _after_paint_delay()
+
+    def prepare_startup_session(self):
+        """Run deferred ArcGIS map/session work after initial Tk rendering."""
+
+        if self._startup_session_prepared:
+            return
+        self._startup_session_prepared = True
+        with perf_session("startup_session", self.messages):
+            if self._startup_experiment != STARTUP_EXPERIMENT_NONE:
+                with perf_block("startup_experiment"):
+                    state, districts, items, active_features, offering_fresh = self._resolve_session_state(
+                        None, None, None, None
+                    )
+                    saved_game = has_saved_game(self.paths) and not offering_fresh
+                    self._run_startup_experiment_once(state, districts, items, active_features, saved_game)
+            with perf_block("active_map"):
+                ensure_active_map(self.messages)
+            with perf_block("saved_game_probe"):
+                offer_fresh_start = has_saved_game(self.paths) and not output_layers_present()
+            if offer_fresh_start:
+                self._offer_fresh_start = True
+                _log(self.messages, "DASH", "saved game present but no Permit Office layers on map; offering fresh start")
+                self.reload()
+                return
+            with perf_block("dashboard_session"):
+                self.seed = prepare_dashboard_session(self.paths, self.seed, self.messages, resume=True)
+            with perf_block("redraw_benchmark"):
+                run_redraw_benchmark(self.paths, self.messages, self._benchmark_runs)
 
     def open(self):
         try:
@@ -272,7 +446,9 @@ class DashboardController:
         self.view = PermitDeskView(self.root, callbacks, self.select_item)
 
         self.reload()
+        self.schedule_startup_session_preparation()
         self._schedule_deadline_tick()
+        self._schedule_ticker_tick()
         self.root.mainloop()
 
     def select_item(self, item_id):
@@ -284,9 +460,9 @@ class DashboardController:
         if item:
             try:
                 select_case_context(self.paths, self.district_layer, item, self.seed, self.messages)
-                self.status_text = f"Selected {item.title}; map context updated."
+                self._set_status_text(f"Selected {item.title}; map context updated.")
             except Exception as exc:
-                self.status_text = f"Map selection failed: {exc}"
+                self._set_status_text(f"Map selection failed: {exc}")
                 _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
         self.reload()
 
@@ -377,6 +553,7 @@ class DashboardController:
         self.selected_item_id = model.selected_item_id
         self.selected_report_id = model.selected_report_id
         self.selected_desk_tab = model.selected_desk_tab
+        self._ticker_index = 0
         self.view.render(model)
 
     def _record_receipt(self, title, report, affected, state):
@@ -588,6 +765,12 @@ class DashboardController:
             return note
         return ""
 
+    def _set_status_text(self, value):
+        """Set transient command status before ambient ticker resumes."""
+
+        self.status_text = str(value or "")
+        self._status_hold_until = time.monotonic() + STATUS_TEXT_HOLD_SECONDS if self.status_text else 0.0
+
     def _schedule_deadline_tick(self):
         """Keep the live clock moving without reloading ArcGIS rows."""
 
@@ -597,6 +780,38 @@ class DashboardController:
             self._deadline_after_id = self.root.after(TIMER_TICK_MS, self._deadline_tick)
         except Exception:
             self._deadline_after_id = None
+
+    def _schedule_ticker_tick(self):
+        """Schedule the ambient status ticker without touching ArcGIS rows."""
+
+        if not getattr(self, "root", None):
+            return
+        try:
+            self._ticker_after_id = self.root.after(TICKER_TICK_MS, self._ticker_tick)
+        except Exception:
+            self._ticker_after_id = None
+
+    def _ticker_tick(self):
+        """Advance the ambient ticker through the lightweight status-strip path."""
+
+        try:
+            if self._command_busy:
+                return
+            if self.status_text:
+                if time.monotonic() < getattr(self, "_status_hold_until", 0.0):
+                    return
+                self.status_text = ""
+                self._status_hold_until = 0.0
+            view = getattr(self, "view", None)
+            model = getattr(view, "model", None)
+            ticker_items = tuple(getattr(model, "ticker_items", ()) or ())
+            if not ticker_items or not hasattr(view, "update_status_marquee"):
+                return
+            self._ticker_offset_px += TICKER_STEP_PX
+            self._ticker_index = self._ticker_offset_px
+            view.update_status_marquee(self._ticker_offset_px)
+        finally:
+            self._schedule_ticker_tick()
 
     def _deadline_tick(self):
         """Advance daily pressure and close the week when the deadline expires."""

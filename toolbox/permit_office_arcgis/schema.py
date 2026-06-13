@@ -21,12 +21,17 @@ GAME_STATE = "PermitGameState"
 PROJECTS = "PermitProjects"
 COMMANDS = "PermitUICommand"
 ACTION_LOG = "PermitActionLog"
+SCHEMA_META = "PermitSchemaMeta"
+SCHEMA_VERSION = "2026-06-12-startup-schema-v1"
+SCHEMA_VERSION_KEY = "schema_version"
+WEB_MERCATOR_WKID = 3857
 
 P_WORKSPACE = 0
 P_OUTPUT = 1
 P_PERF = 2
 P_REDRAW_EXPERIMENT = 3
 P_REDRAW_BENCHMARK_RUNS = 4
+P_STARTUP_EXPERIMENT = 5
 
 DISTRICT_FIELDS = [
     ("cell_id", "TEXT", "District ID", 32),
@@ -165,12 +170,34 @@ ACTION_LOG_FIELDS = [
     ("city_delta", "TEXT", "City Delta", 512),
 ]
 
+SCHEMA_META_FIELDS = [
+    ("key", "TEXT", "Key", 64),
+    ("value_text", "TEXT", "Value Text", 2048),
+]
+
 LEGACY_CITY_HEALTH_FIELD_MIGRATIONS = {
     "prosperity": "activity",
     "unrest": "friction",
     "culture": "trust",
     "risk": "exposure",
 }
+
+
+def schema_paths(gdb_path):
+    """Return the canonical dataset paths for a Permit Office geodatabase."""
+
+    return {
+        "districts": os.path.join(gdb_path, DISTRICTS),
+        "points": os.path.join(gdb_path, POINTS),
+        "lines": os.path.join(gdb_path, LINES),
+        "zones": os.path.join(gdb_path, ZONES),
+        "docket": os.path.join(gdb_path, DOCKET),
+        "state": os.path.join(gdb_path, GAME_STATE),
+        "projects": os.path.join(gdb_path, PROJECTS),
+        "commands": os.path.join(gdb_path, COMMANDS),
+        "action_log": os.path.join(gdb_path, ACTION_LOG),
+        "schema_meta": os.path.join(gdb_path, SCHEMA_META),
+    }
 
 
 def resolve_workspace(value, messages):
@@ -231,6 +258,34 @@ def add_field_if_missing(table, name, field_type, alias=None, length=None):
     return True
 
 
+def _spatial_reference_wkid(spatial_ref):
+    """Return a usable WKID from an ArcPy SpatialReference-like object."""
+
+    for attr in ("factoryCode", "wkid", "latestWkid"):
+        value = getattr(spatial_ref, attr, 0)
+        try:
+            wkid = int(value or 0)
+        except (TypeError, ValueError):
+            wkid = 0
+        if wkid:
+            return wkid
+    return 0
+
+
+def normalized_spatial_reference(spatial_ref, messages=None):
+    """Return a freshly constructed SR safe for CreateFeatureclass.
+
+    ArcGIS Pro 3.3.2 can crash when the active-map SpatialReference COM object is
+    passed straight into CreateFeatureclass. Use only its stable WKID and build a
+    new arcpy.SpatialReference instance, falling back to Web Mercator.
+    """
+
+    wkid = _spatial_reference_wkid(spatial_ref) or WEB_MERCATOR_WKID
+    if wkid == WEB_MERCATOR_WKID and _spatial_reference_wkid(spatial_ref) == 0:
+        _log(messages, "MAP", "using Web Mercator (3857)")
+    return arcpy.SpatialReference(wkid)
+
+
 def ensure_table(gdb_path, name, fields, messages):
     """Create or update a non-spatial table with the configured fields."""
 
@@ -248,7 +303,12 @@ def ensure_feature_class(gdb_path, name, geometry_type, fields, spatial_ref, mes
 
     path = os.path.join(gdb_path, name)
     if not arcpy.Exists(path):
-        arcpy.management.CreateFeatureclass(gdb_path, name, geometry_type, spatial_reference=spatial_ref)
+        arcpy.management.CreateFeatureclass(
+            gdb_path,
+            name,
+            geometry_type,
+            spatial_reference=normalized_spatial_reference(spatial_ref, messages),
+        )
         _log(messages, "SCHEMA", f"created feature class: {name}")
     for field in fields:
         add_field_if_missing(path, *field)
@@ -293,19 +353,63 @@ def active_spatial_reference(messages):
         aprx = arcpy.mp.ArcGISProject("CURRENT")
         active_map = aprx.activeMap
         sr = getattr(active_map, "spatialReference", None) if active_map else None
-        if sr is not None and getattr(sr, "factoryCode", 0):
-            _log(messages, "MAP", f"using active map spatial reference (wkid {sr.factoryCode})")
-            return sr
+        wkid = _spatial_reference_wkid(sr)
+        if wkid:
+            _log(messages, "MAP", f"using active map spatial reference (wkid {wkid})")
+            return normalized_spatial_reference(sr, messages)
         _log(messages, "MAP", "active map has no usable spatial reference; using Web Mercator (3857)")
     except Exception as exc:
         _warn(messages, "MAP", f"active map SR unavailable ({exc}); using Web Mercator (3857)")
-    return arcpy.SpatialReference(3857)
+    return arcpy.SpatialReference(WEB_MERCATOR_WKID)
+
+
+def _schema_marker_current(state_path):
+    """Return True when the additive schema marker matches this code version."""
+
+    with arcpy.da.SearchCursor(state_path, ["key", "value_text"]) as cursor:
+        for key, value_text in cursor:
+            if key == SCHEMA_VERSION_KEY:
+                return str(value_text or "") == SCHEMA_VERSION
+    return False
+
+
+def _schema_fast_path_current(paths, messages):
+    """Return True when expected datasets and the schema marker are present."""
+
+    if not all(arcpy.Exists(path) for path in paths.values()):
+        return False
+    try:
+        if _schema_marker_current(paths["schema_meta"]):
+            _log(messages, "SCHEMA", f"fast path schema={SCHEMA_VERSION}")
+            return True
+    except Exception as exc:
+        _warn(messages, "SCHEMA", f"fast path unavailable: {exc}")
+    return False
+
+
+def _mark_schema_current(paths, messages):
+    """Persist the current additive schema marker in the game-state table."""
+
+    try:
+        with arcpy.da.UpdateCursor(paths["schema_meta"], ["key", "value_text"]) as cursor:
+            for row in cursor:
+                if row[0] == SCHEMA_VERSION_KEY:
+                    row[1] = SCHEMA_VERSION
+                    cursor.updateRow(row)
+                    return
+        with arcpy.da.InsertCursor(paths["schema_meta"], ["key", "value_text"]) as cursor:
+            cursor.insertRow([SCHEMA_VERSION_KEY, SCHEMA_VERSION])
+    except Exception as exc:
+        _warn(messages, "SCHEMA", f"schema marker not written: {exc}")
 
 
 def ensure_schema(gdb_path, messages):
     """Ensure all active feature classes and tables exist in the game geodatabase."""
 
     ensure_gdb(gdb_path, messages)
+    paths = schema_paths(gdb_path)
+    if _schema_fast_path_current(paths, messages):
+        return paths
     sr = active_spatial_reference(messages)
     paths = {
         "districts": ensure_feature_class(gdb_path, DISTRICTS, "POLYGON", DISTRICT_FIELDS, sr, messages),
@@ -317,8 +421,10 @@ def ensure_schema(gdb_path, messages):
         "projects": ensure_table(gdb_path, PROJECTS, PROJECT_FIELDS, messages),
         "commands": ensure_table(gdb_path, COMMANDS, COMMAND_FIELDS, messages),
         "action_log": ensure_table(gdb_path, ACTION_LOG, ACTION_LOG_FIELDS, messages),
+        "schema_meta": ensure_table(gdb_path, SCHEMA_META, SCHEMA_META_FIELDS, messages),
     }
     migrate_legacy_city_health_fields(paths["districts"], messages)
+    _mark_schema_current(paths, messages)
     return paths
 
 
