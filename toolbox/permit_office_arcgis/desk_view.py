@@ -572,31 +572,64 @@ class PermitDeskView:
         y = y0 + 52
         last_group = ""
         group_filter = set(groups or ())
-        rows = [row for row in self.model.map_legend_rows if not group_filter or row.group in group_filter]
+        if group_filter == {"Selection"} and self.model.case_map_symbols:
+            rows = list(self.model.case_map_symbols)
+        else:
+            rows = [row for row in self.model.map_legend_rows if not group_filter or row.group in group_filter]
         if groups:
             order = {group: index for index, group in enumerate(groups)}
-            rows.sort(key=lambda row: order.get(row.group, len(order)))
+            rows.sort(key=lambda row: order.get(getattr(row, "group", "Selection"), len(order)))
         for row in rows:
             if y > y1 - 30:
                 break
-            if row.group != last_group:
-                c.create_text(x0 + 12, y, text=row.group, anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
-                field = LEGEND_GROUP_FIELDS.get(row.group)
+            group = getattr(row, "group", "Selection")
+            if group != last_group:
+                c.create_text(x0 + 12, y, text=group, anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
+                field = LEGEND_GROUP_FIELDS.get(group)
                 if field:
                     c.create_text(x0 + 12, y + 14, text=field, anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
                     y += 31
                 else:
                     y += 18
-                last_group = row.group
+                last_group = group
             self._draw_map_key_row(c, x0 + 12, y, x1 - 12, row)
             y += 31
 
     def _draw_map_key_row(self, c, x0, y0, x1, row):
         """Draw one bounded legend row with swatch, label, and detail."""
 
-        self._draw_legend_symbol(c, x0, y0 + 1, row)
-        c.create_text(x0 + 20, y0 - 1, text=self._fit_px(row.label, 8, "bold", x1 - x0 - 20), anchor="nw", fill=Palette.INK, font=self._font(8, "bold"))
-        c.create_text(x0 + 20, y0 + 13, text=self._fit_px(row.detail, 7, "normal", x1 - x0 - 20), anchor="nw", fill=Palette.MUTED, font=self._font(7))
+        if hasattr(row, "group"):
+            self._draw_legend_symbol(c, x0, y0 + 1, row)
+        else:
+            self._draw_case_symbol(c, x0, y0 + 1, row)
+        state = getattr(row, "state", "")
+        label_w = x1 - x0 - (52 if state else 20)
+        c.create_text(x0 + 20, y0 - 1, text=self._fit_px(row.label, 8, "bold", label_w), anchor="nw", fill=Palette.INK, font=self._font(8, "bold"))
+        c.create_text(x0 + 20, y0 + 13, text=self._fit_px(row.detail, 7, "normal", label_w), anchor="nw", fill=Palette.MUTED, font=self._font(7))
+        if state:
+            c.create_text(x1, y0 - 1, text=_clip(state, 5), anchor="ne", fill=_tone_color(getattr(row, "tone", "neutral")), font=self._font(7, "bold"))
+
+    def _draw_case_symbol(self, c, x0, y0, row):
+        """Draw a map symbol matching the row geometry when available."""
+
+        shape = getattr(row, "shape", "")
+        swatch = getattr(row, "swatch", Palette.LINE) or Palette.LINE
+        if shape == "line":
+            if hasattr(c, "_record"):
+                c._record("symbol-line", (x0, y0 + 9, x0 + 18, y0 + 9), {})
+            c.create_line(x0, y0 + 9, x0 + 18, y0 + 9, fill=swatch, width=4, capstyle="round")
+            return
+        if shape == "point":
+            if hasattr(c, "_record"):
+                c._record("symbol-point", (x0 + 2, y0 + 3, x0 + 14, y0 + 15), {})
+            c.create_oval(x0 + 2, y0 + 3, x0 + 14, y0 + 15, fill=swatch, outline=Palette.LINE)
+            return
+        if shape == "zone":
+            if hasattr(c, "_record"):
+                c._record("symbol-zone", (x0 + 1, y0 + 2, x0 + 17, y0 + 16), {})
+            c.create_rectangle(x0 + 1, y0 + 2, x0 + 17, y0 + 16, fill=swatch, outline=Palette.LINE)
+            return
+        self._draw_legend_symbol(c, x0, y0, row)
 
     def _draw_legend_symbol(self, c, x0, y0, row):
         """Draw a Contents-style symbol matched to the represented layer."""
@@ -1170,10 +1203,8 @@ class PermitDeskView:
             c.create_rectangle(cx0, cy0, cx1, cy0 + cell_h, fill=Palette.PAPER_ALT, outline=Palette.LINE)
             c.create_text(cx0 + 8, cy0 + 7, text=row.label.upper(), anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
             c.create_text(cx1 - 8, cy0 + 7, text=_clip(row.value, 8), anchor="ne", fill=tone, font=self._font(10, "bold"))
-            pct = max(0, min(100, int(row.meter or 0)))
-            c.create_rectangle(cx0 + 8, cy0 + 34, cx1 - 8, cy0 + 40, fill="#dce5e1", outline="")
-            if pct:
-                c.create_rectangle(cx0 + 8, cy0 + 34, cx0 + 8 + int((cx1 - cx0 - 16) * pct / 100), cy0 + 40, fill=tone, outline="")
+            self._draw_sparkline(c, cx0 + 8, cy0 + 29, cx1 - 28, cy0 + 43, row.points, tone)
+            c.create_text(cx1 - 8, cy0 + 30, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(9, "bold"))
         return y + (cell_h * 2) + gap
 
     def _draw_group_row(self, c, x0, x1, y, row):
@@ -1181,10 +1212,33 @@ class PermitDeskView:
 
         tone = _tone_color(row.tone)
         c.create_rectangle(x0, y, x1, y + 34, fill=Palette.PAPER_ALT, outline=Palette.LINE)
-        c.create_text(x0 + 8, y + 5, text=self._fit_px(row.label, 8, "bold", (x1 - x0) // 2), anchor="nw", fill=Palette.INK, font=self._font(8, "bold"))
-        c.create_text(x1 - 8, y + 5, text=row.state.upper(), anchor="ne", fill=tone, font=self._font(7, "bold"))
-        c.create_text(x0 + 8, y + 20, text=self._fit_px(row.detail, 7, "normal", x1 - x0 - 16), anchor="nw", fill=Palette.MUTED, font=self._font(7))
+        if hasattr(c, "_record"):
+            c._record("group-swatch", (x0 + 8, y + 10, x0 + 18, y + 20), {})
+        c.create_rectangle(x0 + 8, y + 10, x0 + 18, y + 20, fill=row.swatch or Palette.LINE, outline=Palette.LINE)
+        c.create_text(x0 + 26, y + 5, text=self._fit_px(row.label, 8, "bold", (x1 - x0) // 2), anchor="nw", fill=Palette.INK, font=self._font(8, "bold"))
+        self._draw_sparkline(c, x1 - 62, y + 10, x1 - 22, y + 24, row.points, tone)
+        c.create_text(x1 - 8, y + 5, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(8, "bold"))
+        c.create_text(x0 + 26, y + 20, text=self._fit_px(row.detail, 7, "normal", x1 - x0 - 90), anchor="nw", fill=Palette.MUTED, font=self._font(7))
         return y + 34
+
+    def _draw_sparkline(self, c, x0, y0, x1, y1, points, color):
+        """Draw a compact static sparkline from 0-100 point values."""
+
+        if hasattr(c, "_record"):
+            c._record("sparkline", (x0, y0, x1, y1), {})
+        pts = tuple(points or ())
+        if len(pts) < 2:
+            c.create_text(x1, y0, text="?", anchor="ne", fill=color, font=self._font(8, "bold"))
+            return
+        width = max(1, x1 - x0)
+        height = max(1, y1 - y0)
+        coords = []
+        for index, value in enumerate(pts):
+            px = x0 + int(width * index / max(1, len(pts) - 1))
+            py = y1 - int(height * max(0, min(100, int(value))) / 100)
+            coords.append((px, py))
+        for start, end in zip(coords, coords[1:]):
+            c.create_line(start[0], start[1], end[0], end[1], fill=color, width=2)
 
     def _draw_pulse_row(self, c, x0, x1, y, row):
         """Draw one city pulse signal."""

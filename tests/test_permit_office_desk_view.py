@@ -1608,6 +1608,46 @@ def test_office_standing_rail_keeps_threat_tracks_in_wire_ticker_not_pulse():
     assert "MAINTENANCE" not in texts
 
 
+def test_ledger_rows_include_trend_points_for_core_pulse_stats():
+    """Verify pulse stats carry static sparkline data for the view."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(activity=63, friction=28, trust=47, exposure=19), districts, [item], item.item_id)
+    ledger = {row.label: row for row in model.ledger_rows}
+
+    for label in ("Activity", "Trust", "Friction", "Exposure"):
+        assert ledger[label].trend in {"up", "down", "flat", "unknown"}
+        assert len(ledger[label].points) in {0, 6}
+
+
+def test_city_pulse_draws_sparklines_and_group_swatches():
+    """Verify the right rail draws trend graphics and culture swatches."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_ledger_rail(canvas, (0, 0, 300, 700))
+
+    assert any(kind == "sparkline" for kind, _args, _kwargs in canvas.created)
+    assert any(kind == "group-swatch" for kind, _args, _kwargs in canvas.created)
+
+
+def test_map_key_draws_shape_matched_case_symbols():
+    """Verify selected-case map symbols use point/line/zone glyphs."""
+
+    item, districts = _vendor_case()
+    item.geometry_type = "LINE"
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_map_key_rail(canvas, (0, 0, 240, 260), groups=("Selection",))
+
+    assert any(kind == "symbol-line" for kind, _args, _kwargs in canvas.created)
+
+
 def test_build_desk_model_does_not_mutate_districts_argument():
     """Verify scoring the Audit row leaves the caller's district profiles intact.
 
