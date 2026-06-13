@@ -829,47 +829,66 @@ class PermitDeskView:
             c._record("active-card", (x0, y0, x1, y1), {})
         _shadow_rect(c, x0 + 4, y0 + 5, x1 + 4, y1 + 5)
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.PAPER, outline=Palette.LINE, width=1)
-        c.create_rectangle(x0, y0, x1, y0 + 78, fill=Palette.WHITE, outline="")
-        c.create_line(x0, y0 + 78, x1, y0 + 78, fill=Palette.LINE)
+        header_h = 86
+        c.create_rectangle(x0, y0, x1, y0 + header_h, fill=Palette.WHITE, outline="")
+        c.create_line(x0, y0 + header_h, x1, y0 + header_h, fill=Palette.LINE)
 
         pad = 22
         body_x0 = x0 + pad
         body_x1 = x1 - pad
         risk_known = (case.risk_band or "unknown").lower() not in ("", "unknown")
         risk_text = "RISK: " + case.risk_band.upper() if risk_known else "RISK: PENDING"
-        c.create_text(body_x0, y0 + 18, text="DECISION BRIEF", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
-        c.create_text(body_x0, y0 + 40, text=self._fit_px(case.title, 16, "bold", body_x1 - body_x0 - 150), anchor="nw", fill=Palette.INK, font=self._font(16, "bold"))
-        self._draw_status_badge(c, body_x1 - 132, y0 + 34, body_x1, y0 + 60, risk_text, _risk_color(case.risk_band))
-        content_y0 = y0 + 92
+        title_x1 = body_x1 - 150
+        c.create_text(body_x0, y0 + 15, text="DECISION BRIEF", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
+        c.create_rectangle(body_x0, y0 + 32, title_x1, y0 + 64, fill=Palette.PAPER_ALT, outline=Palette.LINE, tags=("application-title-frame",))
+        c.create_text(body_x0 + 10, y0 + 39, text=self._fit_px(case.title, 13, "bold", title_x1 - body_x0 - 20), anchor="nw", fill=Palette.INK, font=self._font(13, "bold"))
+        self._draw_status_badge(c, body_x1 - 132, y0 + 35, body_x1, y0 + 61, risk_text, _risk_color(case.risk_band))
+        content_y0 = y0 + header_h + 16
         content_y1 = y1 - 16
         available = max(260, content_y1 - content_y0)
-        gap = 14
+        gap = 14 if available < 430 else 26
         if available < 430:
             min_action_h = 166
-            evidence_h = max(64, min(96, int(available * 0.22)))
-            info_h = max(62, min(90, available - (2 * gap) - min_action_h - evidence_h))
-            action_h = max(120, available - (2 * gap) - info_h - evidence_h)
-        else:
-            info_h = min(max(190, int(available * 0.42)), 260)
-            evidence_h = min(max(140, int(available * 0.24)), 170)
-            action_h = min(max(170, int(available * 0.34)), 218)
-            overflow = (info_h + evidence_h + action_h + (2 * gap)) - available
+            evidence_h = max(56, min(88, int(available * 0.20)))
+            info_h = max(56, min(96, available - (2 * gap) - min_action_h - evidence_h))
+            overflow = (info_h + evidence_h + min_action_h + (2 * gap)) - available
             if overflow > 0:
-                take = min(overflow, max(0, evidence_h - 110))
+                take = min(overflow, max(0, evidence_h - 52))
                 evidence_h -= take
                 overflow -= take
             if overflow > 0:
-                take = min(overflow, max(0, info_h - 160))
+                info_h = max(52, info_h - overflow)
+            action_h = max(min_action_h, available - (2 * gap) - info_h - evidence_h)
+        else:
+            action_h = min(max(178, int(available * 0.30)), 214)
+            evidence_h = min(max(116, int(available * 0.21)), 150)
+            info_h = available - (2 * gap) - action_h - evidence_h
+            if info_h < 180:
+                need = 180 - info_h
+                take = min(need, max(0, evidence_h - 108))
+                evidence_h -= take
+                need -= take
+                if need > 0:
+                    action_h = max(166, action_h - need)
+                info_h = available - (2 * gap) - action_h - evidence_h
+            info_h = min(info_h, 270)
+            overflow = (info_h + evidence_h + action_h + (2 * gap)) - available
+            if overflow > 0:
+                take = min(overflow, max(0, evidence_h - 108))
+                evidence_h -= take
+                overflow -= take
+            if overflow > 0:
+                take = min(overflow, max(0, info_h - 180))
                 info_h -= take
                 overflow -= take
             if overflow > 0:
-                action_h = max(150, action_h - overflow)
+                action_h = max(166, action_h - overflow)
         info_box = (body_x0, content_y0, body_x1, min(content_y1, content_y0 + info_h))
         evidence_y0 = info_box[3] + gap
         evidence_box = (body_x0, evidence_y0, body_x1, min(content_y1, evidence_y0 + evidence_h))
         action_y0 = evidence_box[3] + gap
         if hasattr(c, "_record"):
-            c._record("decision-info", (info_box[0], info_box[1], evidence_box[2], evidence_box[3]), {})
+            c._record("decision-info", (info_box[0], info_box[1], evidence_box[2], action_y0), {})
         self._draw_application_info_panel(c, info_box)
         self._draw_case_evidence_row(c, evidence_box)
         self._draw_case_controls(c, body_x0, action_y0, body_x1, min(content_y1, action_y0 + action_h))
@@ -885,9 +904,17 @@ class PermitDeskView:
         pad = 14
         tx0 = x0 + pad
         tx1 = x1 - pad
-        yy = y0 + pad
-        preview = "\n".join(_fit_lines(case.preview, max(44, (tx1 - tx0) // 8), 3))
-        yy = _text_bottom(c, tx0, yy, preview, self._font(10), Palette.MUTED, width=tx1 - tx0) + 12
+        applicant = next((field.value for field in case.fields if field.label.lower() == "applicant"), "not assigned")
+        contact = next((field.value for field in case.fields if field.label.lower() == "contact"), "")
+        strip_y0 = y0 + pad
+        strip_y1 = strip_y0 + 28
+        c.create_rectangle(tx0, strip_y0, tx1, strip_y1, fill=Palette.WHITE, outline=Palette.LINE, tags=("applicant-strip",))
+        c.create_text(tx0 + 10, strip_y0 + 8, text="APPLICANT", anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
+        contact_x = tx0 + max(260, int((tx1 - tx0) * 0.45))
+        c.create_text(tx0 + 88, strip_y0 + 7, text=self._fit_px(applicant, 9, "bold", contact_x - tx0 - 100), anchor="nw", fill=Palette.INK, font=self._font(9, "bold"))
+        if contact:
+            c.create_text(contact_x, strip_y0 + 8, text="CONTACT", anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
+            c.create_text(contact_x + 66, strip_y0 + 7, text=self._fit_px(contact, 9, "bold", tx1 - contact_x - 76), anchor="nw", fill=Palette.INK, font=self._font(9, "bold"))
         econ_text = ""
         econ_color = Palette.MUTED
         econ_y = y1
@@ -897,6 +924,15 @@ class PermitDeskView:
             econ_color = Palette.GREEN if "net +" in case.economy else Palette.RED if "net -" in case.economy else Palette.MUTED
             econ_y = max(y0 + pad, y1 - 20)
             c.create_text(tx0, econ_y, text=self._fit_px(econ_text, 9, "bold", tx1 - tx0), anchor="nw", fill=econ_color, font=self._font(9, "bold"))
+        desc_y0 = strip_y1 + 10
+        note_top_limit = (econ_y - 8) if econ_text else (y1 - 10)
+        desc_h = max(44, min(96, note_top_limit - desc_y0 - 58))
+        desc_y1 = min(note_top_limit - 12, desc_y0 + desc_h)
+        if desc_y1 > desc_y0:
+            c.create_rectangle(tx0, desc_y0, tx1, desc_y1, fill=Palette.WHITE, outline=Palette.LINE, tags=("description-block",))
+            preview_lines = _fit_lines(case.preview, max(44, (tx1 - tx0 - 22) // 8), max(1, (desc_y1 - desc_y0 - 14) // 16))
+            c.create_text(tx0 + 12, desc_y0 + 8, text="\n".join(preview_lines), anchor="nw", fill=Palette.MUTED, font=self._font(10), width=tx1 - tx0 - 24)
+        yy = desc_y1 + 10
         inspected = bool(case.inspection) and not case.inspection.lower().startswith("no inspection")
         note = case.inspection if inspected else "Uninspected: decision impacts are estimates. Inspect File may reveal violations or stronger stakeholder reactions."
         note_color = Palette.RED if inspected and case.risk_band == "high" else Palette.GOLD if not inspected else Palette.BLUE
@@ -912,6 +948,8 @@ class PermitDeskView:
 
         x0, y0, x1, y1 = box
         case = self.model.case
+        if hasattr(c, "_record"):
+            c._record("evidence-row", (x0, y0, x1, y1), {})
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.PAPER_ALT, outline=Palette.LINE)
         pad = 10
         gap = 22

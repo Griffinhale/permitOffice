@@ -1676,6 +1676,45 @@ def test_active_card_gives_brief_info_larger_than_evidence_row():
     assert info[3] - info[1] > grid[3] - grid[1]
 
 
+def test_decision_brief_draws_framed_title_and_applicant_block():
+    """Verify the active brief follows the skeleton title/applicant/description stack."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_active_card(canvas, (0, 0, 820, 680))
+
+    texts = _text_values(canvas)
+    info = next(args for kind, args, _kwargs in canvas.created if kind == "app-info")
+    title_frames = [args for kind, args, kwargs in canvas.created if kind == "rect" and kwargs.get("tags") == ("application-title-frame",)]
+    description_blocks = [args for kind, args, kwargs in canvas.created if kind == "rect" and kwargs.get("tags") == ("description-block",)]
+
+    assert "APPLICANT" in texts
+    assert "Vendor Compact Office" in texts
+    assert title_frames
+    assert description_blocks
+    assert description_blocks[0][3] - description_blocks[0][1] >= 72
+    assert info[3] - info[1] >= 210
+
+
+def test_decision_brief_keeps_evidence_and_actions_separated():
+    """Verify the evidence row breathes before the command tile row starts."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_active_card(canvas, (0, 0, 820, 680))
+
+    evidence = next(args for kind, args, _kwargs in canvas.created if kind == "evidence-row")
+    action_grid = next(args for kind, args, _kwargs in canvas.created if kind == "action-grid")
+
+    assert action_grid[1] - evidence[3] >= 18
+
+
 def test_action_cards_draw_hotkeys_and_disabled_reason():
     """Verify actions show hotkey hints and unavailable reasons."""
 
