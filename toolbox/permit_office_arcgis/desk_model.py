@@ -1493,7 +1493,7 @@ def _district_group_rows(districts) -> tuple[DistrictGroupRow, ...]:
                 _spark_points(score, trend),
             )
         )
-    return tuple(sorted(rows, key=lambda row: (row.meter, row.label))[:4])
+    return tuple(sorted(rows, key=lambda row: (row.meter, row.label)))
 
 
 def _district_table_rows(districts, selected) -> tuple[DistrictTableRow, ...]:

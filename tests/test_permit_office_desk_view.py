@@ -671,6 +671,30 @@ def test_build_desk_model_tracks_district_group_health_from_profiles():
     assert "pressure" in rows["Residential"].detail
 
 
+def test_build_desk_model_keeps_all_district_groups_visible_to_rail():
+    """Verify the city pulse receives every district type represented on the map."""
+
+    item, districts = _vendor_case()
+    for idx, district_type in enumerate(("residential", "industrial", "civic", "academic", "natural", "housing")):
+        profile = rules.DistrictProfile(
+            f"D10{idx}",
+            f"{district_type.title()} District",
+            700 + idx,
+            activity=42 - idx,
+            friction=22 + idx,
+            trust=38,
+            exposure=24,
+            services=44,
+            district_type=district_type,
+        )
+        districts[profile.cell_id] = rules.normalize_profile(profile)
+
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    labels = {row.label for row in model.district_group_rows}
+    assert labels >= {"Mercantile", "Residential", "Industrial", "Civic", "Academic", "Natural", "Housing"}
+
+
 def test_build_desk_model_exposes_district_attribute_rows():
     """Verify the wireframe bottom table has district state to render."""
 
@@ -1687,6 +1711,28 @@ def test_action_cards_draw_separate_impact_compartment():
     assert len(impact_boxes) >= 6
 
 
+def test_action_cards_place_hotkey_before_cost_and_graphical_impact():
+    """Verify action cards make command key, AP/cost, and impact separately scannable."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_active_card(canvas, (0, 0, 820, 680))
+
+    hotkeys = [(args, kwargs) for kind, args, kwargs in canvas.created if kind == "text" and kwargs.get("tags") == ("hotkey-badge",)]
+    costs = [(args, kwargs) for kind, args, kwargs in canvas.created if kind == "text" and kwargs.get("tags") == ("cost-line",)]
+    markers = [args for kind, args, kwargs in canvas.created if kind in {"line", "rect"} and kwargs.get("tags") == ("impact-marker",)]
+    impact_boxes = [args for kind, args, kwargs in canvas.created if kind == "rect" and kwargs.get("tags") == ("impact-box",)]
+
+    assert hotkeys
+    assert costs
+    assert hotkeys[0][0][0] < costs[0][0][0]
+    assert markers
+    assert max(box[2] - box[0] for box in impact_boxes) >= 104
+
+
 def test_office_standing_rail_keeps_threat_tracks_in_wire_ticker_not_pulse():
     """Verify City Pulse focuses on standing/stats while threats live in WIRE."""
 
@@ -1796,6 +1842,35 @@ def test_filed_reports_keep_attribute_table_under_report_and_pulse():
     pulse = next(args for kind, args, _kwargs in canvas.created if kind == "city-pulse")
     assert table[1] > report[3]
     assert table[3] >= 880
+
+
+def test_city_pulse_stops_above_external_attribute_table():
+    """Verify the right rail and live district table share the same vertical boundary."""
+
+    item, districts = _vendor_case()
+    for idx, district_type in enumerate(("residential", "industrial", "civic", "academic", "natural")):
+        profile = rules.DistrictProfile(
+            f"D20{idx}",
+            f"{district_type.title()} District",
+            800,
+            activity=44,
+            friction=22 + idx,
+            trust=40,
+            exposure=25,
+            services=43,
+            district_type=district_type,
+        )
+        districts[profile.cell_id] = rules.normalize_profile(profile)
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+
+    view._draw(1120, 900)
+
+    table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
+    pulse = next(args for kind, args, _kwargs in canvas.created if kind == "city-pulse")
+    assert pulse[3] <= table[1] - 8
 
 
 def test_map_key_draws_shape_matched_case_symbols():

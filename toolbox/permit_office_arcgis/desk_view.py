@@ -313,10 +313,8 @@ class PermitDeskView:
 
         external_table = bool(self.model.docket_rows) and self.model.selected_desk_tab in ("applications", "reports")
         if external_table:
-            body_h = body_y1 - body_y0
-            table_h = min(330, max(220, int(body_h * 0.28)))
-            top_y1 = body_y1 - table_h - gap
-            table_y0 = top_y1 + gap
+            table_y0 = _workspace_table_top((workspace_x0, body_y0, workspace_x1, body_y1))
+            top_y1 = table_y0 - gap
             self._external_attribute_table = (top_y1, table_y0, body_y1, health_x1)
             self._draw_main_workspace(c, (workspace_x0, body_y0, workspace_x1, body_y1))
             self._draw_ledger_rail(c, (health_x0, body_y0, health_x1, top_y1))
@@ -441,7 +439,7 @@ class PermitDeskView:
         work_y0 = detail_box[1] + 26
         if external_table:
             _top_y1, _table_y0, table_y1, table_x1 = external_table
-            table_y0 = key_y0
+            table_y0 = _table_y0
             work_box = (detail_box[0], work_y0, detail_box[2], min(detail_box[3], table_y0 - 44))
             table_box = (detail_box[0], table_y0, table_x1, table_y1)
         else:
@@ -1142,30 +1140,37 @@ class PermitDeskView:
         tone = color if enabled else Palette.MUTED
         c.create_rectangle(x0, y0, x1, y1, fill=fill, outline=outline, width=2 if hover else 1)
         c.create_rectangle(x0, y0, x0 + 4, y1, fill=tone, outline="")
-        impact_w = max(70, min(128, int((x1 - x0) * 0.32)))
-        impact_x0 = max(x0 + 92, x1 - impact_w)
+        impact_w = max(116, min(170, int((x1 - x0) * 0.46)))
+        impact_x0 = max(x0 + 112, x1 - impact_w)
         c.create_line(impact_x0, y0 + 7, impact_x0, y1 - 7, fill=Palette.LINE, tags=("impact-divider",))
-        c.create_rectangle(impact_x0 + 6, y0 + 10, x1 - 8, y1 - 10, fill=Palette.PAPER_ALT if enabled else Palette.PAPER, outline=Palette.LINE, tags=("impact-box",))
+        c.create_rectangle(impact_x0 + 4, y0 + 10, x1 - 6, y1 - 10, fill=Palette.PAPER_ALT if enabled else Palette.PAPER, outline=Palette.LINE, tags=("impact-box",))
         label_w = impact_x0 - x0 - 24
-        c.create_text(x0 + 12, y0 + 8, text=self._fit_px(label, 9, "bold", label_w), anchor="nw", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(9, "bold"))
+        c.create_text(x0 + 12, y0 + 8, text=label, anchor="nw", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(9, "bold"), width=label_w)
+        cost_x = x0 + 12
         if hotkey:
-            hk_x0 = impact_x0 - 28
-            c.create_rectangle(hk_x0, y0 + 7, impact_x0 - 8, y0 + 25, fill=Palette.PAPER_ALT, outline=Palette.LINE)
-            c.create_text((hk_x0 + impact_x0 - 8) // 2, y0 + 10, text=hotkey, anchor="n", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(7, "bold"))
-        c.create_text(x0 + 12, y0 + 31, text=cost, anchor="nw", fill=tone, font=self._font(8, "bold"), width=label_w)
-        impact_label_x = impact_x0 + 14
+            hk_x0 = x0 + 12
+            c.create_rectangle(hk_x0, y0 + 30, hk_x0 + 20, y0 + 48, fill=Palette.PAPER_ALT, outline=Palette.LINE, tags=("hotkey-badge",))
+            c.create_text(hk_x0 + 10, y0 + 33, text=hotkey, anchor="n", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(7, "bold"), tags=("hotkey-badge",))
+            cost_x = hk_x0 + 28
+        c.create_text(cost_x, y0 + 31, text=cost, anchor="nw", fill=tone, font=self._font(8, "bold"), width=max(40, impact_x0 - cost_x - 12), tags=("cost-line",))
+        impact_label_x = impact_x0 + 18
         impact_w_text = max(48, x1 - impact_label_x - 14)
         if isinstance(detail, tuple):
             city, local = detail
+            city_tone = _impact_tone(city)
+            local_tone = _impact_tone(local)
+            _draw_impact_marker(c, impact_x0 + 14, y0 + 21, city_tone)
             c.create_text(impact_label_x, y0 + 16, text="City", anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
             c.create_text(impact_label_x, y0 + 29, text=self._fit_px(city, 7, "normal", impact_w_text), anchor="nw", fill=Palette.INK, font=self._font(7), width=impact_w_text)
             local_y = y0 + 50 if y1 - y0 >= 78 else y0 + 46
+            _draw_impact_marker(c, impact_x0 + 14, local_y + 5, local_tone)
             c.create_text(impact_label_x, local_y, text="Local", anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
             c.create_text(impact_label_x, local_y + 13, text=self._fit_px(local, 7, "normal", impact_w_text), anchor="nw", fill=Palette.INK, font=self._font(7), width=impact_w_text)
             if not enabled and disabled_reason:
                 c.create_text(x0 + 12, y1 - 17, text=self._fit_px(disabled_reason, 7, "normal", label_w), anchor="nw", fill=Palette.MUTED, font=self._font(7))
         elif y1 - y0 >= 68:
             detail_lines = _fit_lines(detail, max(16, (x1 - x0 - 24) // 7), 3)
+            _draw_impact_marker(c, impact_x0 + 14, y0 + 26, _impact_tone(detail))
             c.create_text(impact_label_x, y0 + 18, text="\n".join(detail_lines), anchor="nw", fill=Palette.MUTED, font=self._font(7), width=impact_w_text)
             if not enabled and disabled_reason:
                 c.create_text(x0 + 12, y1 - 17, text=self._fit_px(disabled_reason, 7, "normal", label_w), anchor="nw", fill=Palette.MUTED, font=self._font(7))
@@ -1227,10 +1232,14 @@ class PermitDeskView:
         if self.model.district_group_rows and y < y1 - 70:
             c.create_text(inner_x0, y, text="DISTRICT GROUPS", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
             y += 18
-            for row in self.model.district_group_rows[:4]:
-                if y + 52 > y1 - 14:
+            group_rows = tuple(self.model.district_group_rows)
+            available = max(0, y1 - 14 - y)
+            row_gap = 8
+            row_h = 56 if len(group_rows) <= 4 else max(38, min(56, (available - row_gap * max(0, len(group_rows) - 1)) // max(1, len(group_rows))))
+            for row in group_rows:
+                if y + row_h > y1 - 14:
                     break
-                y = self._draw_group_row(c, inner_x0, inner_x1, y, row) + 8
+                y = self._draw_group_row(c, inner_x0, inner_x1, y, row, row_h=row_h) + row_gap
 
     def _draw_map_state_key(self, c, x0, y0, x1, y1):
         """Draw district and map-state symbology in the right rail."""
@@ -1281,19 +1290,18 @@ class PermitDeskView:
             c.create_text(cx1 - 8, cy0 + 54, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(8, "bold"))
         return y + (cell_h * 2) + gap
 
-    def _draw_group_row(self, c, x0, x1, y, row):
+    def _draw_group_row(self, c, x0, x1, y, row, row_h=46):
         """Draw one district group health row."""
 
         tone = _tone_color(row.tone)
-        row_h = 46
         c.create_rectangle(x0, y, x1, y + row_h, fill=Palette.PAPER_ALT, outline=Palette.LINE)
         if hasattr(c, "_record"):
             c._record("group-swatch", (x0 + 8, y + 10, x0 + 18, y + 20), {})
         c.create_rectangle(x0 + 8, y + 10, x0 + 18, y + 20, fill=row.swatch or Palette.LINE, outline=Palette.LINE)
         c.create_text(x0 + 26, y + 5, text=self._fit_px(row.label, 8, "bold", (x1 - x0) // 2), anchor="nw", fill=Palette.INK, font=self._font(8, "bold"))
-        self._draw_sparkline(c, x1 - 86, y + 12, x1 - 22, y + 30, row.points, tone)
+        self._draw_sparkline(c, x1 - 96, y + 14, x1 - 22, min(y + row_h - 14, y + 38), row.points, tone)
         c.create_text(x1 - 8, y + 5, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(8, "bold"))
-        c.create_text(x0 + 26, y + 20, text=self._fit_px(row.detail, 7, "normal", x1 - x0 - 110), anchor="nw", fill=Palette.MUTED, font=self._font(7))
+        c.create_text(x0 + 26, y + 22, text=self._fit_px(row.detail, 7, "normal", x1 - x0 - 120), anchor="nw", fill=Palette.MUTED, font=self._font(7))
         return y + row_h
 
     def _draw_sparkline(self, c, x0, y0, x1, y1, points, color):
@@ -1683,6 +1691,18 @@ def _folder_key_top(rail_box):
     return y1 - key_h
 
 
+def _workspace_table_top(workspace_box):
+    """Return the shared top edge for the live attribute table."""
+
+    x0, y0, x1, y1 = workspace_box
+    content = (x0 + 12, y0 + 12, x1 - 12, y1 - 12)
+    panel_y0 = content[1] + 8
+    panel_y1 = content[3]
+    rail_w = min(252, max(230, int((content[2] - content[0]) * 0.25)))
+    rail_box = (content[0], panel_y0, content[0] + rail_w, panel_y1)
+    return _folder_key_top(rail_box)
+
+
 def _legend_subset(rows, group, labels):
     """Return legend rows from a group in a specific public order."""
 
@@ -1792,6 +1812,33 @@ def _tone_color(tone):
     if tone == "watch":
         return Palette.GOLD
     return Palette.INK
+
+
+def _impact_tone(value):
+    """Infer a tiny visual impact tone from a lane summary string."""
+
+    text = str(value or "").lower()
+    if "?" in text or "unknown" in text or "reveal" in text:
+        return "watch"
+    if any(token in text for token in ("-", "risk", "pressure", "friction", "exposure", "unresolved", "return", "heat")):
+        return "bad"
+    if any(token in text for token in ("+", "trust", "stabil", "reduce", "conditions")):
+        return "good"
+    return "neutral"
+
+
+def _draw_impact_marker(c, x, y, tone):
+    """Draw a small colored impact direction marker."""
+
+    color = _tone_color(tone)
+    if tone == "good":
+        c.create_line(x, y + 6, x, y - 6, fill=color, width=2, arrow="last", tags=("impact-marker",))
+    elif tone == "bad":
+        c.create_line(x, y - 6, x, y + 6, fill=color, width=2, arrow="last", tags=("impact-marker",))
+    elif tone == "watch":
+        c.create_rectangle(x - 4, y - 4, x + 4, y + 4, fill=color, outline=color, tags=("impact-marker",))
+    else:
+        c.create_line(x - 5, y, x + 5, y, fill=color, width=2, tags=("impact-marker",))
 
 
 def _trend_marker(trend):
