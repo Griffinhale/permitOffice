@@ -440,7 +440,7 @@ class PermitDeskView:
         if external_table:
             _top_y1, _table_y0, table_y1, table_x1 = external_table
             table_y0 = _table_y0
-            work_box = (detail_box[0], work_y0, detail_box[2], min(detail_box[3], table_y0 - 44))
+            work_box = (detail_box[0], work_y0, detail_box[2], min(detail_box[3], table_y0 - 14))
             table_box = (detail_box[0], table_y0, table_x1, table_y1)
         else:
             panel_h = panel_y1 - panel_y0

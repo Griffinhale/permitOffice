@@ -837,9 +837,32 @@ def test_tall_full_dashboard_table_rises_under_action_stack():
     map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
     docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
 
-    assert table[1] - action_grid[3] <= 150
+    assert table[1] - action_grid[3] <= 40
     assert abs(table[1] - map_key[1]) <= 4
     assert map_key[1] - max(bbox[3] for bbox in docket_boxes) <= 140
+
+
+def test_tall_full_dashboard_active_card_wraps_action_stack():
+    """Verify the active card does not reserve a large empty lower half."""
+
+    item, districts = _vendor_case()
+    rows = [item] + [
+        rules.DocketItem(f"T0{n}", "street_vendor_compact", f"Application Case {n}", "POINT", 1)
+        for n in range(2, 5)
+    ]
+    model = build_desk_model(rules.CityState(), districts, rows, item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+
+    view._draw(1536, 1700)
+
+    active = next(args for kind, args, _kwargs in canvas.created if kind == "active-card")
+    action_grid = next(args for kind, args, _kwargs in canvas.created if kind == "action-grid")
+    table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
+
+    assert active[3] - action_grid[3] <= 36
+    assert 12 <= table[1] - active[3] <= 24
 
 
 def test_full_dashboard_left_folder_rail_runs_single_map_cheat_sheet():
