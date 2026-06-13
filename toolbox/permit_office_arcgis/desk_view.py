@@ -473,7 +473,7 @@ class PermitDeskView:
         if available < 760:
             key_h = min(360, max(280, int(available * 0.40)))
         else:
-            key_h = min(560, max(380, int(available * 0.47)))
+            key_h = min(720, max(380, int(available * 0.47)))
         key_y0 = y1 - key_h
         key_y1 = y1
         list_box = (x0, list_y0, x1, key_y0 - 10)
@@ -1732,7 +1732,7 @@ def _folder_key_top(rail_box):
     if available < 760:
         key_h = min(360, max(280, int(available * 0.40)))
     else:
-        key_h = min(560, max(380, int(available * 0.47)))
+        key_h = min(720, max(380, int(available * 0.47)))
     return y1 - key_h
 
 
