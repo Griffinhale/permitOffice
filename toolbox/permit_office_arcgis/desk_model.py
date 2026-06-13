@@ -20,7 +20,7 @@ from .symbology_config import (
 
 
 ACTIVE_STATUSES = frozenset(("open", "inspected", "active", "carried"))
-HEADLINE_METRICS = (("Week", "WEEK"), ("AP", "AP"), ("Money", "$"), ("Office Standing", "STAND"), ("Audit", "AUDIT"), ("Threats", "THREAT"))
+HEADLINE_METRICS = (("Week", "WEEK"), ("AP", "AP"), ("Money", "$"))
 
 
 @dataclass(frozen=True)

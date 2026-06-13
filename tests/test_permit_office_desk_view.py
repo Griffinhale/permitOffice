@@ -239,23 +239,56 @@ def test_headline_metrics_hide_generic_city_builder_stats():
 
     labels = [label for label, _display in HEADLINE_METRICS]
 
-    assert labels == ["Week", "AP", "Money", "Office Standing", "Audit", "Threats"]
+    assert labels == ["Week", "AP", "Money"]
     assert "Activity" not in labels
     assert "Friction" not in labels
     assert "Trust" not in labels
     assert "Exposure" not in labels
     assert "Heat" not in labels
     assert "Pressure" not in labels
+    assert "Office Standing" not in labels
+    assert "Audit" not in labels
+    assert "Threats" not in labels
 
 
-def test_headline_metrics_promote_office_standing_and_threats():
-    """Verify the top banner uses the refined public pressure language."""
+def test_top_header_renders_only_title_core_metrics_deadline_and_global_menu():
+    """Verify the top header owns the only menu and keeps headline copy compact."""
 
-    labels = [label for label, _display in HEADLINE_METRICS]
+    item, districts = _vendor_case()
+    model = build_desk_model(
+        rules.CityState(ap=2, money=75),
+        districts,
+        [item],
+        item.item_id,
+        deadline_text="MON INTAKE 1:00",
+        deadline_meter=40,
+        deadline_running=True,
+    )
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
 
-    assert labels == ["Week", "AP", "Money", "Office Standing", "Audit", "Threats"]
-    assert "Heat" not in labels
-    assert "Pressure" not in labels
+    view._draw(1120, 900)
+
+    texts = _text_values(canvas)
+    assert "PERMIT OFFICE" in texts
+    assert "WEEK" in texts
+    assert "AP" in texts
+    assert "$" in texts
+    assert "DAY" in texts
+    assert "TIME" in texts
+    assert "MON" in texts
+    assert "1:00" in texts
+    assert "STAND" not in texts
+    assert "AUDIT" not in texts
+    assert "THREAT" not in texts
+    assert "FILING DEADLINE" not in texts
+    assert "INTAKE" not in texts
+
+    menu_targets = [(kind, ident, bbox) for kind, ident, bbox, _callback in view._click_targets if (kind, ident) == ("session", "Menu")]
+    assert len(menu_targets) == 1
+    _kind, _ident, bbox = menu_targets[0]
+    assert bbox[1] < 64
 
 
 def test_ledger_rows_include_top_threat_track_summary():

@@ -342,7 +342,7 @@ class PermitDeskView:
         metrics = self._ledger_by_label
         headlines = HEADLINE_METRICS
         x_start = 310
-        right_pad = 216 if self.model.deadline_text else 28
+        right_pad = 292 if self.model.deadline_text else 84
         spacing = max(70, (width - x_start - right_pad) // len(headlines))
         x = x_start
         for key, display in headlines:
@@ -355,19 +355,23 @@ class PermitDeskView:
             x += spacing
         if self.model.deadline_text:
             self._draw_deadline_clock(c, width, h)
+        self._draw_menu_button(c, width - 60, 18, width - 20, h - 16)
 
     def _draw_deadline_clock(self, c, width, h):
-        """Draw the live filing deadline in the top banner."""
+        """Draw the live office clock in the top banner."""
 
-        x1 = width - 20
-        x0 = x1 - 190
+        x1 = width - 72
+        x0 = x1 - 170
         y0 = 10
         y1 = h - 9
         meter = max(0, min(100, int(self.model.deadline_meter or 0)))
         fill = Palette.GOLD if meter >= 75 else Palette.PAPER if self.model.deadline_running else Palette.LEDGER_LINE
+        day, time = _deadline_day_time(self.model.deadline_text)
         c.create_rectangle(x0, y0, x1, y1, outline=fill, width=1)
-        c.create_text(x0 + 10, y0 + 5, text="FILING DEADLINE", anchor="nw", fill=Palette.LEDGER_LINE, font=self._font(7, "bold"))
-        c.create_text(x0 + 10, y0 + 20, text=_clip(self.model.deadline_text, 22), anchor="nw", fill=Palette.PAPER, font=self._font(9, "bold"))
+        c.create_text(x0 + 10, y0 + 5, text="DAY", anchor="nw", fill=Palette.LEDGER_LINE, font=self._font(7, "bold"))
+        c.create_text(x0 + 10, y0 + 20, text=_clip(day, 9), anchor="nw", fill=Palette.PAPER, font=self._font(9, "bold"))
+        c.create_text(x0 + 76, y0 + 5, text="TIME", anchor="nw", fill=Palette.LEDGER_LINE, font=self._font(7, "bold"))
+        c.create_text(x0 + 76, y0 + 20, text=_clip(time, 11), anchor="nw", fill=Palette.PAPER, font=self._font(9, "bold"))
         # Thin progress bar pinned to the inner bottom edge, clear of the text.
         c.create_rectangle(x0 + 1, y1 - 4, x0 + 1 + int((x1 - x0 - 2) * meter / 100), y1 - 1, fill=fill, outline="")
 
@@ -398,8 +402,7 @@ class PermitDeskView:
         x0, y0, x1, y1 = box
         _shadow_rect(c, x0 + 6, y0 + 8, x1 + 6, y1 + 8)
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.PAPER_ALT, outline=Palette.LINE, width=2)
-        self._draw_menu_button(c, x1 - 52, y0 + 8, x1 - 12, y0 + 34)
-        content = (x0 + 12, y0 + 44, x1 - 12, y1 - 12)
+        content = (x0 + 12, y0 + 12, x1 - 12, y1 - 12)
         self._draw_application_tab_content(c, content)
 
     def _draw_primary_tab(self, c, x0, y0, x1, y1, label, selected, callback):
@@ -1422,6 +1425,15 @@ def _clip(value, width):
     """Shorten text to a single normalized line for canvas rendering."""
 
     return shorten(" ".join(str(value or "").split()), width=width, placeholder="...")
+
+
+def _deadline_day_time(value):
+    """Return day and time tokens from the controller's office-clock text."""
+
+    tokens = str(value or "").split()
+    day = tokens[0] if tokens else ""
+    time = next((token for token in reversed(tokens) if ":" in token), tokens[-1] if tokens else "")
+    return day, time
 
 
 def _fit_lines(value, line_width, max_lines):
