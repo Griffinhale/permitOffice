@@ -1772,6 +1772,53 @@ def test_action_cards_place_hotkey_before_cost_and_graphical_impact():
     assert max(box[2] - box[0] for box in impact_boxes) >= 104
 
 
+def test_wide_command_tiles_are_capped_and_centered():
+    """Verify command tiles keep drawn-button proportions on wide workspaces."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_case_controls(canvas, 0, 0, 1200, 230)
+
+    action_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "case-action"]
+    assert len(action_boxes) == 6
+    widths = [bbox[2] - bbox[0] for bbox in action_boxes]
+    left_space = min(bbox[0] for bbox in action_boxes) - 10
+    right_space = 1190 - max(bbox[2] for bbox in action_boxes)
+
+    assert max(widths) <= 320
+    assert min(widths) >= 240
+    assert abs(left_space - right_space) <= 4
+
+
+def test_command_tile_text_and_impact_panels_stay_inside_cards():
+    """Verify bounded tile text and impact panels cannot bleed past card edges."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_case_controls(canvas, 0, 0, 1200, 230)
+
+    action_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "case-action"]
+    impact_boxes = [args for kind, args, kwargs in canvas.created if kind == "rect" and kwargs.get("tags") == ("impact-box",)]
+    assert impact_boxes
+    assert min(box[0] - card[0] for box, card in zip(impact_boxes, action_boxes)) >= 150
+    assert max(box[2] - box[0] for box in impact_boxes) <= 150
+    for kind, args, kwargs in canvas.created:
+        if kind != "text" or kwargs.get("width") is None:
+            continue
+        x = args[0]
+        y = args[1]
+        card = next((bbox for bbox in action_boxes if bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]), None)
+        if card is None:
+            continue
+        assert x + kwargs["width"] <= card[2] - 6
+
+
 def test_office_standing_rail_keeps_threat_tracks_in_wire_ticker_not_pulse():
     """Verify City Pulse focuses on standing/stats while threats live in WIRE."""
 

@@ -1146,10 +1146,14 @@ class PermitDeskView:
         )
         gap = 8
         row_gap = 8
-        card_w = max(88, (x1 - x0 - gap * 2) // 3)
+        inner_w = max(1, x1 - x0)
+        raw_card_w = (inner_w - gap * 2) // 3
+        card_w = max(88, min(316, raw_card_w))
+        grid_w = card_w * 3 + gap * 2
+        grid_x0 = x0 + max(0, (inner_w - grid_w) // 2)
         card_h = max(64, min(96, (y1 - y0 - row_gap) // 2))
         for index, (label, cost, detail, color, callback, primary, enabled, hotkey, tooltip, disabled_reason) in enumerate(controls):
-            cx = x0 + (index % 3) * (card_w + gap)
+            cx = grid_x0 + (index % 3) * (card_w + gap)
             cy = y0 + (index // 3) * (card_h + row_gap)
             self._draw_case_action_card(
                 c,
@@ -1178,8 +1182,8 @@ class PermitDeskView:
         tone = color if enabled else Palette.MUTED
         c.create_rectangle(x0, y0, x1, y1, fill=fill, outline=outline, width=2 if hover else 1)
         c.create_rectangle(x0, y0, x0 + 4, y1, fill=tone, outline="")
-        impact_w = max(116, min(170, int((x1 - x0) * 0.46)))
-        impact_x0 = max(x0 + 112, x1 - impact_w)
+        impact_w = max(118, min(160, int((x1 - x0) * 0.44)))
+        impact_x0 = max(x0 + 104, x1 - impact_w)
         c.create_line(impact_x0, y0 + 7, impact_x0, y1 - 7, fill=Palette.LINE, tags=("impact-divider",))
         c.create_rectangle(impact_x0 + 4, y0 + 10, x1 - 6, y1 - 10, fill=Palette.PAPER_ALT if enabled else Palette.PAPER, outline=Palette.LINE, tags=("impact-box",))
         label_w = impact_x0 - x0 - 24
