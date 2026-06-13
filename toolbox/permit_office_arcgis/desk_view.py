@@ -754,11 +754,23 @@ class PermitDeskView:
         content_y1 = y1 - 16
         available = max(260, content_y1 - content_y0)
         gap = 14
-        info_h = min(max(164, int(available * 0.42)), 230)
-        action_h = min(max(170, int(available * 0.40)), 218)
+        if available < 430:
+            min_action_h = 166
+            evidence_h = max(64, min(96, int(available * 0.22)))
+            info_h = max(62, min(90, available - (2 * gap) - min_action_h - evidence_h))
+            action_h = max(120, available - (2 * gap) - info_h - evidence_h)
+        else:
+            info_h = min(max(130, int(available * 0.32)), 190)
+            evidence_h = min(max(118, int(available * 0.26)), 170)
+            action_h = min(max(170, int(available * 0.34)), 218)
         info_box = (body_x0, content_y0, body_x1, min(content_y1, content_y0 + info_h))
-        action_y0 = info_box[3] + gap
+        evidence_y0 = info_box[3] + gap
+        evidence_box = (body_x0, evidence_y0, body_x1, min(content_y1, evidence_y0 + evidence_h))
+        action_y0 = evidence_box[3] + gap
+        if hasattr(c, "_record"):
+            c._record("decision-info", (info_box[0], info_box[1], evidence_box[2], evidence_box[3]), {})
         self._draw_application_info_panel(c, info_box)
+        self._draw_case_evidence_row(c, evidence_box)
         self._draw_case_controls(c, body_x0, action_y0, body_x1, min(content_y1, action_y0 + action_h))
 
     def _draw_application_info_panel(self, c, box):
@@ -768,7 +780,6 @@ class PermitDeskView:
         case = self.model.case
         if hasattr(c, "_record"):
             c._record("app-info", (x0, y0, x1, y1), {})
-            c._record("decision-info", (x0, y0, x1, y1), {})
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.PAPER_ALT, outline=Palette.LINE)
         pad = 14
         tx0 = x0 + pad
@@ -776,23 +787,101 @@ class PermitDeskView:
         yy = y0 + pad
         preview = "\n".join(_fit_lines(case.preview, max(44, (tx1 - tx0) // 8), 3))
         yy = _text_bottom(c, tx0, yy, preview, self._font(10), Palette.MUTED, width=tx1 - tx0) + 12
-        c.create_text(tx0, yy, text="Affected districts / cultures", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
-        yy = _text_bottom(c, tx0, yy + 16, self._fit_px(case.districts, 11, "bold", tx1 - tx0), self._font(11, "bold"), Palette.INK) + 12
+        econ_text = ""
+        econ_color = Palette.MUTED
+        econ_y = y1
+        if case.economy:
+            econ_qualifier = "filed" if bool(case.inspection) and not case.inspection.lower().startswith("no inspection") else "est."
+            econ_text = f"Budget ({econ_qualifier}): {case.economy}" if case.economy != "no recurring budget" else "Budget: no recurring revenue or upkeep"
+            econ_color = Palette.GREEN if "net +" in case.economy else Palette.RED if "net -" in case.economy else Palette.MUTED
+            econ_y = max(y0 + pad, y1 - 20)
+            c.create_text(tx0, econ_y, text=self._fit_px(econ_text, 9, "bold", tx1 - tx0), anchor="nw", fill=econ_color, font=self._font(9, "bold"))
         inspected = bool(case.inspection) and not case.inspection.lower().startswith("no inspection")
         note = case.inspection if inspected else "Uninspected: decision impacts are estimates. Inspect File may reveal violations or stronger stakeholder reactions."
         note_color = Palette.RED if inspected and case.risk_band == "high" else Palette.GOLD if not inspected else Palette.BLUE
-        note_h = min(52, max(34, y1 - yy - 30))
-        if note_h >= 30:
+        note_h = min(52, (econ_y - 6 if econ_text else y1 - 10) - yy)
+        if note_h >= 24:
             c.create_rectangle(tx0, yy, tx1, yy + note_h, fill="#fff8e9" if not inspected else Palette.NOTE_BLUE, outline="")
             c.create_rectangle(tx0, yy, tx0 + 4, yy + note_h, fill=note_color, outline="")
-            note_lines = _fit_lines(note, max(30, (tx1 - tx0 - 24) // 7), 2)
+            note_lines = _fit_lines(note, max(30, (tx1 - tx0 - 24) // 7), 1 if note_h < 34 else 2)
             c.create_text(tx0 + 12, yy + 8, text="\n".join(note_lines), anchor="nw", fill=Palette.INK, font=self._font(9, "bold"))
-            yy += note_h + 10
-        if case.economy and yy < y1 - 18:
-            econ_qualifier = "filed" if inspected else "est."
-            econ_text = f"Budget ({econ_qualifier}): {case.economy}" if case.economy != "no recurring budget" else "Budget: no recurring revenue or upkeep"
-            econ_color = Palette.GREEN if "net +" in case.economy else Palette.RED if "net -" in case.economy else Palette.MUTED
-            c.create_text(tx0, yy, text=self._fit_px(econ_text, 9, "bold", tx1 - tx0), anchor="nw", fill=econ_color, font=self._font(9, "bold"))
+
+    def _draw_case_evidence_row(self, c, box):
+        """Draw compact evidence widgets for districts, cultures, and outcomes."""
+
+        x0, y0, x1, y1 = box
+        case = self.model.case
+        c.create_rectangle(x0, y0, x1, y1, fill=Palette.PAPER_ALT, outline=Palette.LINE)
+        pad = 10
+        gap = 8
+        col_w = max(100, (x1 - x0 - (2 * pad) - (2 * gap)) // 3)
+        columns = (
+            ("AFFECTED DISTRICTS", x0 + pad, x0 + pad + col_w),
+            ("CULTURE PRESSURE", x0 + pad + col_w + gap, x0 + pad + 2 * col_w + gap),
+            ("POSSIBLE OUTCOMES", x0 + pad + 2 * (col_w + gap), x1 - pad),
+        )
+        for title, cx0, cx1 in columns:
+            c.create_text(cx0, y0 + 9, text=title, anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
+        content_top = y0 + 30
+        content_bottom = y1 - 8
+        self._draw_district_grid_widget(c, columns[0][1], content_top, columns[0][2], content_bottom, case.district_grid)
+        self._draw_trend_card_stack(c, columns[1][1], content_top, columns[1][2], content_bottom, case.culture_cards, "culture-card")
+        self._draw_trend_card_stack(c, columns[2][1], content_top, columns[2][2], content_bottom, case.outcome_cards, "outcome-card")
+
+    def _draw_district_grid_widget(self, c, x0, y0, x1, y1, cells):
+        """Draw the selected-case district mini-grid."""
+
+        if hasattr(c, "_record"):
+            c._record("district-grid", (x0, y0, x1, y1), {})
+        cells = tuple(cells or ())
+        if not cells:
+            c.create_text(x0, y0 + 4, text="No map targets", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
+            return
+        cols = 4
+        gap = 4
+        cell_w = max(24, min(40, (x1 - x0 - gap * (cols - 1)) // cols))
+        cell_h = max(20, min(30, (y1 - y0 - gap * 2) // 3))
+        for index, cell in enumerate(cells[:12]):
+            col = index % cols
+            row = index // cols
+            cx0 = x0 + col * (cell_w + gap)
+            cy0 = y0 + row * (cell_h + gap)
+            cx1 = min(x1, cx0 + cell_w)
+            cy1 = min(y1, cy0 + cell_h)
+            fill = cell.swatch or Palette.NOTE_BLUE if cell.affected else Palette.WHITE
+            outline = Palette.INK if cell.affected else Palette.LINE
+            c.create_rectangle(cx0, cy0, cx1, cy1, fill=fill, outline=outline, width=2 if cell.affected else 1)
+            c.create_text((cx0 + cx1) // 2, (cy0 + cy1) // 2, text=cell.label, anchor="center", fill=Palette.WHITE if cell.affected and cell.swatch else Palette.INK, font=self._font(7, "bold"))
+
+    def _draw_trend_card_stack(self, c, x0, y0, x1, y1, cards, record_kind):
+        """Draw compact trend cards for culture or outcome evidence."""
+
+        cards = tuple(cards or ())
+        if not cards:
+            c.create_text(x0, y0 + 4, text="Unknown", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
+            return
+        gap = 5
+        row_h = max(30, min(42, (y1 - y0 - gap * (min(len(cards), 3) - 1)) // max(1, min(len(cards), 3))))
+        for index, card in enumerate(cards[:3]):
+            yy = y0 + index * (row_h + gap)
+            if yy >= y1:
+                break
+            if hasattr(c, "_record"):
+                c._record(record_kind, (x0, yy, x1, min(y1, yy + row_h)), {})
+            tone = _tone_color(card.tone)
+            c.create_rectangle(x0, yy, x1, min(y1, yy + row_h), fill=Palette.WHITE, outline=Palette.LINE)
+            c.create_rectangle(x0, yy, x0 + 4, min(y1, yy + row_h), fill=tone, outline="")
+            if card.swatch:
+                c.create_rectangle(x0 + 10, yy + 8, x0 + 20, yy + 18, fill=card.swatch, outline=Palette.LINE)
+                text_x = x0 + 26
+            else:
+                text_x = x0 + 10
+            marker_color = _trend_color(card.trend, card.tone)
+            c.create_text(text_x, yy + 5, text=self._fit_px(card.label, 8, "bold", x1 - text_x - 28), anchor="nw", fill=Palette.INK, font=self._font(8, "bold"))
+            c.create_text(x1 - 10, yy + 5, text=_trend_marker(card.trend), anchor="ne", fill=marker_color, font=self._font(8, "bold"))
+            detail_y = yy + 21
+            if detail_y < y1 - 8:
+                c.create_text(text_x, detail_y, text=self._fit_px(card.detail, 7, "normal", x1 - text_x - 10), anchor="nw", fill=Palette.MUTED, font=self._font(7))
 
     def _draw_status_badge(self, c, x0, y0, x1, y1, text, color):
         """Draw a restrained status badge."""
@@ -907,18 +996,18 @@ class PermitDeskView:
         mitigate = lanes.get("approve_mitigated")
         deny = lanes.get("deny")
         controls = (
-            (exhibit_label, "0 AP", "map layer visibility", Palette.BLUE, self.callbacks.toggle_exhibit, False, True),
-            ("Retarget Map", "0 AP", "use selected map features", Palette.TEAL, self.callbacks.update_from_map, False, True),
-            ("Inspect File", "1 AP", "reveal filed risk", Palette.GOLD, self.callbacks.inspect, False, True),
-            (approve.label if approve else "Issue Permit", approve.cost if approve else "1 AP", (approve.city_effect, approve.local_effect) if approve else ("City: file permit", "Local: update target"), Palette.GREEN, self.callbacks.approve, True, approve.enabled if approve else True),
-            (mitigate.label if mitigate else "Add Conditions", mitigate.cost if mitigate else "1 AP", (mitigate.city_effect, mitigate.local_effect) if mitigate else ("City: add terms", "Local: reduce risk"), "#527d65", self.callbacks.approve_mitigated, True, mitigate.enabled if mitigate else True),
-            (deny.label if deny else "Deny", deny.cost if deny else "0 AP", (deny.city_effect, deny.local_effect) if deny else ("City: reject filing", "Local: unresolved pressure"), Palette.RED, self.callbacks.deny, True, deny.enabled if deny else True),
+            (exhibit_label, "0 AP", "map layer visibility", Palette.BLUE, self.callbacks.toggle_exhibit, False, True, "V", "Toggle proposed feature visibility.", ""),
+            ("Retarget Map", "0 AP", "use selected map features", Palette.TEAL, self.callbacks.update_from_map, False, True, "T", "Use selected map features as targets.", ""),
+            ("Inspect File", "1 AP", "reveal filed risk", Palette.GOLD, self.callbacks.inspect, False, True, "I", "Spend AP to reveal risk and outcomes.", ""),
+            (approve.label if approve else "Issue Permit", approve.cost if approve else "1 AP", (approve.city_effect, approve.local_effect) if approve else ("City: file permit", "Local: update target"), Palette.GREEN, self.callbacks.approve, True, approve.enabled if approve else True, approve.hotkey if approve else "A", approve.tooltip if approve else "Issue the permit and file the selected map change.", approve.disabled_reason if approve else ""),
+            (mitigate.label if mitigate else "Add Conditions", mitigate.cost if mitigate else "1 AP", (mitigate.city_effect, mitigate.local_effect) if mitigate else ("City: add terms", "Local: reduce risk"), "#527d65", self.callbacks.approve_mitigated, True, mitigate.enabled if mitigate else True, mitigate.hotkey if mitigate else "M", mitigate.tooltip if mitigate else "Issue the permit with mitigation conditions.", mitigate.disabled_reason if mitigate else ""),
+            (deny.label if deny else "Deny", deny.cost if deny else "0 AP", (deny.city_effect, deny.local_effect) if deny else ("City: reject filing", "Local: unresolved pressure"), Palette.RED, self.callbacks.deny, True, deny.enabled if deny else True, deny.hotkey if deny else "D", deny.tooltip if deny else "Deny the filing.", deny.disabled_reason if deny else ""),
         )
         gap = 8
         row_gap = 8
         card_w = max(88, (x1 - x0 - gap * 2) // 3)
         card_h = max(64, min(96, (y1 - y0 - row_gap) // 2))
-        for index, (label, cost, detail, color, callback, primary, enabled) in enumerate(controls):
+        for index, (label, cost, detail, color, callback, primary, enabled, hotkey, tooltip, disabled_reason) in enumerate(controls):
             cx = x0 + (index % 3) * (card_w + gap)
             cy = y0 + (index // 3) * (card_h + row_gap)
             self._draw_case_action_card(
@@ -934,9 +1023,12 @@ class PermitDeskView:
                 callback,
                 primary,
                 enabled,
+                hotkey,
+                tooltip,
+                disabled_reason,
             )
 
-    def _draw_case_action_card(self, c, x0, y0, x1, y1, label, cost, detail, color, callback, primary=False, enabled=True):
+    def _draw_case_action_card(self, c, x0, y0, x1, y1, label, cost, detail, color, callback, primary=False, enabled=True, hotkey="", tooltip="", disabled_reason=""):
         """Draw one larger in-card action with its visible AP/cost line."""
 
         hover = self._hover_key == f"case-action:{label}"
@@ -945,9 +1037,16 @@ class PermitDeskView:
         tone = color if enabled else Palette.MUTED
         c.create_rectangle(x0, y0, x1, y1, fill=fill, outline=outline, width=2 if hover else 1)
         c.create_rectangle(x0, y0, x0 + 4, y1, fill=tone, outline="")
-        c.create_text(x0 + 12, y0 + 8, text=self._fit_px(label, 9, "bold", x1 - x0 - 24), anchor="nw", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(9, "bold"))
+        label_w = x1 - x0 - (52 if hotkey else 24)
+        c.create_text(x0 + 12, y0 + 8, text=self._fit_px(label, 9, "bold", label_w), anchor="nw", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(9, "bold"))
+        if hotkey:
+            hk_x0 = x1 - 26
+            c.create_rectangle(hk_x0, y0 + 7, x1 - 8, y0 + 25, fill=Palette.PAPER_ALT, outline=Palette.LINE)
+            c.create_text((hk_x0 + x1 - 8) // 2, y0 + 10, text=hotkey, anchor="n", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(7, "bold"))
         c.create_text(x0 + 12, y0 + 27, text=cost, anchor="nw", fill=tone, font=self._font(8, "bold"), width=x1 - x0 - 24)
-        if isinstance(detail, tuple):
+        if not enabled and disabled_reason:
+            c.create_text(x0 + 12, y1 - 18, text=self._fit_px(disabled_reason, 7, "normal", x1 - x0 - 24), anchor="nw", fill=Palette.MUTED, font=self._font(7))
+        elif isinstance(detail, tuple):
             city, local = detail
             label_w = 34
             detail_w = max(40, x1 - x0 - label_w - 28)
@@ -959,6 +1058,8 @@ class PermitDeskView:
         elif y1 - y0 >= 68:
             detail_lines = _fit_lines(detail, max(16, (x1 - x0 - 24) // 7), 3)
             c.create_text(x0 + 12, y0 + 44, text="\n".join(detail_lines), anchor="nw", fill=Palette.MUTED, font=self._font(7), width=x1 - x0 - 24)
+        elif tooltip:
+            c.create_text(x0 + 12, y1 - 18, text=self._fit_px(tooltip, 7, "normal", x1 - x0 - 24), anchor="nw", fill=Palette.MUTED, font=self._font(7))
         if enabled:
             self._add_target("case-action", label, (x0, y0, x1, y1), callback)
 
@@ -1485,3 +1586,31 @@ def _tone_color(tone):
     if tone == "watch":
         return Palette.GOLD
     return Palette.INK
+
+
+def _trend_marker(trend):
+    """Return a compact trend glyph for evidence cards."""
+
+    value = (trend or "").lower()
+    if value == "up":
+        return "up"
+    if value == "down":
+        return "down"
+    if value == "flat":
+        return "flat"
+    return "?"
+
+
+def _trend_color(trend, tone="neutral"):
+    """Return marker color from an explicit tone or the trend direction."""
+
+    if tone and tone != "neutral":
+        return _tone_color(tone)
+    value = (trend or "").lower()
+    if value == "up":
+        return Palette.GREEN
+    if value == "down":
+        return Palette.RED
+    if value == "unknown":
+        return Palette.GOLD
+    return Palette.MUTED

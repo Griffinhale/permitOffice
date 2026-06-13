@@ -1545,6 +1545,42 @@ def test_decision_brief_uses_two_row_action_grid_for_breathing_room():
     assert all(sum(1 for bbox in action_boxes if round(bbox[1] / 10) * 10 == row) == 3 for row in row_tops)
 
 
+def test_active_card_draws_evidence_grid_culture_cards_and_outcomes():
+    """Verify the decision brief draws the approved case evidence row."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_active_card(canvas, (0, 0, 820, 680))
+
+    texts = _text_values(canvas)
+    assert "AFFECTED DISTRICTS" in texts
+    assert "CULTURE PRESSURE" in texts
+    assert "POSSIBLE OUTCOMES" in texts
+    assert any(kind == "district-grid" for kind, _args, _kwargs in canvas.created)
+    assert any(kind == "culture-card" for kind, _args, _kwargs in canvas.created)
+    assert any(kind == "outcome-card" for kind, _args, _kwargs in canvas.created)
+
+
+def test_action_cards_draw_hotkeys_and_disabled_reason():
+    """Verify actions show hotkey hints and unavailable reasons."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(ap=0, money=60), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_active_card(canvas, (0, 0, 820, 680))
+
+    texts = _text_values(canvas)
+    assert "A" in texts
+    assert "M" in texts
+    assert "D" in texts
+    assert any("Needs 1 AP" in str(text) for text in texts)
+
+
 def test_office_standing_rail_keeps_threat_tracks_in_wire_ticker_not_pulse():
     """Verify City Pulse focuses on standing/stats while threats live in WIRE."""
 
