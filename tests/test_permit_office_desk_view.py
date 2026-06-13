@@ -127,10 +127,22 @@ def test_heat_ticker_explains_future_followup_pressure():
 
     model = build_desk_model(state, districts, [item], item.item_id)
 
-    heat_line = model.ticker_items[0]
-    assert heat_line.startswith("Heat desk: vendors 3")
+    heat_line = next(line for line in model.ticker_items if line.startswith("WIRE: heat desk"))
+    assert heat_line.startswith("WIRE: heat desk flags vendors 3")
     for phrase in ("incident", "enforcement", "follow-up filing"):
         assert phrase in heat_line
+
+
+def test_ticker_leads_with_threat_track_summary():
+    """Verify the ambient ticker names threat tracks instead of generic pressure."""
+
+    item, districts = _vendor_case()
+    districts["D0000"].service_gap["utilities"] = 42
+
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    assert model.ticker_items[0].startswith("WIRE: threat desk reports Service Failure")
+    assert "utilities gap 42" in model.ticker_items[0]
 
 
 def test_ticker_surfaces_contested_buyout_for_legibility():
@@ -144,7 +156,7 @@ def test_ticker_surfaces_contested_buyout_for_legibility():
 
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
 
-    assert any("Boundary desk:" in line and "Cinder Yard" in line for line in model.ticker_items)
+    assert any(line.startswith("WIRE: boundary desk") and "Cinder Yard" in line for line in model.ticker_items)
 
 
 def test_ledger_rows_surface_non_money_city_health():
@@ -227,11 +239,40 @@ def test_headline_metrics_hide_generic_city_builder_stats():
 
     labels = [label for label, _display in HEADLINE_METRICS]
 
-    assert labels == ["Week", "AP", "Money", "Heat", "Audit", "Pressure"]
+    assert labels == ["Week", "AP", "Money", "Office Standing", "Audit", "Threats"]
     assert "Activity" not in labels
     assert "Friction" not in labels
     assert "Trust" not in labels
     assert "Exposure" not in labels
+    assert "Heat" not in labels
+    assert "Pressure" not in labels
+
+
+def test_headline_metrics_promote_office_standing_and_threats():
+    """Verify the top banner uses the refined public pressure language."""
+
+    labels = [label for label, _display in HEADLINE_METRICS]
+
+    assert labels == ["Week", "AP", "Money", "Office Standing", "Audit", "Threats"]
+    assert "Heat" not in labels
+    assert "Pressure" not in labels
+
+
+def test_ledger_rows_include_top_threat_track_summary():
+    """Verify the ledger exposes threat tracks as the public pressure language."""
+
+    item, districts = _vendor_case()
+    profile = districts["D0000"]
+    profile.service_gap["utilities"] = 42
+    state = rules.CityState(exposure=68)
+
+    model = build_desk_model(state, districts, [item], item.item_id)
+    ledger = {row.label: row for row in model.ledger_rows}
+
+    assert [row.label for row in model.ledger_rows[:6]] == ["Office Standing", "Week", "AP", "Money", "Audit", "Threats"]
+    assert "Threats" in ledger
+    assert ledger["Threats"].value.startswith("Legal Exposure:")
+    assert "city exposure 68" in ledger["Threats"].value
 
 
 def test_ledger_derives_maintenance_from_active_features_when_available():
@@ -250,6 +291,60 @@ def test_ledger_derives_maintenance_from_active_features_when_available():
     ledger = {row.label: row for row in model.ledger_rows}
 
     assert ledger["Maintenance"].value == "1 due; lowest condition 22"
+
+
+def test_threat_track_summaries_group_existing_pressure_causes():
+    """Verify internal pressure fields collapse into four public threat tracks."""
+
+    from toolbox.permit_office_arcgis.desk_model import _threat_track_summaries
+
+    item, districts = _vendor_case()
+    profile = districts["D0000"]
+    profile.hazards = {"fire": 3}
+    profile.service_gap["utilities"] = 42
+    profile.displacement = {"renters": 3}
+    profile.buyout_pressure = 4
+    state = rules.CityState(friction=62, exposure=71)
+    state.stakeholder_heat["vendors"] = 3
+    feature = rules.FeatureInstance("F-market", "vendor_market", status="degraded", condition=22, target_cell_ids=["D0000"])
+
+    tracks = _threat_track_summaries(state, districts, [feature], [item])
+    by_label = {track.label: track for track in tracks}
+
+    assert "Public Anger" in by_label
+    assert "homeowners grievance" in by_label["Public Anger"].value
+    assert "vendors heat 3" in by_label["Public Anger"].value
+    assert "Legal Exposure" in by_label
+    assert "city exposure 71" in by_label["Legal Exposure"].value
+    assert "fire band 3" in by_label["Legal Exposure"].value
+    assert "Service Failure" in by_label
+    assert "utilities gap 42" in by_label["Service Failure"].value
+    assert "maintenance due" in by_label["Service Failure"].value
+    assert "Speculation Pressure" in by_label
+    assert "renters displacement 3" in by_label["Speculation Pressure"].value
+    assert "buyout pressure 4" in by_label["Speculation Pressure"].value
+
+
+def test_threat_track_summary_returns_quiet_when_no_pressure():
+    """Verify calm boards do not invent threat-track noise."""
+
+    from toolbox.permit_office_arcgis.desk_model import _threat_track_summaries
+
+    _item, districts = _vendor_case()
+    for profile in districts.values():
+        profile.dissatisfaction = {"homeowners": 0}
+        profile.hazards = {}
+        profile.service_gap = {}
+        profile.displacement = {}
+        profile.buyout_pressure = 0
+        profile.incident_state = "none"
+        profile.incident_group = ""
+
+    tracks = _threat_track_summaries(rules.CityState(), districts, [], [])
+
+    assert [track.label for track in tracks] == ["Threats"]
+    assert tracks[0].value == "quiet"
+    assert tracks[0].tone == "neutral"
 
 
 def test_build_desk_model_threads_receipt_into_view_model():
@@ -298,7 +393,8 @@ def test_build_desk_model_selects_report_tabs_and_builds_ticker():
     assert first.selected_desk_tab == "applications"
     assert [tab.selected for tab in first.report_tabs] == [True, False]
     assert first.ticker_items == second.ticker_items
-    assert any("Street wire" in text for text in first.ticker_items)
+    assert all(text.startswith("WIRE:") for text in first.ticker_items)
+    assert any("street desk" in text.lower() for text in first.ticker_items)
 
 
 def test_build_desk_model_can_select_reports_primary_tab():
@@ -332,6 +428,54 @@ def test_build_desk_model_adds_decision_lanes_for_selected_case():
     assert "0 AP" in lanes["deny"].cost
 
 
+def test_action_lanes_name_primary_threat_for_deny_and_issue():
+    """Verify action previews use threat-track language before commitment."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(ap=2, money=60), districts, [item], item.item_id)
+    lanes = {lane.action_id: lane for lane in model.action_lanes}
+
+    assert "Public Anger" in lanes["deny"].city_effect
+    assert "Public Anger" in lanes["approve"].city_effect
+    assert "Public Anger" in lanes["approve_mitigated"].city_effect
+    assert "Threat" in lanes["approve_mitigated"].local_effect
+
+
+def test_template_primary_threat_prioritizes_specific_pressure_categories():
+    """Verify threat copy uses specific pressure tracks before broad catalog buckets."""
+
+    from toolbox.permit_office_arcgis.desk_model import _template_primary_threat
+
+    business_utility = type(
+        "Template",
+        (),
+        {
+            "category": "business",
+            "pressure_category": "utility",
+            "is_incident": False,
+            "is_enforcement": False,
+            "failure_mode": "",
+        },
+    )()
+    compliance_housing = type(
+        "Template",
+        (),
+        {
+            "category": "compliance",
+            "pressure_category": "housing",
+            "is_incident": False,
+            "is_enforcement": False,
+            "failure_mode": "",
+        },
+    )()
+
+    assert _template_primary_threat(business_utility) == "Legal Exposure"
+    assert _template_primary_threat(compliance_housing) == "Speculation Pressure"
+    assert _template_primary_threat(rules.TEMPLATES["occupancy_certificate"]) == "Speculation Pressure"
+    assert _template_primary_threat(rules.TEMPLATES[rules.MAINTENANCE_TEMPLATE_ID]) == "Service Failure"
+    assert _template_primary_threat(rules.TEMPLATES[rules.ENFORCEMENT_TEMPLATE_ID]) == "Legal Exposure"
+
+
 def test_incident_decision_lanes_disable_ap_gated_actions_when_ap_empty():
     """Verify AP-gated incident actions are visibly unavailable at 0 AP."""
 
@@ -363,7 +507,7 @@ def test_permit_deny_stays_enabled_when_ap_empty():
 
 
 def test_maintenance_case_uses_repair_action_family():
-    """Verify maintenance follow-ups read as Fund Repair / Patch / Defer (#2)."""
+    """Verify maintenance follow-ups read as repair actions and service threat previews."""
 
     item = rules.DocketItem(
         "maint",
@@ -376,13 +520,21 @@ def test_maintenance_case_uses_repair_action_family():
     profile = rules.DistrictProfile("D0000", "Market Row", 1000, 50, 20, 35, 25, 50, "mercantile")
     districts = {profile.cell_id: rules.normalize_profile(profile)}
 
-    model = build_desk_model(rules.CityState(ap=3, money=60), districts, [item], item.item_id)
+    model = build_desk_model(
+        rules.CityState(ap=3, money=60),
+        districts,
+        [item],
+        item.item_id,
+        proposal_visible_by_item={item.item_id: True},
+    )
     lanes = {lane.action_id: lane for lane in model.action_lanes}
 
     assert lanes["approve"].label == "Fund Repair"
+    assert "Service Failure" in lanes["approve"].city_effect
     assert lanes["approve_mitigated"].label == "Patch"
+    assert "Service Failure" in lanes["approve_mitigated"].city_effect
     assert lanes["deny"].label == "Defer"
-    assert "maintenance" in lanes["deny"].city_effect
+    assert "Service Failure rises if maintenance is deferred" in lanes["deny"].city_effect
 
 
 def test_build_desk_model_marks_queue_cleared_when_no_active_items():
@@ -396,6 +548,558 @@ def test_build_desk_model_marks_queue_cleared_when_no_active_items():
 
     assert model.queue_cleared is True
     assert model.action_lanes == ()
+
+
+def test_build_desk_model_exposes_map_key_legend_rows():
+    """Verify the view model carries Contents-style map-key concepts."""
+
+    item, districts = _vendor_case()
+    districts["D0000"].display_state = "grievance"
+
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    legend = {(row.group, row.label): row for row in model.map_legend_rows}
+    assert ("PermitDistricts", "Mercantile") in legend
+    assert ("District display", "Local Grievance") in legend
+    assert ("PermitPoints", "Proposed") in legend
+    assert ("PermitLines", "Road") in legend
+    assert ("PermitZones", "Commerce") in legend
+    assert ("Selection", "Selected target") in legend
+    assert ("Selection", "Filed state") in legend
+
+
+def test_build_desk_model_tracks_district_group_health_from_profiles():
+    """Verify group tracker combines prosperity, pressure, and local heat."""
+
+    item, districts = _vendor_case()
+    residential = rules.DistrictProfile(
+        "D0001",
+        "Old Annex",
+        900,
+        activity=32,
+        friction=70,
+        trust=18,
+        exposure=65,
+        services=25,
+        district_type="residential",
+        population_mix={"renters": 3, "families": 2},
+        dissatisfaction={"renters": 4, "families": 3},
+        display_state="grievance",
+    )
+    districts[residential.cell_id] = rules.normalize_profile(residential)
+
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    rows = {row.label: row for row in model.district_group_rows}
+    assert "Residential" in rows
+    assert rows["Residential"].state in {"Critical", "Strained"}
+    assert "heat" in rows["Residential"].detail
+    assert "pressure" in rows["Residential"].detail
+
+
+def test_build_desk_model_exposes_district_attribute_rows():
+    """Verify the wireframe bottom table has district state to render."""
+
+    item, districts = _vendor_case()
+    profile = districts["D0000"]
+    profile.prosperity_band = "thriving"
+    profile.identity_state = "converted"
+    profile.display_state = "service_gap"
+
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    row = model.district_table_rows[0]
+    assert row.district == "D0000"
+    assert row.name
+    assert row.district_type == "Mercantile"
+    assert row.prosperity == "Thriving"
+    assert row.community == "Converted"
+    assert row.pressure == "Service Gap"
+    assert row.selected is True
+
+
+def test_hybrid_application_workspace_draws_folder_rail_with_map_key_below_inbox():
+    """Verify Applications uses a folder rail with map key below the inbox."""
+
+    item, districts = _vendor_case()
+    rows = [
+        item,
+        rules.DocketItem("T02", "street_vendor_compact", "Business License Fee Sweep", "POINT", 1),
+        rules.DocketItem("T03", "street_vendor_compact", "Public Art and Museum Grant", "POINT", 1),
+    ]
+    districts["D0000"].display_state = "grievance"
+    model = build_desk_model(rules.CityState(), districts, rows, item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 900, 620))
+
+    texts = _text_values(canvas)
+    assert "INBOX" in texts
+    assert "DECISION BRIEF" in texts
+    assert "MAP KEY" in texts
+    assert "PermitPoints" in texts
+    assert "display_state" in texts
+    assert "Selected target" in texts
+    assert "PermitDistricts" not in texts
+    assert "District Type" not in texts
+    assert "Prosperity" not in texts
+    assert "Community" not in texts
+    docket_targets = [(ident, bbox) for kind, ident, bbox, _callback in view._click_targets if kind == "docket"]
+    assert {ident for ident, _bbox in docket_targets} == {"T01-vendor", "T02", "T03"}
+    assert all(bbox[2] <= 250 for _ident, bbox in docket_targets)
+    assert any(kind == "map-key" for kind, _args, _kwargs in canvas.created)
+    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    inbox_targets = [bbox for _ident, bbox in docket_targets]
+    assert map_key[0] < 250
+    assert map_key[1] > max(bbox[3] for bbox in inbox_targets)
+    assert map_key[3] - map_key[1] >= 240
+    assert ("desk-tab", "Applications") in [(kind, ident) for kind, ident, _bbox, _callback in view._click_targets]
+    assert ("desk-tab", "Filed Reports") in [(kind, ident) for kind, ident, _bbox, _callback in view._click_targets]
+
+
+def test_wireframe_workspace_draws_center_application_table_and_side_rails():
+    """Verify Applications follows the wireframe regions."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    regions = {kind: args for kind, args, _kwargs in canvas.created if kind in {"app-info", "action-grid", "district-table", "map-key"}}
+    assert {"app-info", "action-grid", "district-table", "map-key"} <= set(regions)
+    assert regions["app-info"][1] < regions["action-grid"][1] < regions["district-table"][1]
+    assert regions["map-key"][0] < regions["app-info"][0]
+    assert regions["district-table"][3] >= 880
+
+
+def test_wireframe_workspace_keeps_table_attached_to_decision_module():
+    """Verify tall windows do not leave a large blank well above the table."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    regions = {kind: args for kind, args, _kwargs in canvas.created if kind in {"active-card", "action-grid", "district-table"}}
+    assert {"active-card", "action-grid", "district-table"} <= set(regions)
+    assert regions["active-card"][3] - regions["action-grid"][3] <= 44
+    assert regions["district-table"][1] - regions["active-card"][3] <= 16
+
+
+def test_full_dashboard_table_spans_under_decision_and_city_pulse():
+    """Verify the bottom attributes pane cuts under both upper work columns."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+
+    view._draw(1120, 900)
+
+    active = next(args for kind, args, _kwargs in canvas.created if kind == "active-card")
+    pulse = next(args for kind, args, _kwargs in canvas.created if kind == "city-pulse")
+    table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
+
+    assert pulse[3] - pulse[1] < table[3] - pulse[1]
+    assert table[1] >= max(active[3], pulse[3])
+    assert table[0] < pulse[0] < table[2]
+    assert table[3] >= 880
+
+
+def test_full_dashboard_left_folder_rail_runs_past_attribute_table():
+    """Verify only middle/right panes sit above the bottom table."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+
+    view._draw(1120, 900)
+
+    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
+    assert map_key[0] < table[0]
+    assert map_key[3] >= table[3] - 20
+
+
+def test_map_key_draws_contents_style_point_line_and_area_glyphs():
+    """Verify legend symbols resemble ArcGIS Contents layer glyphs."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_map_key_rail(canvas, (0, 0, 260, 520), groups=("PermitPoints", "PermitLines", "PermitZones", "Selection"))
+
+    assert any(kind == "oval" for kind, _args, _kwargs in canvas.created)
+    assert any(kind == "line" and kwargs.get("width", 1) >= 3 for kind, _args, kwargs in canvas.created)
+    assert any(kind == "rect" and kwargs.get("width", 1) >= 2 for kind, _args, kwargs in canvas.created)
+
+
+def test_filed_reports_workspace_uses_history_list_and_detail_panel():
+    """Verify Filed Reports swaps the folder rail from inbox to report history."""
+
+    item, districts = _vendor_case()
+    tabs = (
+        ReportTab("week-1", "Week Closed", "week", "week", False, "Week one report."),
+        ReportTab("decision-1", "Street Vendor", "decision", "approved", False, "Decision filed."),
+    )
+    model = build_desk_model(
+        rules.CityState(),
+        districts,
+        [item],
+        item.item_id,
+        report_tabs=tabs,
+        selected_report_id="week-1",
+        selected_desk_tab="reports",
+    )
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 900, 620))
+
+    texts = _text_values(canvas)
+    assert "HISTORY" in texts
+    assert "REPORT DETAIL" in texts
+    assert "Week Closed" in texts
+    assert "Week one report." in texts
+    report_targets = [(ident, bbox) for kind, ident, bbox, _callback in view._click_targets if kind == "report"]
+    assert [ident for ident, _bbox in report_targets] == ["week-1", "decision-1"]
+
+
+def test_city_pulse_draws_standing_stat_grid_wire_and_district_groups():
+    """Verify right rail uses standing, stats, group health, and map state without ticker duplication."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(activity=55, trust=42, friction=35, exposure=28), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_ledger_rail(canvas, (0, 0, 290, 720))
+
+    texts = _text_values(canvas)
+    assert "OFFICE STANDING" in texts
+    assert "DISTRICT GROUPS" in texts
+    assert "MAP STATE" in texts
+    assert "PermitDistricts" in texts
+    assert "district_type" in texts
+    assert "District display" in texts
+    assert "display_state" in texts
+    assert "Prosperity" in texts
+    assert "Community" in texts
+    assert "WIRE" not in texts
+    assert "WIRE QUEUE" not in texts
+    assert "Latest city signals driving current risk." not in texts
+    assert {"ACTIVITY", "TRUST", "FRICTION", "EXPOSURE"} <= set(texts)
+
+
+def test_selected_case_actions_are_nearby_cards_without_global_toolbar_targets():
+    """Verify selected-case actions live in the central card region only."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 900, 620))
+
+    case_actions = [(ident, bbox) for kind, ident, bbox, _callback in view._click_targets if kind == "case-action"]
+    action_labels = {ident for ident, _bbox in case_actions}
+    assert {"Issue Permit", "Add Conditions", "Deny", "Inspect File", "Retarget Map"} <= action_labels
+    assert all(230 < bbox[0] < 700 and bbox[1] > 110 for _ident, bbox in case_actions)
+    assert not [target for target in view._click_targets if target[0] == "action"]
+
+
+def test_selected_case_action_cards_attach_to_brief_with_costs():
+    """Verify all map tools and decisions render as one 3x2 action grid."""
+
+    item = rules.DocketItem(
+        "maint",
+        rules.MAINTENANCE_TEMPLATE_ID,
+        "Feature Maintenance Order",
+        "POINT",
+        1,
+        target_cell_ids=["D0000"],
+    )
+    profile = rules.DistrictProfile("D0000", "Market Row", 1000, 50, 20, 35, 25, 50, "mercantile")
+    districts = {profile.cell_id: rules.normalize_profile(profile)}
+    model = build_desk_model(
+        rules.CityState(ap=3, money=60),
+        districts,
+        [item],
+        item.item_id,
+        proposal_visible_by_item={item.item_id: True},
+    )
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    case_actions = [(ident, bbox) for kind, ident, bbox, _callback in view._click_targets if kind == "case-action"]
+    labels = {ident for ident, _bbox in case_actions}
+    assert {
+        "Hide Proposed Feature",
+        "Retarget Map",
+        "Inspect File",
+        "Fund Repair",
+        "Patch",
+        "Defer",
+    } <= labels
+    assert len(case_actions) == 6
+    assert len(labels) == 6
+    heights = [bbox[3] - bbox[1] for _ident, bbox in case_actions]
+    assert min(heights) >= 70
+    assert max(heights) <= 180
+    regions = {kind: args for kind, args, _kwargs in canvas.created if kind in {"app-info", "action-grid", "district-table"}}
+    assert regions["app-info"][3] < regions["action-grid"][1] < regions["district-table"][1]
+    assert regions["district-table"][3] >= 880
+    row_tops = sorted({round(bbox[1] / 10) * 10 for _ident, bbox in case_actions})
+    assert len(row_tops) == 2
+    assert all(sum(1 for _ident, bbox in case_actions if abs((round(bbox[1] / 10) * 10) - row) <= 10) == 3 for row in row_tops)
+
+    texts = _text_values(canvas)
+    assert "0 AP" in texts
+    assert "1 AP" in texts
+    assert "1 AP / $6" in texts
+    assert "1 AP / $10; conditions +$4" in texts
+    assert "0 AP / $0; may return as follow-up" in texts
+    assert "City" in texts
+    assert "Local" in texts
+    assert any("Service Failure" in str(text) for text in texts)
+    info_boxes = [args for kind, args, _kwargs in canvas.created if kind == "decision-info"]
+    assert info_boxes
+    info_h = info_boxes[0][3] - info_boxes[0][1]
+    grid_h = max(bbox[3] for _ident, bbox in case_actions) - min(bbox[1] for _ident, bbox in case_actions)
+    assert 1.0 <= info_h / grid_h <= 1.6
+
+
+def test_decision_actions_are_not_duplicated_in_bottom_utility_row():
+    """Verify decision and utility actions share one 3x2 grid instead of separate rows."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    action_boxes = {ident: bbox for kind, ident, bbox, _callback in view._click_targets if kind == "case-action"}
+    assert len(action_boxes) == 6
+    assert {"Issue Permit", "Add Conditions", "Deny", "Retarget Map", "Inspect File"} <= set(action_boxes)
+    row_tops = sorted({round(bbox[1] / 10) * 10 for bbox in action_boxes.values()})
+    assert len(row_tops) == 2
+    assert min(bbox[3] - bbox[1] for bbox in action_boxes.values()) >= 70
+    assert max(bbox[3] - bbox[1] for bbox in action_boxes.values()) <= 180
+
+
+def test_inbox_keeps_multiple_rows_with_the_expanded_map_key():
+    """Verify the expanded map key does not starve the inbox list."""
+
+    rows = [
+        rules.DocketItem(f"T{n:02d}", "street_vendor_compact", f"Case {n}", "POINT", 1)
+        for n in range(1, 9)
+    ]
+    _item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, rows, "T01")
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
+    assert docket_boxes
+    assert map_key[3] - map_key[1] >= 440
+    assert len(docket_boxes) >= 4
+
+
+def test_inbox_rows_are_large_enough_to_use_the_left_rail():
+    """Verify application inbox rows are not compressed into tiny strips."""
+
+    rows = [
+        rules.DocketItem(f"T{n:02d}", "street_vendor_compact", f"Long Application Case {n}", "POINT", 1)
+        for n in range(1, 7)
+    ]
+    _item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, rows, "T01")
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
+    assert docket_boxes
+    assert min(bbox[3] - bbox[1] for bbox in docket_boxes) >= 52
+
+
+def test_inbox_rows_end_close_to_the_map_key():
+    """Verify the inbox list does not leave a large dead gap above the key."""
+
+    rows = [
+        rules.DocketItem(f"T{n:02d}", "street_vendor_compact", f"Application Case {n}", "POINT", 1)
+        for n in range(1, 5)
+    ]
+    _item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, rows, "T01")
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
+    assert map_key[1] - max(bbox[3] for bbox in docket_boxes) <= 64
+
+
+def test_status_strip_marquee_draws_wire_text_at_scrolled_position():
+    """Verify ambient status text is rendered as a right-to-left marquee."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+    view._status_strip_box = (0, 0, 420, 28)
+
+    view.update_status_marquee(0)
+    first_wire = [
+        args[0]
+        for kind, args, kwargs in canvas.created
+        if kind == "text" and kwargs.get("tags") == ("status-strip", "status-marquee")
+    ][0]
+
+    canvas.created.clear()
+    view.update_status_marquee(36)
+    second_wire = [
+        args[0]
+        for kind, args, kwargs in canvas.created
+        if kind == "text" and kwargs.get("tags") == ("status-strip", "status-marquee")
+    ][0]
+
+    assert second_wire < first_wire
+
+
+def test_hybrid_layout_caps_work_area_and_widens_map_key_for_legibility():
+    """Verify the folder rail gives the key a bounded but legible block."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    map_key_boxes = [args for kind, args, _kwargs in canvas.created if kind == "map-key"]
+    assert map_key_boxes
+    x0, y0, x1, y1 = map_key_boxes[0]
+    assert x1 <= 260
+    assert y0 > 240
+    assert 440 <= y1 - y0 <= 520
+    texts = _text_values(canvas)
+    assert "PermitPoints" in texts
+    assert "PermitLines" in texts
+    assert "PermitZones" in texts
+
+
+def test_tall_workspace_splits_left_rail_between_inbox_and_map_symbols():
+    """Verify tall ArcGIS windows do not leave the left rail mostly empty."""
+
+    rows = [
+        rules.DocketItem(f"T{n:02d}", "street_vendor_compact", f"Application Case {n}", "POINT", 1)
+        for n in range(1, 5)
+    ]
+    _item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, rows, "T01")
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 1500))
+
+    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    docket_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "docket"]
+    assert docket_boxes
+    assert map_key[3] - map_key[1] >= 650
+    assert map_key[1] - max(bbox[3] for bbox in docket_boxes) <= 80
+
+
+def test_application_workspace_uses_full_available_height_for_detail_and_rails():
+    """Verify the main desk does not leave a large unused lower half at startup."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
+
+    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    district_table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
+    action_grid = next(args for kind, args, _kwargs in canvas.created if kind == "action-grid")
+    case_action_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "case-action"]
+    assert map_key[3] >= 880
+    assert district_table[3] >= 880
+    assert action_grid[3] < district_table[1]
+    assert case_action_boxes
+
+
+def test_decision_lane_bounds_local_text_inside_narrow_card():
+    """Verify narrow hybrid lanes do not push Local text outside the card."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    lane = model.action_lanes[0]
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    lane_x1 = 520
+
+    view._draw_decision_lane(canvas, 240, 120, lane_x1, 200, lane)
+
+    local_texts = [
+        (args, kwargs)
+        for kind, args, kwargs in canvas.created
+        if kind == "text" and kwargs.get("text") == "Local"
+    ]
+    assert local_texts
+    local_x = local_texts[0][0][0]
+    assert 240 < local_x < lane_x1
+    bounded_texts = [
+        (args, kwargs)
+        for kind, args, kwargs in canvas.created
+        if kind == "text" and kwargs.get("width") is not None
+    ]
+    assert bounded_texts
+    for args, kwargs in bounded_texts:
+        width = kwargs["width"]
+        assert width > 0
+        assert args[0] + width <= lane_x1 - 12
+
+
+def test_inbox_rail_pins_selected_case_when_beyond_visible_cap():
+    """Verify the selected item remains visible even deep in a long docket."""
+
+    item, districts = _vendor_case()
+    rows = [item] + [
+        rules.DocketItem(f"T{n:02d}", "street_vendor_compact", f"Case {n}", "POINT", 1)
+        for n in range(2, 18)
+    ]
+    selected_id = "T16"
+    model = build_desk_model(rules.CityState(), districts, rows, selected_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_inbox_rail(canvas, (0, 0, 190, 330), list(model.docket_rows), selected_id)
+
+    target_ids = [ident for kind, ident, _bbox, _callback in view._click_targets if kind == "docket"]
+    assert target_ids[0] == selected_id
+    assert "ACTIVE" in _text_values(canvas)
 
 
 class _FakeCanvas:
@@ -426,6 +1130,11 @@ class _FakeCanvas:
         """Record a line and return its synthetic id."""
 
         return self._record("line", args, kwargs)
+
+    def create_oval(self, *args, **kwargs):
+        """Record an oval and return its synthetic id."""
+
+        return self._record("oval", args, kwargs)
 
     def delete(self, *_args):
         """Record canvas clearing for full-draw tests."""
@@ -514,8 +1223,8 @@ def _text_values(canvas):
     return [kwargs.get("text") for kind, _args, kwargs in canvas.created if kind == "text"]
 
 
-def test_application_workspace_stacks_queued_cases_under_active_case():
-    """Verify the active case expands while queued cases collapse vertically beneath it."""
+def test_application_workspace_lists_active_and_queued_cases_in_left_inbox():
+    """Verify the active case expands centrally while all docket rows stay selectable in the rail."""
 
     item, districts = _vendor_case()
     rows = [
@@ -530,10 +1239,11 @@ def test_application_workspace_stacks_queued_cases_under_active_case():
 
     view._draw_application_tab_content(canvas, (0, 0, 760, 700))
 
-    # The active case (T03) is the expanded brief, not a collapsed queued row.
     target_ids = [ident for kind, ident, _bbox, _callback in view._click_targets if kind == "docket"]
-    assert target_ids == ["T01-vendor", "T02", "T04"]
-    assert "QUEUED (3)" in _text_values(canvas)
+    assert target_ids == ["T01-vendor", "T02", "T03", "T04"]
+    assert "INBOX" in _text_values(canvas)
+    assert "ACTIVE" in _text_values(canvas)
+    assert "DECISION BRIEF" in _text_values(canvas)
     assert not any(text.startswith("+") and "queued" in text for text in _text_values(canvas))
 
 
@@ -744,8 +1454,8 @@ def test_selected_application_uses_explicit_proposed_feature_copy():
         assert expected in _text_values(canvas)
 
 
-def test_decision_brief_uses_vertical_lane_rows_for_breathing_room():
-    """Verify action consequences use stacked rows instead of cramped columns."""
+def test_decision_brief_uses_two_row_action_grid_for_breathing_room():
+    """Verify actions use a roomy 3x2 grid instead of cramped columns."""
 
     item, districts = _vendor_case()
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
@@ -754,20 +1464,18 @@ def test_decision_brief_uses_vertical_lane_rows_for_breathing_room():
 
     view._draw_active_card(canvas, (0, 0, 760, 620))
 
-    lane_rects = [
-        args
-        for kind, args, kwargs in canvas.created
-        if kind == "rect" and kwargs.get("fill") == Palette.PAPER_ALT and len(args) == 4 and args[3] - args[1] >= 58
-    ]
-    assert len(lane_rects) >= 3
-    assert lane_rects[1][1] > lane_rects[0][1]
-    assert lane_rects[2][1] > lane_rects[1][1]
+    action_boxes = [bbox for kind, _ident, bbox, _callback in view._click_targets if kind == "case-action"]
+    assert len(action_boxes) == 6
+    row_tops = sorted({round(bbox[1] / 10) * 10 for bbox in action_boxes})
+    assert len(row_tops) == 2
+    assert all(sum(1 for bbox in action_boxes if round(bbox[1] / 10) * 10 == row) == 3 for row in row_tops)
 
 
-def test_city_health_rail_draws_only_slim_pulse_signals():
-    """Verify City Health defaults to pulse signals, not the full ledger."""
+def test_office_standing_rail_keeps_threat_tracks_in_wire_ticker_not_pulse():
+    """Verify City Pulse focuses on standing/stats while threats live in WIRE."""
 
     item, districts = _vendor_case()
+    districts["D0000"].service_gap["utilities"] = 42
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
     view, _callbacks = _view_for_drawing(model)
     canvas = _FakeCanvas()
@@ -776,10 +1484,15 @@ def test_city_health_rail_draws_only_slim_pulse_signals():
 
     texts = _text_values(canvas)
     assert "CITY PULSE" in texts
+    assert "OFFICE STANDING" in texts
+    assert "THREATS" not in texts
+    assert not any("Service Failure" in str(text) for text in texts)
+    assert any(text.startswith("WIRE:") and "Service Failure" in text and "utilities gap 42" in text for text in model.ticker_items)
     assert "ACTIVITY" in texts
     assert "TRUST" in texts
+    assert "FRICTION" in texts
     assert "EXPOSURE" in texts
-    assert "PRESSURE" in texts
+    assert "PRESSURE" not in texts
     assert "SERVICES" not in texts
     assert "HOUSING" not in texts
     assert "MAINTENANCE" not in texts
@@ -788,9 +1501,9 @@ def test_city_health_rail_draws_only_slim_pulse_signals():
 def test_build_desk_model_does_not_mutate_districts_argument():
     """Verify scoring the Audit row leaves the caller's district profiles intact.
 
-    `_ledger_rows` scores the live audit for the Audit row. It must not mutate the
-    districts passed in — we rely on `normalize_profile` being idempotent instead
-    of a defensive `deepcopy`, so a normalized profile must round-trip unchanged.
+    `_ledger_rows` scores the live audit for the Audit row. Its defensive copy
+    path must leave the caller's districts unchanged, so a normalized profile
+    must round-trip unchanged.
     """
 
     import copy
@@ -810,7 +1523,7 @@ def test_build_desk_model_does_not_mutate_districts_argument():
 
 
 def test_city_health_index_folds_core_metrics():
-    """Verify the City Health headline summarizes the four core metrics."""
+    """Verify the compatibility wrapper preserves the City Health formula."""
 
     from toolbox.permit_office_arcgis.desk_model import _city_health_index
 
@@ -823,20 +1536,51 @@ def test_city_health_index_folds_core_metrics():
     assert 0 <= _city_health_index(failing) <= 100
 
 
-def test_ledger_surfaces_city_health_headline_and_heat():
-    """Verify the ledger leads with a Health row and keeps Heat visible."""
+def test_office_standing_index_reuses_city_vital_formula():
+    """Verify Office Standing preserves the existing City Health formula."""
+
+    from toolbox.permit_office_arcgis.desk_model import _office_standing_index
+
+    strong = rules.CityState(activity=80, trust=60, friction=10, exposure=20)
+    assert _office_standing_index(strong) == 78
+
+    failing = rules.CityState(activity=20, trust=15, friction=70, exposure=65)
+    assert _office_standing_index(failing) == 25
+    assert 0 <= _office_standing_index(failing) <= 100
+
+
+def test_ledger_surfaces_office_standing_headline():
+    """Verify the ledger leads with Office Standing instead of City Health."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(
+        rules.CityState(activity=70, trust=55, friction=15, exposure=20),
+        districts,
+        [item],
+        item.item_id,
+    )
+    ledger = {row.label: row for row in model.ledger_rows}
+
+    assert "Office Standing" in ledger
+    assert ledger["Office Standing"].meter is not None
+    assert ledger["Office Standing"].value == "72 Strong"
+    assert "Health" not in ledger
+
+
+def test_ledger_surfaces_office_standing_headline_and_heat():
+    """Verify the ledger leads with Office Standing and keeps Heat visible."""
 
     item, districts = _vendor_case()
     model = build_desk_model(rules.CityState(activity=70, trust=55, friction=15, exposure=20), districts, [item], item.item_id)
     ledger = {row.label: row for row in model.ledger_rows}
 
-    assert "Health" in ledger
-    assert ledger["Health"].meter is not None
+    assert "Office Standing" in ledger
+    assert ledger["Office Standing"].meter is not None
     assert "Heat" in ledger
 
 
-def test_city_health_rail_draws_health_and_heat_headline():
-    """Verify the pulse rail renders the City Health gauge and Heat indicator."""
+def test_city_health_rail_draws_office_standing_without_wire_headline():
+    """Verify the pulse rail renders Office Standing without duplicating the ticker."""
 
     item, districts = _vendor_case()
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
@@ -846,8 +1590,11 @@ def test_city_health_rail_draws_health_and_heat_headline():
     view._draw_ledger_rail(canvas, (0, 0, 260, 620))
 
     texts = _text_values(canvas)
-    assert "CITY HEALTH" in texts
-    assert "HEAT" in texts
+    assert "OFFICE STANDING" in texts
+    assert "THREATS" not in texts
+    assert any(text.startswith("WIRE:") for text in model.ticker_items)
+    assert "HEAT" not in texts
+    assert "CITY HEALTH" not in texts
 
 
 def test_selected_case_renders_economy_and_action_note():
@@ -902,8 +1649,8 @@ def test_session_menu_offers_manual_end_week_when_out_of_ap():
     assert ("advance_turn", ()) in callbacks.calls
 
 
-def test_start_help_overlay_explains_score_exhibits_and_resume():
-    """Verify the help overlay covers score optimization, exhibits, and resume behavior."""
+def test_start_help_overlay_is_short_start_card_with_primary_actions():
+    """Verify the start/help sheet is a compact start card, not the old long manual."""
 
     model = build_desk_model(rules.CityState(), {}, [], show_start_help=True)
     view, _callbacks = _view_for_drawing(model)
@@ -911,13 +1658,16 @@ def test_start_help_overlay_explains_score_exhibits_and_resume():
 
     view._draw_start_help_overlay(canvas, 1120, 860)
 
-    body = " ".join(str(text) for text in _text_values(canvas))
-    for phrase in ("Activity", "Trust", "Services", "money", "Friction", "Exposure"):
-        assert phrase in body
-    for phrase in ("Show Proposed Feature", "selected application's map exhibit", "Retarget Map"):
-        assert phrase in body
-    for phrase in ("End Game", "geodatabase", "resume"):
-        assert phrase in body
+    texts = [str(text or "") for text in _text_values(canvas)]
+    body = " ".join(texts)
+    assert "PERMIT OFFICE" in texts
+    assert any("Run a 12-week civic desk" in text for text in texts)
+    assert "NEW GAME" in texts
+    assert "HELP" in texts
+    assert len([text for text in texts if len(text) > 80]) <= 1
+    assert "Score optimization" not in body
+    assert "Show Proposed Feature" not in body
+    assert "Unresolved cases forecast" not in body
 
 
 def test_summary_helpers_report_service_hazard_and_maintenance_backlog():

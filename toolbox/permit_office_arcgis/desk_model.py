@@ -11,10 +11,16 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from .rules_loader import rules
+from .symbology_config import (
+    DISPLAY_STATE_SYMBOLS,
+    DISTRICT_TYPE_SYMBOLS,
+    IDENTITY_STATE_SYMBOLS,
+    PROSPERITY_BAND_SYMBOLS,
+)
 
 
 ACTIVE_STATUSES = frozenset(("open", "inspected", "active", "carried"))
-HEADLINE_METRICS = (("Week", "WEEK"), ("AP", "AP"), ("Money", "$"), ("Heat", "HEAT"), ("Audit", "AUDIT"), ("Pressure", "PRESS"))
+HEADLINE_METRICS = (("Week", "WEEK"), ("AP", "AP"), ("Money", "$"), ("Office Standing", "STAND"), ("Audit", "AUDIT"), ("Threats", "THREAT"))
 
 
 @dataclass(frozen=True)
@@ -136,6 +142,41 @@ class ActionLane:
 
 
 @dataclass(frozen=True)
+class MapLegendRow:
+    """One row in the public map key rail."""
+
+    group: str
+    label: str
+    detail: str
+    swatch: str
+    tone: str = "neutral"
+
+
+@dataclass(frozen=True)
+class DistrictGroupRow:
+    """Aggregated district-division health for the city pulse rail."""
+
+    label: str
+    state: str
+    detail: str
+    tone: str = "neutral"
+    meter: int = 0
+
+
+@dataclass(frozen=True)
+class DistrictTableRow:
+    """One district state row for the live bottom attribute table."""
+
+    district: str
+    name: str
+    district_type: str
+    prosperity: str
+    pressure: str
+    community: str
+    selected: bool = False
+
+
+@dataclass(frozen=True)
 class DeskViewModel:
     """Everything the desk view needs to draw one frame."""
 
@@ -159,6 +200,9 @@ class DeskViewModel:
     auto_close_active: bool = False
     auto_close_seconds: int = 0
     game_active: bool = True
+    map_legend_rows: tuple[MapLegendRow, ...] = ()
+    district_group_rows: tuple[DistrictGroupRow, ...] = ()
+    district_table_rows: tuple[DistrictTableRow, ...] = ()
 
 
 def build_desk_model(
@@ -227,6 +271,9 @@ def build_desk_model(
         )
     exhibit_visible = bool(proposal_visible_by_item.get(selected_id))
     ticker_items = _ticker_items(state, districts, active_features, active_items, report_tabs)
+    map_legend_rows = _map_legend_rows(districts, active_items, selected_id)
+    district_group_rows = _district_group_rows(districts)
+    district_table_rows = _district_table_rows(districts, selected)
     return DeskViewModel(
         docket_rows,
         selected_id,
@@ -248,6 +295,9 @@ def build_desk_model(
         bool(auto_close_active),
         int(auto_close_seconds or 0),
         bool(game_active),
+        map_legend_rows,
+        district_group_rows,
+        district_table_rows,
     )
 
 
@@ -422,6 +472,10 @@ def _action_lanes(state, districts, item) -> tuple[ActionLane, ...]:
     issue_city = _city_forecast_bucket(template, targets, mitigated=False)
     mitigated_city = _city_forecast_bucket(template, targets, mitigated=True)
     deny_city = _deny_forecast(template)
+    threat = _template_primary_threat(template)
+    issue_city = f"{threat}: {issue_city}"
+    mitigated_city = f"{threat}: {mitigated_city}"
+    local = f"Threat context: {local}"
     issue_enabled, issue_reason = _resource_available(state, template.ap_cost, issue_money)
     mitigated_enabled, mitigated_reason = _resource_available(state, template.ap_cost, mitigated_money)
     deny_enabled, deny_reason = _resource_available(state, deny_ap, 0)
@@ -456,18 +510,50 @@ def _action_lane_labels(template) -> tuple[str, str, str]:
     return "Issue Permit", "Add Conditions", "Deny"
 
 
+def _template_primary_threat(template) -> str:
+    """Return the public threat track most associated with a template."""
+
+    category = getattr(template, "category", "")
+    pressure = getattr(template, "pressure_category", "")
+    if pressure in ("maintenance", "service"):
+        return "Service Failure"
+    if pressure in ("housing", "land", "construction"):
+        return "Speculation Pressure"
+    if pressure in ("health", "incident", "business", "event", "culture"):
+        return "Public Anger"
+    if pressure in (
+        "inspection",
+        "safety",
+        "enforcement",
+        "compliance",
+        "utility",
+        "department",
+    ):
+        return "Legal Exposure"
+    if category in ("development", "residential", "land"):
+        return "Speculation Pressure"
+    if template.is_incident or category in ("event", "business", "culture"):
+        return "Public Anger"
+    if template.is_enforcement or category in ("compliance", "utility", "department"):
+        return "Legal Exposure"
+    if category in ("education",):
+        return "Service Failure"
+    return "Public Anger"
+
+
 def _deny_forecast(template) -> str:
     """Return a compact deny/defer consequence forecast."""
 
+    threat = _template_primary_threat(template)
     if getattr(template, "pressure_category", "") == "maintenance":
-        return "maintenance deferred; condition keeps degrading"
+        return "Service Failure rises if maintenance is deferred"
     if template.is_incident:
-        return "incident remains open"
+        return "Public Anger rises while incident remains open"
     if template.is_enforcement:
-        return "enforcement deferred"
+        return "Legal Exposure rises while enforcement is deferred"
     if template.failure_mode:
-        return f"risk of {template.failure_mode}"
-    return "no immediate build; applicant heat may rise"
+        return f"{threat} may rise; risk of {template.failure_mode}"
+    return f"{threat} may rise; applicant heat may return"
 
 
 def _cost_bucket_value(template) -> str:
@@ -818,28 +904,59 @@ def _worst_tone(*tones) -> str:
     return max((tone or "neutral" for tone in tones), key=lambda tone: priority.get(tone, 0))
 
 
-def _city_health_index(state) -> int:
-    """Fold the four core metrics into one 0-100 city wellness signal.
+def _office_standing_index(state) -> int:
+    """Fold the four core metrics into one 0-100 office legitimacy signal.
 
-    Activity and Trust read positive; Friction and Exposure read negative. The
-    engine still tracks the four metrics independently -- this is a presentation
-    summary so the player has one headline gauge instead of four bars to parse.
+    Activity and Trust read positive; Friction and Exposure read negative. This
+    preserves the prior City Health formula while changing the player-facing
+    framing from generic wellness to the office's mandate to keep issuing permits.
     """
 
-    score = (int(state.activity) + int(state.trust) + (100 - int(state.friction)) + (100 - int(state.exposure))) / 4
-    return max(0, min(100, round(score)))
+    return rules.office_standing_index(state)
 
 
-def _city_health_descriptor(value: int) -> tuple[str, str]:
-    """Return a (word, tone) summary for a city health index value."""
+def _office_standing_descriptor(value: int) -> tuple[str, str]:
+    """Return a (word, tone) summary for Office Standing."""
 
     if value >= 65:
-        return "Thriving", "good"
+        return "Strong", "good"
     if value >= 45:
-        return "Stable", "watch"
+        return "Authorized", "watch"
     if value >= 30:
         return "Strained", "watch"
     return "Failing", "bad"
+
+
+def _city_health_index(state) -> int:
+    """Compatibility wrapper for older tests and callers."""
+
+    return _office_standing_index(state)
+
+
+def _city_health_descriptor(value: int) -> tuple[str, str]:
+    """Compatibility wrapper for older tests and callers."""
+
+    return _office_standing_descriptor(value)
+
+
+THREAT_TRACKS = ("Public Anger", "Legal Exposure", "Service Failure", "Speculation Pressure")
+
+
+def _threat_track_summaries(state, districts, active_features=None, docket=None) -> tuple[LedgerRow, ...]:
+    """Collapse internal pressure fields into player-facing threat tracks."""
+
+    derived = rules.derive_threat_tracks(state, districts, active_features, docket)
+    rows: list[LedgerRow] = []
+    for track in derived:
+        if not track.reasons:
+            continue
+        value = "; ".join(track.reasons[:3])
+        rows.append(LedgerRow(track.label, value, track.tone, track.score))
+
+    if rows:
+        order = {label: index for index, label in enumerate(THREAT_TRACKS)}
+        return tuple(sorted(rows, key=lambda row: (-(row.meter or 0), order.get(row.label, len(order)))))
+    return (LedgerRow("Threats", "quiet", "neutral"),)
 
 
 def _ledger_rows(state, districts, active_features=None, docket=None, audit_grade=None) -> tuple[LedgerRow, ...]:
@@ -852,8 +969,8 @@ def _ledger_rows(state, districts, active_features=None, docket=None, audit_grad
     districts this function reads afterward.
     """
 
-    health = _city_health_index(state)
-    health_word, health_tone = _city_health_descriptor(health)
+    standing = _office_standing_index(state)
+    standing_word, standing_tone = _office_standing_descriptor(standing)
     heat = rules.heat_summary(state)
     # NOTE: the deepcopy on the None path is load-bearing. `scorecard` ->
     # `generate_audit_result` calls `normalize_profile` in place, which re-derives
@@ -871,14 +988,20 @@ def _ledger_rows(state, districts, active_features=None, docket=None, audit_grad
     housing_summary = _housing_pressure_summary(districts.values() if isinstance(districts, dict) else districts)
     maintenance = _maintenance_summary(active_features) if active_features is not None else _maintenance_count_from_state(state)
     pressure = _pressure_cause_summary(districts)
+    threat_rows = _threat_track_summaries(state, districts, active_features, docket or ())
+    headline_threat = threat_rows[0]
+    threat_value = headline_threat.value if headline_threat.label == "Threats" else f"{headline_threat.label}: {headline_threat.value}"
+    threat_tone = headline_threat.tone
+    threat_meter = headline_threat.meter
     week_value = f"{state.turn}/{state.max_turns} CLOSED" if state.status == "complete" or state.turn > state.max_turns else f"{state.turn}/{state.max_turns}"
     return (
-        LedgerRow("Health", f"{health} {health_word}", health_tone, health),
+        LedgerRow("Office Standing", f"{standing} {standing_word}", standing_tone, standing),
         LedgerRow("Week", week_value, "neutral", _meter(state.turn, state.max_turns)),
         LedgerRow("AP", f"{state.ap}/{state.max_ap}", "good" if state.ap else "watch", _meter(state.ap, state.max_ap)),
         LedgerRow("Money", f"${state.money}", "good" if state.money >= 20 else "watch"),
-        LedgerRow("Heat", heat, "bad" if heat != "none" else "neutral"),
         LedgerRow("Audit", _short_audit_grade(audit_grade), "bad" if audit_grade == "FAIL" else "watch" if audit_grade == "CONDITIONAL" else "good"),
+        LedgerRow("Threats", threat_value, threat_tone, threat_meter),
+        LedgerRow("Heat", heat, "bad" if heat != "none" else "neutral"),
         LedgerRow("Pressure", pressure, "watch" if pressure != "stable" else "neutral"),
         LedgerRow("Activity", str(state.activity), "good", state.activity),
         LedgerRow("Friction", str(state.friction), "bad" if state.friction >= 50 else "watch", state.friction),
@@ -978,36 +1101,214 @@ def _ticker_items(state, districts, active_features=None, docket=None, report_ta
     """Build deterministic city ticker lines from live game state."""
 
     items = []
+    threat_rows = _threat_track_summaries(state, districts, active_features, docket)
+    lead_threat = threat_rows[0]
+    if lead_threat.label != "Threats":
+        items.append(f"WIRE: threat desk reports {lead_threat.label}: {lead_threat.value}.")
     heat = rules.heat_summary(state)
     if heat != "none":
-        items.append(f"Heat desk: {heat} may become incident, enforcement, or follow-up filing.")
+        items.append(f"WIRE: heat desk flags {heat}; incident, enforcement, or follow-up filing may arrive.")
     pressure = _pressure_cause_summary(districts)
     if pressure != "stable":
-        items.append(f"Street wire: {pressure} showing on district files.")
+        items.append(f"WIRE: street desk sees {pressure} showing on district files.")
     incidents = rules.incident_summary(districts)
     if incidents != "none":
-        items.append(f"Civic desk: {incidents}.")
+        items.append(f"WIRE: civic desk logs {incidents}.")
     profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
     contested = sorted((p for p in profiles if getattr(p, "identity_state", "stable") == "contested"), key=lambda p: p.cell_id)
     converted = sorted((p for p in profiles if getattr(p, "identity_state", "stable") == "converted"), key=lambda p: p.cell_id)
     if contested:
         lead = contested[0]
-        items.append(f"Boundary desk: {lead.name} fending off a {lead.contesting_type} buyout; office attention can still hold the line.")
+        items.append(f"WIRE: boundary desk says {lead.name} is fending off a {lead.contesting_type} buyout.")
     elif converted:
         lead = converted[0]
-        items.append(f"Boundary desk: {lead.name} has flipped {lead.district_type} after a neighbor's buyout cleared.")
+        items.append(f"WIRE: boundary desk notes {lead.name} flipped {lead.district_type} after a neighbor buyout cleared.")
     maintenance = _maintenance_summary(active_features) if active_features is not None else _maintenance_count_from_state(state)
     if maintenance != "none":
-        items.append(f"Works desk: maintenance {maintenance}.")
+        items.append(f"WIRE: works desk lists maintenance {maintenance}.")
     open_count = len([item for item in docket or () if item.status in ACTIVE_STATUSES])
     if open_count:
-        items.append(f"Clerk queue: {open_count} active application(s), {state.ap}/{state.max_ap} AP left.")
+        items.append(f"WIRE: clerk queue has {open_count} active application(s), {state.ap}/{state.max_ap} AP left.")
     if report_tabs:
         latest = report_tabs[-1]
-        items.append(f"Filed: {latest.title}.")
+        items.append(f"WIRE: filed report added, {latest.title}.")
     if not items:
-        items.append("City desk quiet: filings orderly, complaints merely decorative.")
+        items.append("WIRE: city desk quiet, filings orderly and complaints contained.")
     return tuple(items[:4])
+
+
+def _map_legend_rows(districts, docket=None, selected_item_id="") -> tuple[MapLegendRow, ...]:
+    """Build public map-key rows for the Applications right rail."""
+
+    rows: list[MapLegendRow] = []
+    profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
+    district_type_keys = _ordered_values((getattr(profile, "district_type", "") or "district" for profile in profiles), DISTRICT_TYPE_SYMBOLS)
+    for key in district_type_keys[:6] or ["residential"]:
+        label = DISTRICT_TYPE_SYMBOLS.get(key, ([216, 225, 222, 100], _display(key)))[1]
+        rows.append(MapLegendRow("PermitDistricts", label, "base district fill", _symbol_hex(DISTRICT_TYPE_SYMBOLS.get(key)), "neutral"))
+
+    display_keys = _ordered_values((getattr(profile, "display_state", "") or "stable" for profile in profiles), DISPLAY_STATE_SYMBOLS)
+    for key in display_keys[:5] or ["stable"]:
+        label = DISPLAY_STATE_SYMBOLS.get(key, ([157, 175, 170, 100], _display(key)))[1]
+        rows.append(MapLegendRow("District display", label, "district pressure overlay", _symbol_hex(DISPLAY_STATE_SYMBOLS.get(key)), "watch" if key != "stable" else "neutral"))
+
+    prosperity_keys = _ordered_values((getattr(profile, "prosperity_band", "") or "stable" for profile in profiles), PROSPERITY_BAND_SYMBOLS)
+    for key in prosperity_keys[:4] or ["stable"]:
+        label = PROSPERITY_BAND_SYMBOLS.get(key, ([157, 175, 170, 100], _display(key)))[1]
+        rows.append(MapLegendRow("Prosperity", label, "district prosperity outline", _symbol_hex(PROSPERITY_BAND_SYMBOLS.get(key)), "good" if key == "thriving" else "neutral"))
+
+    identity_keys = _ordered_values((getattr(profile, "identity_state", "") or "stable" for profile in profiles), IDENTITY_STATE_SYMBOLS)
+    for key in identity_keys[:4] or ["stable"]:
+        label = IDENTITY_STATE_SYMBOLS.get(key, ([157, 175, 170, 100], _display(key)))[1]
+        rows.append(MapLegendRow("Community", label, "identity overlay", _symbol_hex(IDENTITY_STATE_SYMBOLS.get(key)), "watch" if key != "stable" else "neutral"))
+
+    rows.extend(_feature_legend_rows("PermitPoints", ("expired", "maintained", "maintenance_due", "proposed", "responded", "special_interest")))
+    rows.extend(_feature_legend_rows("PermitLines", ("active", "road")))
+    rows.extend(_feature_legend_rows("PermitZones", ("active", "campus", "civic", "commerce", "housing", "industry", "park")))
+
+    selected = next((item for item in docket or () if getattr(item, "item_id", "") == selected_item_id), None)
+    target_count = len(getattr(selected, "target_cell_ids", ()) or ()) if selected else 0
+    rows.append(MapLegendRow("Selection", "Selected target", f"{target_count} district(s)", "#2f6488", "good" if target_count else "watch"))
+    filed = _filed_state_label(getattr(selected, "status", "") if selected else "")
+    rows.append(MapLegendRow("Selection", "Filed state", filed, "#2f6b53" if filed != "not filed" else "#9dafaa", "neutral"))
+    return tuple(rows)
+
+
+def _feature_legend_rows(group, keys):
+    """Return Contents-style display_state rows for a feature layer."""
+
+    rows = []
+    for key in keys:
+        symbol = DISPLAY_STATE_SYMBOLS.get(key)
+        if not symbol:
+            continue
+        rows.append(MapLegendRow(group, symbol[1], "feature display state", _symbol_hex(symbol), "neutral"))
+    return rows
+
+
+def _ordered_values(values, symbols):
+    """Return unique values in symbol order with observed values first."""
+
+    seen = []
+    for value in values:
+        key = str(value or "").lower()
+        if key and key not in seen:
+            seen.append(key)
+    ordered = [key for key in symbols if key in seen]
+    ordered.extend(key for key in seen if key not in ordered)
+    return ordered
+
+
+def _symbol_hex(symbol):
+    """Convert a symbology config RGBA tuple to a Tk color."""
+
+    rgba = symbol[0] if symbol else [216, 225, 222, 100]
+    return "#{:02x}{:02x}{:02x}".format(int(rgba[0]), int(rgba[1]), int(rgba[2]))
+
+
+def _district_group_rows(districts) -> tuple[DistrictGroupRow, ...]:
+    """Aggregate district health by district type for the city pulse rail."""
+
+    profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
+    groups: dict[str, list] = {}
+    for profile in profiles:
+        key = getattr(profile, "district_type", "") or "district"
+        groups.setdefault(key, []).append(profile)
+    rows: list[DistrictGroupRow] = []
+    for district_type, group_profiles in sorted(groups.items()):
+        count = max(1, len(group_profiles))
+        prosperity = sum(
+            int(getattr(profile, "activity", 0) or 0)
+            + int(getattr(profile, "trust", 0) or 0)
+            + int(getattr(profile, "services", 0) or 0)
+            - int(getattr(profile, "friction", 0) or 0)
+            - int(getattr(profile, "exposure", 0) or 0)
+            for profile in group_profiles
+        ) / count
+        heat = max((max((getattr(profile, "dissatisfaction", {}) or {}).values() or [0]) for profile in group_profiles), default=0)
+        pressure = sum(1 for profile in group_profiles if (getattr(profile, "display_state", "") or "stable") != "stable")
+        pressure += sum(1 for profile in group_profiles if getattr(profile, "identity_state", "stable") in ("vulnerable", "contested"))
+        pressure += sum(1 for profile in group_profiles if int(getattr(profile, "buyout_pressure", 0) or 0) > 0)
+        score = int(max(0, min(100, 50 + (prosperity / 4) - (heat * 8) - (pressure * 6))))
+        if score < 30 or heat >= 4:
+            state, tone = "Critical", "bad"
+        elif score < 46 or heat >= 3 or pressure >= 2:
+            state, tone = "Strained", "watch"
+        elif score < 62 or pressure:
+            state, tone = "Warming", "watch"
+        else:
+            state, tone = "Stable", "good"
+        rows.append(
+            DistrictGroupRow(
+                _display(district_type),
+                state,
+                f"{count} district(s), heat {heat}, pressure {pressure}",
+                tone,
+                score,
+            )
+        )
+    return tuple(sorted(rows, key=lambda row: (row.meter, row.label))[:4])
+
+
+def _district_table_rows(districts, selected) -> tuple[DistrictTableRow, ...]:
+    """Build the bottom live-attribute table rows from district profiles."""
+
+    profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
+    selected_targets = set(getattr(selected, "target_cell_ids", ()) or ())
+    rows: list[DistrictTableRow] = []
+    for profile in sorted(profiles, key=lambda p: getattr(p, "cell_id", "")):
+        cell_id = getattr(profile, "cell_id", "") or ""
+        rows.append(
+            DistrictTableRow(
+                cell_id,
+                getattr(profile, "name", "") or cell_id,
+                _display(getattr(profile, "district_type", "") or "district"),
+                _display(getattr(profile, "prosperity_band", "") or "stable"),
+                _display(getattr(profile, "display_state", "") or "stable"),
+                _display(getattr(profile, "identity_state", "") or "stable"),
+                cell_id in selected_targets,
+            )
+        )
+    return tuple(rows[:8])
+
+
+def _permit_state_label(status) -> str:
+    """Return public permit-state copy for a docket status."""
+
+    value = str(status or "").lower()
+    if value in ("open", "carried"):
+        return "Open filing"
+    if value == "inspected":
+        return "Inspection filed"
+    if value in ("active", "approved"):
+        return "Approved"
+    if value in ("denied", "deferred"):
+        return "Denied"
+    return _display(value or "filed")
+
+
+def _filed_state_label(status) -> str:
+    """Return compact selected-case filed-state copy."""
+
+    value = str(status or "").lower()
+    if value in ("active", "approved"):
+        return "approved"
+    if value in ("denied", "deferred"):
+        return "denied"
+    if value == "inspected":
+        return "inspection filed"
+    return "not filed"
+
+
+def _permit_state_swatch(label) -> str:
+    """Return a restrained swatch for a public permit-state label."""
+
+    return {
+        "Open filing": "#2f6488",
+        "Inspection filed": "#9f7028",
+        "Approved": "#2f6b53",
+        "Denied": "#b5423f",
+    }.get(label, "#5d6e69")
 
 
 def _inspection_summary(item) -> str:
@@ -1057,4 +1358,4 @@ def _display(value):
     """Convert an identifier into title-style display text."""
 
     text = str(value or "none").replace("_", " ")
-    return text[:1].upper() + text[1:]
+    return " ".join(word[:1].upper() + word[1:] for word in text.split())
