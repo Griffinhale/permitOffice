@@ -466,18 +466,26 @@ class PermitDeskView:
 
         list_y0 = y0 + tab_h + 10
         available = max(260, y1 - list_y0)
-        if available < 760:
+        if apps_selected:
+            key_h = min(260, max(170, int(available * 0.24)))
+        elif available < 760:
             key_h = min(360, max(260, int(available * 0.45)))
         else:
             key_h = min(720, max(500, int(available * 0.50)))
-        key_y0 = y1 - key_h
+        if apps_selected:
+            desired_list_h = min(y1 - list_y0 - key_h - 10, max(260, min(620, 50 + len(rows) * 108)))
+            key_y0 = min(y1 - key_h, list_y0 + desired_list_h + 10)
+            key_y1 = min(y1, key_y0 + key_h)
+        else:
+            key_y0 = y1 - key_h
+            key_y1 = y1
         list_box = (x0, list_y0, x1, key_y0 - 10)
-        key_box = (x0, key_y0, x1, y1)
+        key_box = (x0, key_y0, x1, key_y1)
         if reports_selected:
             self._draw_history_rail(c, list_box)
         else:
             self._draw_inbox_rail(c, list_box, rows, active_id)
-        self._draw_map_key_rail(c, key_box, groups=FEATURE_KEY_GROUPS)
+        self._draw_map_key_rail(c, key_box, groups=("Selection",) if apps_selected else FEATURE_KEY_GROUPS)
 
     def _draw_inbox_rail(self, c, box, rows, active_id):
         """Draw the compact left docket rail."""
@@ -490,7 +498,7 @@ class PermitDeskView:
         y = y0 + 42
         rail_h = y1 - y0
         base_row_h = 60
-        max_row_h = 150 if rail_h > 650 else 94
+        max_row_h = 150 if rail_h > 520 else 94
         row_gap = 7
         visible = max(1, (y1 - y - 18) // (base_row_h + row_gap))
         visible_rows = self._visible_inbox_rows(rows, active_id, visible)
@@ -568,11 +576,14 @@ class PermitDeskView:
         if hasattr(c, "_record"):
             c._record("map-key", (x0, y0, x1, y1), {})
         c.create_text(x0 + 12, y0 + 14, text=title, anchor="nw", fill=Palette.INK, font=self._font(10, "bold"))
+        case_rows = set(groups or ()) == {"Selection"} and bool(self.model.case_map_symbols)
+        if case_rows:
+            c.create_text(x1 - 12, y0 + 16, text="CASE LAYERS", anchor="ne", fill=Palette.MUTED, font=self._font(7, "bold"))
         c.create_line(x0 + 12, y0 + 38, x1 - 12, y0 + 38, fill=Palette.LINE)
         y = y0 + 52
         last_group = ""
         group_filter = set(groups or ())
-        if group_filter == {"Selection"} and self.model.case_map_symbols:
+        if case_rows:
             rows = list(self.model.case_map_symbols)
         else:
             rows = [row for row in self.model.map_legend_rows if not group_filter or row.group in group_filter]
@@ -583,7 +594,7 @@ class PermitDeskView:
             if y > y1 - 30:
                 break
             group = getattr(row, "group", "Selection")
-            if group != last_group:
+            if not case_rows and group != last_group:
                 c.create_text(x0 + 12, y, text=group, anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
                 field = LEGEND_GROUP_FIELDS.get(group)
                 if field:
@@ -794,7 +805,7 @@ class PermitDeskView:
             action_h = max(120, available - (2 * gap) - info_h - evidence_h)
         else:
             info_h = min(max(130, int(available * 0.32)), 190)
-            evidence_h = min(max(118, int(available * 0.26)), 170)
+            evidence_h = min(max(164, int(available * 0.30)), 190)
             action_h = min(max(170, int(available * 0.34)), 218)
         info_box = (body_x0, content_y0, body_x1, min(content_y1, content_y0 + info_h))
         evidence_y0 = info_box[3] + gap
@@ -1117,6 +1128,7 @@ class PermitDeskView:
         _shadow_rect(c, x0 + 4, y0 + 6, x1 + 4, y1 + 6)
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.LEDGER, outline=Palette.LINE, width=1)
         c.create_text(x0 + 14, y0 + 18, text="CITY PULSE", anchor="w", fill=Palette.INK, font=self._font(11, "bold"))
+        c.create_text(x1 - 14, y0 + 18, text="OFFICE CONTEXT", anchor="e", fill=Palette.MUTED, font=self._font(7, "bold"))
         c.create_line(x0 + 14, y0 + 38, x1 - 14, y0 + 38, fill=Palette.LINE)
 
         inner_x0 = x0 + 14
