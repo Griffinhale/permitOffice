@@ -13,7 +13,7 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 - [ ] ArcGIS Pro module cache is fresh: the `.pyt` reload loop at the top of
       `arcpy_permit_office.pyt` lists every `permit_office_arcgis/*` module in use
       (no new modules were added this round, so no change is expected).
-- [ ] `python -m pytest -q` is green on the dev box (offline baseline).
+- [ ] `uv run --with pytest pytest -q` is green on the dev box (offline baseline).
 
 ## 1. Workspace resolution (respects the optional param)
 - [ ] Run with **Game Workspace empty**. Log shows
@@ -111,6 +111,27 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       surface.
 - [ ] Promote no experiment unless it preserves visual correctness after GDB
       writes and reduces live redraw time versus the baseline.
+
+## 12. ArcPy review follow-through
+Offline fakes cannot prove these. Drop the `(after ARn)` tag once that change
+lands and this check passes live.
+- [ ] (after AR2) Open a map whose coordinate system is WGS84 (4326) and start a
+      new game in a fresh workspace. All four feature classes report EPSG 3857
+      and the board draws as even 100 m squares. An existing save still opens
+      unchanged.
+- [ ] (after AR1) Approve one point case and one line case. The districts that
+      receive spillover match the ones the old GP path picked for the same
+      geometry (compare against a pre-change save or a screenshot).
+- [ ] (after AR1, AR4) With `PERMIT_OFFICE_PERF=1`, record `spillover`,
+      `resolve`, and total decision time for one normal decision, next to the
+      section 10 numbers.
+- [ ] (after AR3) Start a new game. The JSON text fields are the new wider
+      length, and a long case history saves without a truncation warning.
+- [ ] (after AR4) On that new `.gdb`, the lookup-column indexes exist
+      (Catalog > table Properties > Indexes).
+- [ ] (after AR6) Swap the district ring a few times. Every slot keeps its full
+      style from the shipped `.lyrx` files: base type, prosperity, and identity
+      look right, with no default single-symbol layer.
 
 ---
 **On any failure:** capture the Geoprocessing message log + a screenshot, note the
