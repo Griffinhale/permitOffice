@@ -5,15 +5,14 @@ You play as a municipal permit clerk trying to keep a strange city functional
 through inspections, approvals, denials, mitigation conditions, and weekly audit
 reports.
 
-The joke is bureaucratic, but the game loop is real: every permit is tied to
-map geometry, district state, stakeholder pressure, recurring costs, and visible
-city consequences.
+The premise is a joke about bureaucracy. The rules are not: every permit is tied
+to map geometry, district state, stakeholder pressure and recurring costs, and
+its consequences show up on the map.
 
-> **Status: public beta - v0.95.0.** Playable end to end. `main` carries a
-> dashboard redesign since that release that has not yet had a live ArcGIS Pro
-> pass; use the v0.95.0 release for the tested build. Requires ArcGIS
-> Pro 3.3+ with ArcPy to run (tested on 3.6); the pure-Python rules run and test
-> without it.
+> **Status: public beta, v0.95.0.** Playable end to end. `main` has a dashboard
+> redesign that hasn't been through a live ArcGIS Pro test yet; use the v0.95.0
+> release for the tested build. Running the game needs ArcGIS Pro 3.3+ with ArcPy
+> (tested on 3.6). The pure-Python rules and tests run without it.
 
 ![Permit Office running as a geoprocessing tool in ArcGIS Pro, with the labeled
 district grid and two districts selected from the active docket](docs/images/01-arcgis-engine-selection.png)
@@ -39,51 +38,49 @@ follow-up orders.
 Approvals can spawn points, lines, or polygons on the map: vendor markets,
 utility trenches, fire coverage areas, public art grants, corridors, reserves,
 incidents, inspection orders, and other civic paperwork with consequences.
-The current rules target a 12-week civic season with scarce AP, more docket
-items than the player can fully process, and city momentum from unresolved
-cases.
+A season runs 12 weeks. Each week brings more cases than your action points can
+cover, and the cases you leave unresolved keep pushing the city.
 
 ## Why I Built It
 
-Permit Office is an experiment in using ArcGIS Pro as a game engine rather than
-only a mapping tool. Feature classes are the save file, map selections are the
-input device, and ArcPy geometry operations become part of the rules system.
+Permit Office uses ArcGIS Pro as a game engine. Feature classes are the save
+file, map selections are the input, and ArcPy geometry operations are part of
+the rules.
 
-The longer aim is a platform for live-updating city simulations built from the
-standard ArcGIS tools analysts already use: disaster readiness, service
-disruption, emergency rerouting. A game is the hardest first test of that idea,
-because it has to stay correct and responsive while the map changes every turn.
-Permit Office is that test.
+The longer aim is live-updating city simulations built from the standard ArcGIS
+tools analysts already use, for work like disaster readiness, service
+disruption and emergency rerouting. A game is a demanding first test of that
+idea, because it has to stay correct and responsive while the map changes every
+turn.
 
-The project is also a small design study in "paperwork as play": the player is
-not an all-powerful mayor, but an audit-facing office that shapes the city by
-filing, approving, delaying, and explaining official decisions.
+It is also a small study in paperwork as play. You are a permit office, not a
+mayor, and you shape the city by filing, approving, delaying and explaining
+official decisions.
 
-## What Is Interesting
+## Design Notes
 
-- **ArcGIS-native game state:** districts, docket rows, projects, commands,
-  logs, and permit features live in a file geodatabase.
-- **Spatial consequences:** selected districts, adjacency, buffers, feature
-  geometry, and support layers drive gameplay effects.
-- **Pure Python rules:** the main simulation is testable without ArcGIS Pro,
-  while ArcPy handles persistence and map operations.
-- **Procedural civic texture:** district names, populations, services,
-  grievances, hazards, housing pressure, stakeholder heat, and docket items are
-  generated from a seed.
-- **District identity pressure:** district type *and* citizen-culture mix
-  influence which proposals appear, ignored proposals can create hidden momentum,
-  and low-activity districts can enter contested buyout transitions where multiple
-  stronger neighbors bid — a successful buyout shifts the district's type,
-  culture, and name.
-- **Dry municipal absurdism:** the interface is built like a cluttered permit
-  desk, with filed reports and audit language instead of fantasy UI tropes.
-- **Designed around ArcGIS Pro's limits:** ArcPy and the map must stay on one
-  thread, and `RefreshLayer` does not reload changed attributes. So only
-  ArcPy-free work runs in the background, from copied rows; a one-ply decision
-  cache predicts which districts and layers each choice will change; and a
-  three-slot display ring rebuilds a hidden layer and shows it only once it
-  succeeds, replacing a 4-5 second full redraw. The alternatives that were
-  measured and rejected are in
+- **The geodatabase is the game state.** Districts, docket rows, projects,
+  commands, logs and permit features all live in one file geodatabase.
+- **Space drives the rules.** Selected districts, adjacency, buffers and feature
+  geometry decide who a decision affects.
+- **The rules are plain Python.** The simulation runs and tests without ArcGIS
+  Pro; ArcPy handles storage, spatial analysis and the map.
+- **Cities come from a seed.** District names, populations, services,
+  grievances, hazards, housing pressure, stakeholder heat and the docket are
+  all generated, and the same seed gives the same city.
+- **Districts change hands.** District type and citizen culture shape which
+  proposals appear, and ignored proposals build hidden momentum. A quiet district
+  can be bid for by stronger neighbors, and a successful buyout changes its type,
+  culture and name.
+- **The tone is dry.** The interface looks like a cluttered permit desk, with
+  filed reports and audit language.
+- **It works within ArcGIS Pro's limits.** ArcPy and the map have to stay on one
+  thread, and `RefreshLayer` doesn't reload changed attributes. So only
+  ArcPy-free work runs in the background, from copied rows. A decision cache
+  predicts which districts and layers each choice will change, and a three-slot
+  display ring rebuilds a hidden layer and shows it only once the rebuild
+  succeeds. That replaced a 4-5 second full redraw. The measured alternatives and
+  why each was dropped are in
   [`docs/failed-experiments.md`](docs/failed-experiments.md).
 
 ## Quick Start
@@ -129,9 +126,8 @@ toolbox inside that folder.
 By default (no **Game Workspace** chosen) the tool creates or resumes
 `permit_office.gdb` under the ArcGIS project's `data/` folder; set the optional
 **Game Workspace** parameter to use a specific geodatabase or folder instead. The
-geodatabase *is* the save file and remains authoritative. Speculative decision
-futures are cache data only; they are rebuilt from the GDB and never replace it
-as persistence. The generated `.gdb` is local state and should not be committed.
+geodatabase is the save file. The decision cache is rebuilt from it and never
+saved. Don't commit the generated `.gdb`.
 
 ### Run Pure Python Tests
 
