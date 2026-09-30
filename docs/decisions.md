@@ -56,8 +56,8 @@ symbology).
 candidate because it kept the district rehydrate model while cutting
 point-decision redraws to ~1.8s in live benchmark. `predrawn-swap-refresh` stayed
 very fast (~1.0-1.3s) but produced a red/gray close-state map corruption, so it
-remains a diagnostic experiment. Full measurements live in
-`docs/redraw-experiment-notes.md`.
+remains a diagnostic experiment. Retired probes and why are in
+`docs/failed-experiments.md`.
 *(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
 reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
 later. Supersedes the earlier district-family remove+add default with a measured
@@ -209,4 +209,4 @@ performance wins.
 **Rejected:** keeping `predrawn-rehydrate` selectable; retaining GP-facing
 redraw experiment controls; pure visibility swap, volatile overlay, and SDK
 display-cache probes as runtime options. Details live in
-`docs/failed-experiments.md` and `docs/redraw-experiment-notes.md`.
+`docs/failed-experiments.md`.

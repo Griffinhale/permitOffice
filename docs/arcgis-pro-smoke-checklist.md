@@ -101,8 +101,7 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 - [ ] Confirm the public toolbox has no **Redraw Experiment** or benchmark
       parameter.
 - [ ] If live redraw looks wrong, reproduce with the production ring path first.
-      Use `docs/failed-experiments.md` and `docs/redraw-experiment-notes.md`
-      before reviving any retired probe.
+      Use `docs/failed-experiments.md` before reviving any retired probe.
 - [ ] `district-ring`: current promoted path. Confirm point features still
       appear/update after approvals while the district board keeps correct
       type/identity/prosperity visuals.

@@ -156,13 +156,11 @@ do not replace a live ArcGIS Pro smoke test.
   turn loop. Start here.
 - `docs/decisions.md` - concise ADRs: choices made and alternatives rejected.
 - `docs/failed-experiments.md` - probes that were tried live and retired, and why.
-- `docs/redraw-experiment-notes.md` - live ArcGIS Pro redraw measurements.
 - `docs/arcpy-usage.md` - which stock ArcPy APIs we use and how (cursors, schema,
   geometry, map refresh/redraw, selection).
 - `docs/docket-items.md` - docket template/item shape with worked examples.
 - `docs/writing-and-tone.md` - the municipal voice and real copy examples.
 - `docs/arcgis-pro-smoke-checklist.md` - the manual live test in ArcGIS Pro.
-- `docs/archive/` - superseded spike designs, kept for history.
 
 ## Current Status
 
