@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import time
 import uuid
@@ -25,6 +26,13 @@ PREDRAWN_LAYER_PREFIX = "Permit Office Predrawn"
 PREDRAWN_POINTS_PREFIX = "Permit Office Predrawn Points"
 PREDRAWN_LINES_PREFIX = "Permit Office Predrawn Lines"
 PREDRAWN_ZONES_PREFIX = "Permit Office Predrawn Zones"
+
+# Lowest Pro version where flipping a district slot's definition query was seen
+# to show new GDB attribute values without flicker (AR5 spike, Pro 3.7). Older
+# builds keep the ring rehydrate. Lower this only after the probe passes there.
+QUERY_FLIP_MIN_PRO = (3, 7)
+QUERY_FLIP_VALUES = ("1=1", "2=2")
+_PRO_VERSION_CACHE: dict = {}
 
 # District geometry is fixed for the life of a game (only attributes change), so
 # the SHAPE@ pull — the most expensive field on the districts table — is memoized
@@ -1166,6 +1174,58 @@ def _hide_base_feature_layer(active_map, layer_name):
                 pass
 
 
+def _pro_version():
+    """Return the running Pro version as an int tuple, or () when unknown."""
+
+    if "version" not in _PRO_VERSION_CACHE:
+        try:
+            text = str(arcpy.GetInstallInfo().get("Version", ""))
+            _PRO_VERSION_CACHE["version"] = tuple(int(part) for part in text.split(".")[:2] if part.isdigit())
+        except Exception:
+            _PRO_VERSION_CACHE["version"] = ()
+    return _PRO_VERSION_CACHE["version"]
+
+
+def _query_flip_supported():
+    """Return True when this Pro build is proven to requery on a query flip."""
+
+    version = _pro_version()
+    return bool(version) and version >= QUERY_FLIP_MIN_PRO
+
+
+def _same_source(layer, path):
+    """Return True when a layer reads the given feature class."""
+
+    try:
+        source = layer.dataSource
+    except Exception:
+        return False
+    return os.path.normcase(os.path.normpath(source or "")) == os.path.normcase(os.path.normpath(path))
+
+
+def _flip_visible_district_slot(active_map, district_path, messages):
+    """Flip the visible ring slot's query so Pro redraws new attribute values.
+
+    Returns the flipped layer, or None when there is no visible slot reading
+    this save's districts (callers then use the ring rehydrate).
+    """
+
+    for layer in active_map.listLayers():
+        name = getattr(layer, "name", "")
+        if not (_is_ring_slot_name(name) and bool(getattr(layer, "visible", False))):
+            continue
+        if not _same_source(layer, district_path):
+            return None
+        try:
+            current = layer.definitionQuery or ""
+            layer.definitionQuery = QUERY_FLIP_VALUES[1] if current == QUERY_FLIP_VALUES[0] else QUERY_FLIP_VALUES[0]
+            return layer
+        except Exception as exc:
+            _warn(messages, "REDRAW", f"district query flip failed on {name!r}: {exc}")
+            return None
+    return None
+
+
 def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None):
     started = time.perf_counter()
     phases = _PhaseTimer()
@@ -1176,6 +1236,17 @@ def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None)
 
     def _copy_style(layer):
         _prepare_district_display_layer(layer, messages, "1=1")
+
+    if _query_flip_supported():
+        flipped = _flip_visible_district_slot(active_map, paths["districts"], messages)
+        phases.mark("query_flip")
+        if flipped is not None:
+            _hide_non_ring_district_family(active_map)
+            phases.mark("hide_base_districts")
+            _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
+            phases.mark("feature_layers")
+            _log_redraw(messages, "district-flip", "ok", started, f"target={getattr(flipped, 'name', '')!r} {phases.summary()}")
+            return
 
     ring = DistrictLayerRing(active_map, arcpy_module=arcpy, style_copier=_copy_style, phase_marker=phases.mark)
     phases.mark("ring_discovery")

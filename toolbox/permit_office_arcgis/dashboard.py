@@ -1421,7 +1421,8 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
     This preserves the district re-add correctness requirement while avoiding
     the full district family remove/add cycle on every decision.
     ``force_readd=True`` still uses the full legacy path when the layer set or
-    symbology changes.
+    symbology changes. On Pro 3.7+ the district step first tries flipping the
+    visible slot's definition query (see QUERY_FLIP_MIN_PRO in geometry.py).
     """
 
     plan = _redraw_plan(layer_names=layer_names, force_readd=force_readd, dirty_scope=dirty_scope)

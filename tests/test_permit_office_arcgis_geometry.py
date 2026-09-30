@@ -934,3 +934,84 @@ def test_proposal_spillover_without_proposed_row_is_empty(monkeypatch):
         assert geometry.proposal_spillover(_paths(), item) == []
     finally:
         geometry.clear_geometry_cache()
+
+
+def _district_flip_map(version, slot_source="districts", slot_query="1=1"):
+    """Return (fake arcpy, layers, calls) with one visible district ring slot."""
+
+    calls = []
+    base = SimpleNamespace(name=geometry.DISTRICTS, visible=True)
+    slot = SimpleNamespace(name="Permit Office Predrawn 0", visible=True, definitionQuery=slot_query, dataSource=slot_source, transparency=None)
+    layers = [base, slot]
+
+    def add_data(source):
+        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", dataSource=source, transparency=None)
+        layers.append(layer)
+        calls.append(("add", source))
+        return layer
+
+    def install_info():
+        if version is None:
+            raise RuntimeError("no install info")
+        return {"Version": version}
+
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=layers.remove, addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+        GetInstallInfo=install_info,
+    )
+    return fake, slot, base, calls
+
+
+def _patch_flip(monkeypatch, fake):
+    """Install a fake arcpy and stub the non-district redraw work."""
+
+    geometry._PRO_VERSION_CACHE.clear()
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "_refresh_feature_scope", lambda *args, **kwargs: None)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda *args: None)
+    monkeypatch.setattr(geometry, "_configure_labels", lambda *args: None)
+    monkeypatch.setattr(geometry, "_tune_layer_visibility", lambda *args: None)
+
+
+def test_district_redraw_flips_visible_slot_query_on_supported_pro(monkeypatch):
+    """Verify Pro 3.7+ redraws districts by flipping the slot query, with no re-add."""
+
+    fake, slot, base, calls = _district_flip_map("3.7")
+    _patch_flip(monkeypatch, fake)
+    messages = CapturingMessages()
+
+    assert geometry.apply_ring_redraw(_paths(), messages, layer_names={geometry.DISTRICTS}) is True
+    assert slot.definitionQuery == "2=2"
+    assert geometry.apply_ring_redraw(_paths(), messages, layer_names={geometry.DISTRICTS}) is True
+    assert slot.definitionQuery == "1=1"
+    assert calls == []
+    assert base.visible is False
+    assert any("district-flip" in text for text in messages.messages)
+    geometry._PRO_VERSION_CACHE.clear()
+
+
+def test_district_redraw_uses_ring_below_query_flip_version(monkeypatch):
+    """Verify Pro builds below the proven version keep the ring rehydrate."""
+
+    for version in ("3.6", "3.3.2", None):
+        fake, slot, _base, calls = _district_flip_map(version)
+        _patch_flip(monkeypatch, fake)
+
+        assert geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.DISTRICTS}) is True
+        assert ("add", "districts") in calls, version
+        assert slot.definitionQuery == "1=1"
+    geometry._PRO_VERSION_CACHE.clear()
+
+
+def test_district_redraw_uses_ring_when_visible_slot_reads_another_save(monkeypatch):
+    """Verify a slot left over from another save is rehydrated, not flipped."""
+
+    fake, slot, _base, calls = _district_flip_map("3.7", slot_source=r"C:\old\permit_office.gdb\PermitDistricts")
+    _patch_flip(monkeypatch, fake)
+
+    assert geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.DISTRICTS}) is True
+    assert ("add", "districts") in calls
+    assert slot.definitionQuery == "1=1"
+    geometry._PRO_VERSION_CACHE.clear()

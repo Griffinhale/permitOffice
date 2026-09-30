@@ -75,7 +75,7 @@ official decisions.
 - **The tone is dry.** The interface looks like a cluttered permit desk, with
   filed reports and audit language.
 - **It works within ArcGIS Pro's limits.** ArcPy and the map have to stay on one
-  thread, and `RefreshLayer` doesn't reload changed attributes. So only
+  thread, and before Pro 3.7 `RefreshLayer` didn't reload changed attributes. So only
   ArcPy-free work runs in the background, from copied rows. A decision cache
   predicts which districts and layers each choice will change, and a three-slot
   display ring rebuilds a hidden layer and shows it only once the rebuild
@@ -88,9 +88,11 @@ official decisions.
 ### Requirements
 
 - **ArcGIS Pro with ArcPy** to run the game. Developed and tested on **ArcGIS
-  Pro 3.6**; **3.3+** is the practical floor. The only version-gated arcpy call is
-  `arcpy.RefreshLayer` (added at Pro 3.3, and already wrapped in a guard, so older
-  builds degrade gracefully rather than crash); everything else is Pro 2.x-era.
+  Pro 3.6 and 3.7**; **3.3+** is the practical floor. The only version-gated arcpy
+  call is `arcpy.RefreshLayer` (added at Pro 3.3, and already wrapped in a guard, so
+  older builds degrade gracefully rather than crash). The faster district redraw
+  (a definition-query flip) turns on only at Pro 3.7+, where it was tested; older
+  builds use the display ring. Everything else is Pro 2.x-era.
 - **Python 3** for the pure-rules test suite (this runs without ArcGIS). Install
   the test dependency (`pytest`) with **either** pip or
   [uv](https://docs.astral.sh/uv/):

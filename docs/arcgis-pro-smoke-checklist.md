@@ -129,6 +129,10 @@ lands and this check passes live.
       length, and a long case history saves without a truncation warning.
 - [ ] (after AR4) On that new `.gdb`, the lookup-column indexes exist
       (Catalog > table Properties > Indexes).
+- [ ] (after AR14, Pro 3.7+) With `PERMIT_OFFICE_PERF=1`, play a full week.
+      Decisions log `district-flip`, district colors match each filed report,
+      the board never flickers or blanks, and `rebuild` drops below the ring's
+      section 10 numbers. On Pro older than 3.7, decisions log `district-ring`.
 - [ ] (after AR6) Swap the district ring a few times. Every slot keeps its full
       style from the shipped `.lyrx` files: base type, prosperity, and identity
       look right, with no default single-symbol layer.

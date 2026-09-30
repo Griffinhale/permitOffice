@@ -93,6 +93,14 @@ after successful preparation, and leaves the old visible slot intact on failure.
 This keeps the district re-add correctness requirement without rebuilding the
 whole district family every decision.
 
+On Pro 3.7 and newer (`QUERY_FLIP_MIN_PRO` in `geometry.py`), a district-dirty
+redraw first flips the visible slot's `definitionQuery` between `1=1` and `2=2`.
+A live probe on 3.7 showed this makes Pro show new attribute values in about
+0.5 s without flicker. `RefreshLayer` also updated the colors there but
+flickered. The flip only runs when the visible slot reads the current save's
+`PermitDistricts`. Otherwise, and on older Pro, the ring rehydrate runs. The
+version check reads `arcpy.GetInstallInfo()` once per session.
+
 Support features use the same reusable-ring idea with
 `Permit Office Predrawn Points/Lines/Zones 0/1/2`. If a visible support ring slot
 already exists, the adapter first tries a cheap `RefreshLayer` on that slot; if
