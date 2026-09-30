@@ -119,69 +119,104 @@ def _sr_arcpy(active_map, sentinel, raise_err=False):
     )
 
 
-def test_active_spatial_reference_uses_real_map_sr(monkeypatch):
-    """Verify a map with a real WKID is normalized to a fresh SR."""
-    real = _sr(3857)
-    fresh = _sr(3857)
-    monkeypatch.setattr(schema, "arcpy", _sr_arcpy(SimpleNamespace(spatialReference=real), fresh))
+class _Messages:
+    """Collect tool messages so tests can read the logged lines."""
 
-    assert schema.active_spatial_reference(None) is fresh
+    def __init__(self):
+        self.lines = []
 
+    def addMessage(self, line):
+        self.lines.append(line)
 
-def test_active_spatial_reference_falls_back_on_unknown_sr(monkeypatch):
-    """Verify an Unknown map SR (factoryCode 0) falls back to Web Mercator.
-
-    Regression: an Unknown SR is truthy, so it used to propagate into feature-class
-    creation and break the first linear Buffer with a RuntimeError on machines
-    whose active map had no coordinate system.
-    """
-    sentinel = _sr(3857)
-    monkeypatch.setattr(schema, "arcpy", _sr_arcpy(SimpleNamespace(spatialReference=_sr(0)), sentinel))
-
-    assert schema.active_spatial_reference(None) is sentinel
+    def addWarningMessage(self, line):
+        self.lines.append(line)
 
 
-def test_active_spatial_reference_falls_back_when_no_active_map(monkeypatch):
-    """Verify no active map falls back to Web Mercator."""
-    sentinel = _sr(3857)
-    monkeypatch.setattr(schema, "arcpy", _sr_arcpy(None, sentinel))
+def _board_sr_arcpy(active_map, raise_err=False):
+    """ArcPy stub that records every WKID used to build a SpatialReference."""
 
-    assert schema.active_spatial_reference(None) is sentinel
-
-
-def test_active_spatial_reference_falls_back_on_error(monkeypatch):
-    """Verify any probe failure falls back to Web Mercator."""
-    sentinel = _sr(3857)
-    monkeypatch.setattr(schema, "arcpy", _sr_arcpy(None, sentinel, raise_err=True))
-
-    assert schema.active_spatial_reference(None) is sentinel
-
-
-def test_active_spatial_reference_returns_fresh_wkid_sr(monkeypatch):
-    """Verify feature-class creation never receives the raw active-map SR."""
-
-    problematic = _sr(26910)
-    fresh = _sr(26910)
     constructed = []
-    fake_arcpy = _sr_arcpy(SimpleNamespace(spatialReference=problematic), _sr(3857))
-    fake_arcpy.SpatialReference = lambda wkid: constructed.append(wkid) or fresh
+    fake_arcpy = _sr_arcpy(active_map, None, raise_err=raise_err)
+    fake_arcpy.SpatialReference = lambda wkid: constructed.append(wkid) or _sr(wkid)
+    return fake_arcpy, constructed
+
+
+def test_board_spatial_reference_is_web_mercator_in_geographic_map(monkeypatch):
+    """Verify a WGS84 map still yields a fresh 3857 board SR and says why."""
+
+    fake_arcpy, constructed = _board_sr_arcpy(SimpleNamespace(spatialReference=_sr(4326)))
     monkeypatch.setattr(schema, "arcpy", fake_arcpy)
+    messages = _Messages()
 
-    assert schema.active_spatial_reference(None) is fresh
-    assert constructed == [26910]
+    sr = schema.board_spatial_reference(messages)
 
-
-def test_active_spatial_reference_unknown_uses_fresh_web_mercator(monkeypatch):
-    """Verify Unknown active-map SR falls back to a fresh Web Mercator object."""
-
-    fallback = _sr(3857)
-    constructed = []
-    fake_arcpy = _sr_arcpy(SimpleNamespace(spatialReference=_sr(0)), fallback)
-    fake_arcpy.SpatialReference = lambda wkid: constructed.append(wkid) or fallback
-    monkeypatch.setattr(schema, "arcpy", fake_arcpy)
-
-    assert schema.active_spatial_reference(None) is fallback
+    assert sr.factoryCode == 3857
     assert constructed == [3857]
+    assert any("4326" in line and "3857" in line for line in messages.lines)
+
+
+def test_board_spatial_reference_is_web_mercator_in_foot_map(monkeypatch):
+    """Verify a foot-based State Plane map does not shrink the board."""
+
+    fake_arcpy, constructed = _board_sr_arcpy(SimpleNamespace(spatialReference=_sr(2227)))
+    monkeypatch.setattr(schema, "arcpy", fake_arcpy)
+
+    assert schema.board_spatial_reference(None).factoryCode == 3857
+    assert constructed == [3857]
+
+
+def test_board_spatial_reference_quiet_when_map_matches(monkeypatch):
+    """Verify no mismatch note is logged when the map is already Web Mercator."""
+
+    fake_arcpy, _constructed = _board_sr_arcpy(SimpleNamespace(spatialReference=_sr(3857)))
+    monkeypatch.setattr(schema, "arcpy", fake_arcpy)
+    messages = _Messages()
+
+    assert schema.board_spatial_reference(messages).factoryCode == 3857
+    assert messages.lines == []
+
+
+def test_board_spatial_reference_without_usable_map(monkeypatch):
+    """Verify Unknown SR, no active map, and probe errors all give 3857."""
+
+    for active_map, raise_err in (
+        (SimpleNamespace(spatialReference=_sr(0)), False),
+        (None, False),
+        (None, True),
+    ):
+        fake_arcpy, constructed = _board_sr_arcpy(active_map, raise_err=raise_err)
+        monkeypatch.setattr(schema, "arcpy", fake_arcpy)
+
+        assert schema.board_spatial_reference(None).factoryCode == 3857
+        assert constructed == [3857]
+
+
+def test_ensure_schema_creates_feature_classes_in_web_mercator_regardless_of_map(monkeypatch):
+    """Verify new saves use 3857 for all four feature classes in a 4326 map."""
+
+    fake_arcpy, _constructed = _board_sr_arcpy(SimpleNamespace(spatialReference=_sr(4326)))
+    monkeypatch.setattr(schema, "arcpy", fake_arcpy)
+    feature_class_srs = {}
+
+    def ensure_feature_class(gdb_path, name, geometry_type, fields, spatial_ref, messages):
+        feature_class_srs[name] = spatial_ref.factoryCode
+        return f"{gdb_path}/{name}"
+
+    monkeypatch.setattr(schema, "ensure_gdb", lambda *_args: None)
+    monkeypatch.setattr(schema, "_schema_fast_path_current", lambda *_args: False)
+    monkeypatch.setattr(schema, "ensure_feature_class", ensure_feature_class)
+    monkeypatch.setattr(schema, "ensure_table", lambda gdb_path, name, *_args: f"{gdb_path}/{name}")
+    monkeypatch.setattr(schema, "migrate_legacy_city_health_fields", lambda *_args: None)
+    monkeypatch.setattr(schema, "_mark_schema_current", lambda *_args: None)
+
+    schema.ensure_schema("C:/game.gdb", None)
+
+    assert feature_class_srs == {
+        schema.DISTRICTS: 3857,
+        schema.POINTS: 3857,
+        schema.LINES: 3857,
+        schema.ZONES: 3857,
+    }
 
 
 def test_ensure_feature_class_passes_fresh_spatial_reference_to_create(monkeypatch):

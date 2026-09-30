@@ -55,8 +55,9 @@ District board and proposals are built by hand from coordinates:
   (placed at a district centroid); lines connect two centroids.
 - `geom.extent` (XMin/XMax/YMin/YMax) + normalized hint offsets place seeded
   city-detail features inside a district.
-- Spatial reference comes from `arcpy.Describe(fc).spatialReference` or the active
-  map; fallback is `arcpy.SpatialReference(3857)` (Web Mercator).
+- Spatial reference comes from `arcpy.Describe(fc).spatialReference`. New games
+  always create feature classes in `arcpy.SpatialReference(3857)` (Web Mercator),
+  whatever the active map uses; Pro reprojects them for display.
 
 ## 4. Map / display & refresh-redraw (`geometry.py`, `dashboard.py`)
 

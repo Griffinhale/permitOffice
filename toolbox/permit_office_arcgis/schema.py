@@ -335,15 +335,15 @@ def migrate_legacy_city_health_fields(table, messages):
         _warn(messages, "SCHEMA", f"legacy city health fields retained: {exc}")
 
 
-def active_spatial_reference(messages):
-    """Use the active ArcGIS map spatial reference, falling back to Web Mercator.
+def board_spatial_reference(messages):
+    """Return the Web Mercator (3857) SR every new game board is built in.
 
-    Only a map SR with a real WKID (factoryCode != 0) is used; a blank/Unknown
-    map coordinate system (factoryCode 0), a missing property, or any probe
-    failure falls back to Web Mercator (3857). An Unknown SR is otherwise truthy
-    and would propagate into feature-class creation, then crash the first linear
-    `arcpy.analysis.Buffer` with a spatial-reference RuntimeError on machines
-    whose active map has no coordinate system. Logs which path was taken.
+    The board is laid out in raw coordinates 0-500 as 100 m squares, and buffers
+    are in meters, so the feature classes must be in a metric projected system
+    regardless of the active map. Copying the map SR made the board invalid in a
+    geographic map (y > 90 degrees) and shrank it in a foot-based one. Pro
+    reprojects 3857 on the fly, so the map keeps its own system. Logs once when
+    the active map differs, so the user knows why.
     """
 
     try:
@@ -351,12 +351,10 @@ def active_spatial_reference(messages):
         active_map = aprx.activeMap
         sr = getattr(active_map, "spatialReference", None) if active_map else None
         wkid = _spatial_reference_wkid(sr)
-        if wkid:
-            _log(messages, "MAP", f"using active map spatial reference (wkid {wkid})")
-            return normalized_spatial_reference(sr, messages)
-        _log(messages, "MAP", "active map has no usable spatial reference; using Web Mercator (3857)")
-    except Exception as exc:
-        _warn(messages, "MAP", f"active map SR unavailable ({exc}); using Web Mercator (3857)")
+        if wkid and wkid != WEB_MERCATOR_WKID:
+            _log(messages, "MAP", f"active map is wkid {wkid}; new game board uses Web Mercator (3857), shown reprojected")
+    except Exception:
+        pass
     return arcpy.SpatialReference(WEB_MERCATOR_WKID)
 
 
@@ -407,7 +405,7 @@ def ensure_schema(gdb_path, messages):
     paths = schema_paths(gdb_path)
     if _schema_fast_path_current(paths, messages):
         return paths
-    sr = active_spatial_reference(messages)
+    sr = board_spatial_reference(messages)
     paths = {
         "districts": ensure_feature_class(gdb_path, DISTRICTS, "POLYGON", DISTRICT_FIELDS, sr, messages),
         "points": ensure_feature_class(gdb_path, POINTS, "POINT", SUPPORT_FIELDS, sr, messages),
