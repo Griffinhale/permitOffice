@@ -58,6 +58,14 @@ point-decision redraws to ~1.8s in live benchmark. `predrawn-swap-refresh` staye
 very fast (~1.0-1.3s) but produced a red/gray close-state map corruption, so it
 remains a diagnostic experiment. Retired probes and why are in
 `docs/failed-experiments.md`.
+**September 30 follow-up (Pro 3.7):** a live probe found that on Pro 3.7,
+`RefreshLayer` alone does show new attribute values, and so does flipping the
+layer's `definitionQuery` between `1=1` and `2=2`. The flip had no flicker in the
+probe. On Pro 3.7+ (`QUERY_FLIP_MIN_PRO` in `geometry.py`), a district redraw now
+flips the visible ring slot's query instead of re-adding a layer. In live play
+the district step took 0.33-0.52 s, down from 1.1-2.3 s. Older Pro and any slot
+that reads another save still use the ring. The whole map flickers on each
+redraw in both the old and new builds, so the flip did not cause it.
 *(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
 reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
 later. Supersedes the earlier district-family remove+add default with a measured
@@ -210,3 +218,6 @@ performance wins.
 redraw experiment controls; pure visibility swap, volatile overlay, and SDK
 display-cache probes as runtime options. Details live in
 `docs/failed-experiments.md`.
+**September 30 follow-up:** the ring is still the path below Pro 3.7 and the
+fallback above it. On 3.7+ the first step is a query flip on the visible slot
+(see the ADR-4 follow-up).
