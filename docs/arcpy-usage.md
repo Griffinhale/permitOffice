@@ -14,7 +14,9 @@ explicit field list (never `"*"`) and use the `SHAPE@` token for geometry.
   features) and `geometry.py` lookups. District geometry uses
   `["cell_id", "SHAPE@"]`.
 - **UpdateCursor** — district/feature updates (`updateRow`), proposal deletes
-  (`deleteRow`), proposal status changes.
+  (`deleteRow`), proposal status changes, and `_delete_all_rows` (`deleteRow`
+  on every row) before state, project, and docket rewrites. Those run on every
+  save, so they avoid the `DeleteRows` GP tool.
 - **InsertCursor** — board creation, feature inserts, state/docket/command/log
   rows; geometry rows pass `["SHAPE@"] + attrs` to `insertRow`.
 
@@ -38,16 +40,21 @@ Idempotent creation guarded by `arcpy.Exists`:
 - `arcpy.management.CreateTable(gdb_path, name)` — non-spatial tables.
 - `arcpy.management.CreateFeatureclass(gdb_path, name, geometry_type, spatial_reference=sr)`
   — `POINT` / `POLYLINE` / `POLYGON`.
-- `arcpy.management.AddField(table, name, type, field_alias=…, field_length=…)`
-  via an `add_field_if_missing` wrapper; types are `TEXT/LONG/DOUBLE/SHORT/DATE`.
+- `arcpy.management.AddFields(table, [[name, type, alias, length], ...])` via
+  `add_missing_fields`: one `ListFields` and at most one `AddFields` call per
+  table. Types are `TEXT/LONG/DOUBLE/SHORT/DATE`.
   JSON fields are `TEXT` with `JSON_TEXT_LENGTH` (32768) in new saves. Older
-  saves keep their old widths (e.g. `state_json` 4000), since `AddField` never
+  saves keep their old widths (e.g. `state_json` 4000), since `AddFields` never
   widens a field. `store.encode_json` never slices JSON: an oversized payload
   logs a `[STORE]` warning naming the field and size, and stores `{}`.
 - `arcpy.ListFields(table)` to diff existing fields (case-insensitive), and once
   per table per run to read real JSON field widths (`text_field_length`).
+- `arcpy.ListIndexes(table)` + `arcpy.management.AddIndex(table, [field], name)`
+  (`ensure_lookup_indexes`) index `commands.command_id` and `docket.item_id`,
+  the columns single-row where clauses match on.
 - `arcpy.management.DeleteRows(table)` to reset gameplay while keeping schema
-  (`clear_game_rows`); `DeleteField` for the legacy city-health field migration.
+  (`clear_game_rows`, New Game only); `DeleteField` for the legacy city-health
+  field migration.
 
 ## 3. Geometry construction
 

@@ -22,7 +22,7 @@ PROJECTS = "PermitProjects"
 COMMANDS = "PermitUICommand"
 ACTION_LOG = "PermitActionLog"
 SCHEMA_META = "PermitSchemaMeta"
-SCHEMA_VERSION = "2026-09-30-json-width-v2"
+SCHEMA_VERSION = "2026-09-30-lookup-index-v3"
 SCHEMA_VERSION_KEY = "schema_version"
 WEB_MERCATOR_WKID = 3857
 # File-geodatabase text is variable length, so a wide limit costs nothing on
@@ -180,6 +180,10 @@ SCHEMA_META_FIELDS = [
 # one ListFields per table on first write. ensure_schema resets it each run.
 _FIELD_LENGTHS = {}
 
+# (schema_paths key, field) pairs matched by SQL where clauses on hot paths:
+# command_finish and write_docket_item.
+LOOKUP_INDEXES = (("commands", "command_id"), ("docket", "item_id"))
+
 LEGACY_CITY_HEALTH_FIELD_MIGRATIONS = {
     "prosperity": "activity",
     "unrest": "friction",
@@ -248,19 +252,21 @@ def ensure_gdb(gdb_path, messages):
     return gdb_path
 
 
-def add_field_if_missing(table, name, field_type, alias=None, length=None):
-    """Add one ArcGIS field if the table does not already contain it."""
+def add_missing_fields(table, fields):
+    """Add every configured field the table lacks with one AddFields call.
+
+    Returns the names added. AddFields never widens an existing field.
+    """
 
     existing = {field.name.lower() for field in arcpy.ListFields(table)}
-    if name.lower() in existing:
-        return False
-    kwargs = {}
-    if alias:
-        kwargs["field_alias"] = alias
-    if length is not None and field_type.upper() == "TEXT":
-        kwargs["field_length"] = length
-    arcpy.management.AddField(table, name, field_type, **kwargs)
-    return True
+    rows = [
+        [name, field_type, alias or "", length if length is not None and field_type.upper() == "TEXT" else ""]
+        for name, field_type, alias, length in fields
+        if name.lower() not in existing
+    ]
+    if rows:
+        arcpy.management.AddFields(table, rows)
+    return [row[0] for row in rows]
 
 
 def text_field_length(table, field, default):
@@ -315,8 +321,7 @@ def ensure_table(gdb_path, name, fields, messages):
     if not arcpy.Exists(path):
         arcpy.management.CreateTable(gdb_path, name)
         _log(messages, "SCHEMA", f"created table: {name}")
-    for field in fields:
-        add_field_if_missing(path, *field)
+    add_missing_fields(path, fields)
     return path
 
 
@@ -332,8 +337,7 @@ def ensure_feature_class(gdb_path, name, geometry_type, fields, spatial_ref, mes
             spatial_reference=normalized_spatial_reference(spatial_ref, messages),
         )
         _log(messages, "SCHEMA", f"created feature class: {name}")
-    for field in fields:
-        add_field_if_missing(path, *field)
+    add_missing_fields(path, fields)
     return path
 
 
@@ -381,6 +385,24 @@ def board_spatial_reference(messages):
     except Exception:
         pass
     return arcpy.SpatialReference(WEB_MERCATOR_WKID)
+
+
+def ensure_lookup_indexes(paths, messages):
+    """Add attribute indexes on the columns where-clause lookups match on."""
+
+    for key, field in LOOKUP_INDEXES:
+        path = paths[key]
+        try:
+            indexed = {
+                index_field.name.lower()
+                for index in arcpy.ListIndexes(path)
+                for index_field in index.fields
+            }
+            if field.lower() not in indexed:
+                arcpy.management.AddIndex(path, [field], f"idx_{field}")
+                _log(messages, "SCHEMA", f"indexed {key}.{field}")
+        except Exception as exc:
+            _warn(messages, "SCHEMA", f"index on {key}.{field} not added: {exc}")
 
 
 def _schema_marker_current(state_path):
@@ -445,6 +467,7 @@ def ensure_schema(gdb_path, messages):
         "schema_meta": ensure_table(gdb_path, SCHEMA_META, SCHEMA_META_FIELDS, messages),
     }
     migrate_legacy_city_health_fields(paths["districts"], messages)
+    ensure_lookup_indexes(paths, messages)
     _mark_schema_current(paths, messages)
     return paths
 

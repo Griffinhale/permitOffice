@@ -42,6 +42,19 @@ def _sql_quote(value):
     return "'{0}'".format(str(value).replace("'", "''"))
 
 
+def _delete_all_rows(path):
+    """Empty a table with an UpdateCursor instead of the DeleteRows GP tool.
+
+    A GP tool call costs far more than a cursor on these small tables, and
+    these writes run on every decision. clear_game_rows (New Game) keeps
+    DeleteRows.
+    """
+
+    with arcpy.da.UpdateCursor(path, ["OID@"]) as cursor:
+        for _row in cursor:
+            cursor.deleteRow()
+
+
 def square_polygon(x0, y0, size, sr):
     """Build a square district polygon in the target spatial reference."""
 
@@ -181,7 +194,7 @@ def write_state(paths, state):
         "week_day": (str(getattr(state, "week_day", 0)), getattr(state, "week_day", 0)),
         "daily_pressure": as_json("daily_pressure", getattr(state, "daily_pressure", {})),
     }
-    arcpy.management.DeleteRows(paths["state"])
+    _delete_all_rows(paths["state"])
     with arcpy.da.InsertCursor(paths["state"], ["key", "value_text", "value_num"]) as cursor:
         for key, (text, num) in values.items():
             cursor.insertRow([key, text, num])
@@ -693,7 +706,7 @@ def write_projects(paths, projects):
     project_path = paths.get("projects")
     if not project_path or not arcpy.Exists(project_path):
         return
-    arcpy.management.DeleteRows(project_path)
+    _delete_all_rows(project_path)
     fields = [field[0] for field in PROJECT_FIELDS]
     limit = json_field_limit(project_path, "payload_json")
     with arcpy.da.InsertCursor(project_path, fields) as cursor:
@@ -723,7 +736,7 @@ def generate_docket_rows(paths, seed, messages):
     active_features = read_active_features(paths)
     projects = read_projects(paths)
     carried_items = [item for item in read_docket(paths) if item.status == "carried"]
-    arcpy.management.DeleteRows(paths["docket"])
+    _delete_all_rows(paths["docket"])
     if state.status == "complete" or state.turn > state.max_turns:
         _log(messages, "DOCKET", f"final audit complete; no week {state.turn + 1} docket generated")
         return []
@@ -850,8 +863,9 @@ def command_finish(paths, command_id, status, message="", error=""):
     """Mark a command row finished with status and diagnostic text."""
 
     fields = ["command_id", "finished_utc", "status", "attempt_count", "message", "error_message"]
-    # The commands table grows once per action across a 12-week game, so a SQL
-    # match keeps this O(1) instead of scanning every prior command row.
+    # The commands table grows once per action across a 12-week game. The SQL
+    # match uses the command_id attribute index that ensure_schema adds, so it
+    # does not scan every prior command row.
     where = "{0} = {1}".format(fields[0], _sql_quote(command_id))
     with arcpy.da.UpdateCursor(paths["commands"], fields, where) as cursor:
         for row in cursor:

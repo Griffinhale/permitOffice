@@ -356,3 +356,175 @@ def test_json_fields_are_widened_for_new_saves():
     assert ("districts", "hazard_json") in json_fields
     assert set(json_fields.values()) == {schema.JSON_TEXT_LENGTH}
     assert schema.JSON_TEXT_LENGTH > 4000
+
+
+class _NoGpManagement:
+    """Fake arcpy.management that fails on any GP tool call."""
+
+    def __getattr__(self, name):
+        raise AssertionError(f"write path called GP tool {name}")
+
+
+class _RowTable:
+    """In-memory table whose cursors support insert, update, and delete."""
+
+    def __init__(self, rows=None):
+        self.rows = [list(row) for row in rows or []]
+        self.inserted = []
+
+    def insert_cursor(self, _path, _fields):
+        table = self
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def insertRow(self, row):
+                table.inserted.append(list(row))
+
+        return Cursor()
+
+    def update_cursor(self, _path, _fields, where_clause=None):
+        table = self
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def __iter__(self):
+                for row in list(table.rows):
+                    self.current = row
+                    yield row
+
+            def deleteRow(self):
+                table.rows.remove(self.current)
+
+        return Cursor()
+
+
+def _write_path_arcpy(monkeypatch, store, table):
+    """Point store at cursor fakes where every GP tool call fails."""
+
+    monkeypatch.setattr(store.arcpy, "management", _NoGpManagement(), raising=False)
+    monkeypatch.setattr(store.arcpy, "Exists", lambda _path: True, raising=False)
+    monkeypatch.setattr(
+        store.arcpy,
+        "da",
+        SimpleNamespace(InsertCursor=table.insert_cursor, UpdateCursor=table.update_cursor),
+        raising=False,
+    )
+    monkeypatch.setattr(schema, "_FIELD_LENGTHS", {"state": {}, "projects": {}, "docket": {}})
+
+
+def test_write_state_clears_rows_with_cursor_not_delete_rows(monkeypatch):
+    """Verify write_state replaces rows without the DeleteRows GP tool."""
+
+    store = _store()
+    table = _RowTable([["turn", "1", 1], ["money", "5", 5]])
+    _write_path_arcpy(monkeypatch, store, table)
+
+    store.write_state({"state": "state"}, store.rules.CityState())
+
+    assert table.rows == []
+    assert any(row[0] == "turn" for row in table.inserted)
+
+
+def test_write_projects_clears_rows_with_cursor_not_delete_rows(monkeypatch):
+    """Verify write_projects replaces rows without the DeleteRows GP tool."""
+
+    store = _store()
+    table = _RowTable([["old-project"]])
+    _write_path_arcpy(monkeypatch, store, table)
+
+    store.write_projects({"projects": "projects"}, {})
+
+    assert table.rows == []
+
+
+def test_generate_docket_rows_clears_rows_with_cursor_not_delete_rows(monkeypatch):
+    """Verify docket regeneration clears the table without DeleteRows."""
+
+    store = _store()
+    table = _RowTable([["old-item"]])
+    _write_path_arcpy(monkeypatch, store, table)
+    state = store.rules.CityState()
+    state.status = "complete"
+    monkeypatch.setattr(store, "read_state", lambda _paths: state)
+    monkeypatch.setattr(store, "read_districts", lambda _paths: {})
+    monkeypatch.setattr(store, "read_active_features", lambda _paths: [])
+    monkeypatch.setattr(store, "read_projects", lambda _paths: {})
+    monkeypatch.setattr(store, "read_docket", lambda _paths: [])
+    monkeypatch.setattr(store, "_log", lambda *args: None)
+
+    assert store.generate_docket_rows({"docket": "docket"}, 2026, None) == []
+    assert table.rows == []
+
+
+def _schema_setup_arcpy(existing_fields, indexes=()):
+    """Fake arcpy for schema setup that records AddFields and AddIndex calls."""
+
+    calls = {"list_fields": 0, "add_fields": [], "add_index": []}
+
+    def list_fields(_path):
+        calls["list_fields"] += 1
+        return [SimpleNamespace(name=name) for name in existing_fields]
+
+    fake = SimpleNamespace(
+        Exists=lambda _path: True,
+        ListFields=list_fields,
+        ListIndexes=lambda _path: [
+            SimpleNamespace(fields=[SimpleNamespace(name=name)]) for name in indexes
+        ],
+        management=SimpleNamespace(
+            AddFields=lambda table, rows: calls["add_fields"].append((table, rows)),
+            AddIndex=lambda table, fields, name: calls["add_index"].append((table, fields, name)),
+        ),
+    )
+    return fake, calls
+
+
+def test_ensure_table_adds_missing_fields_in_one_call(monkeypatch):
+    """Verify schema setup lists fields once and batches AddFields per table."""
+
+    fake, calls = _schema_setup_arcpy(["key"])
+    monkeypatch.setattr(schema, "arcpy", fake)
+
+    schema.ensure_table("C:/game.gdb", schema.GAME_STATE, schema.STATE_FIELDS, None)
+
+    assert calls["list_fields"] == 1
+    assert len(calls["add_fields"]) == 1
+    table, rows = calls["add_fields"][0]
+    assert table == os.path.join("C:/game.gdb", schema.GAME_STATE)
+    assert rows == [
+        ["value_text", "TEXT", "Value Text", schema.JSON_TEXT_LENGTH],
+        ["value_num", "DOUBLE", "Value Number", ""],
+    ]
+
+
+def test_ensure_table_skips_add_fields_when_complete(monkeypatch):
+    """Verify no AddFields call runs when every field already exists."""
+
+    fake, calls = _schema_setup_arcpy(["KEY", "value_text", "value_num"])
+    monkeypatch.setattr(schema, "arcpy", fake)
+
+    schema.ensure_table("C:/game.gdb", schema.GAME_STATE, schema.STATE_FIELDS, None)
+
+    assert calls["add_fields"] == []
+
+
+def test_ensure_lookup_indexes_adds_missing_indexes_once(monkeypatch):
+    """Verify command_id and docket item_id get attribute indexes when missing."""
+
+    fake, calls = _schema_setup_arcpy([], indexes=["item_id"])
+    monkeypatch.setattr(schema, "arcpy", fake)
+    paths = schema.schema_paths("C:/game.gdb")
+
+    schema.ensure_lookup_indexes(paths, None)
+
+    assert calls["add_index"] == [(paths["commands"], ["command_id"], "idx_command_id")]

@@ -1121,7 +1121,7 @@ def test_generate_docket_rows_uses_rules_default_four_item_docket(monkeypatch):
     monkeypatch.setattr(store, "read_docket", lambda _paths: [])
     monkeypatch.setattr(store, "write_state", lambda _paths, state_arg: saved_states.append(dict(state_arg.pending_followups)))
     monkeypatch.setattr(store, "_log", lambda *args: None)
-    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: None), raising=False)
+    monkeypatch.setattr(store, "_delete_all_rows", lambda _path: None)
     monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
     monkeypatch.setattr("toolbox.permit_office_arcgis.geometry.seed_docket_proposals", lambda *args: None)
 
@@ -1170,7 +1170,7 @@ def test_state_persists_pending_followups_json(monkeypatch):
         def __exit__(self, _exc_type, _exc, _tb):
             return False
 
-    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: rows.clear()), raising=False)
+    monkeypatch.setattr(store, "_delete_all_rows", lambda _path: rows.clear())
     monkeypatch.setattr(
         store.arcpy,
         "da",
@@ -1223,7 +1223,7 @@ def test_state_persists_type_ledger_json(monkeypatch):
         def __exit__(self, _exc_type, _exc, _tb):
             return False
 
-    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: rows.clear()), raising=False)
+    monkeypatch.setattr(store, "_delete_all_rows", lambda _path: rows.clear())
     monkeypatch.setattr(
         store.arcpy,
         "da",
@@ -1337,7 +1337,7 @@ def test_state_storage_writes_renamed_city_health_keys(monkeypatch):
         def insertRow(self, row):
             rows.append(tuple(row))
 
-    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: rows.clear()), raising=False)
+    monkeypatch.setattr(store, "_delete_all_rows", lambda _path: rows.clear())
     monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
 
     store.write_state(paths, state)
@@ -1531,7 +1531,7 @@ def test_generate_docket_rows_persists_consumed_pending_followups(monkeypatch):
     monkeypatch.setattr(store, "read_docket", lambda _paths: [])
     monkeypatch.setattr(store, "write_state", lambda _paths, state_arg: saved_states.append(dict(state_arg.pending_followups)))
     monkeypatch.setattr(store, "_log", lambda *args: None)
-    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: None), raising=False)
+    monkeypatch.setattr(store, "_delete_all_rows", lambda _path: None)
     monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
     monkeypatch.setattr("toolbox.permit_office_arcgis.geometry.seed_docket_proposals", lambda *args: None)
 
@@ -1596,7 +1596,7 @@ def test_generate_docket_rows_carries_existing_mandatory_context(monkeypatch):
     monkeypatch.setattr(store, "read_docket", lambda _paths: [carried])
     monkeypatch.setattr(store, "write_state", lambda *_args: None)
     monkeypatch.setattr(store, "_log", lambda *args: None)
-    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: None), raising=False)
+    monkeypatch.setattr(store, "_delete_all_rows", lambda _path: None)
     monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
     monkeypatch.setattr("toolbox.permit_office_arcgis.geometry.seed_docket_proposals", lambda *args: None)
 
