@@ -34,3 +34,6 @@ docs/superpowers/
 *.sd
 *.sddraft
 *.ppkx
+
+# Local DAGs, spike probes, and dev planning notes (kept out of the public repo).
+docs/dags/
