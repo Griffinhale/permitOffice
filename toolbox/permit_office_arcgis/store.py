@@ -5,6 +5,8 @@ from __future__ import annotations
 import datetime as _datetime
 import json
 import uuid
+from typing import Callable, NamedTuple
+from typing import Callable, NamedTuple
 
 import arcpy
 
@@ -75,86 +77,16 @@ def create_district_board(paths, seed, messages):
     profiles = rules.generate_district_profiles(rows=5, cols=5, seed=seed)
     # The generated rule profiles are flattened into ArcGIS field values so the
     # map layer remains the persisted source for the current board.
-    fields = [
-        "SHAPE@",
-        "cell_id",
-        "district_name",
-        "population",
-        "activity",
-        "friction",
-        "trust",
-        "exposure",
-        "services",
-        "district_type",
-        "prior_district_type",
-        "identity_state",
-        "contesting_cell_id",
-        "contesting_type",
-        "transition_due_turn",
-        "buyout_pressure",
-        "last_buyout_report",
-        "land_use",
-        "zoning_overlay",
-        "display_state",
-        "service_gap_json",
-        "adjacent_cell_ids",
-        "network_access_json",
-        "hazard_json",
-        "housing_capacity",
-        "affordability",
-        "vacancy_rate",
-        "displacement_json",
-        "population_mix_json",
-        "dissatisfaction_json",
-        "incident_state",
-        "incident_group",
-        "public_profile",
-        "last_report",
-        "prosperity_band",
-    ]
+    fields = ["SHAPE@"] + DISTRICT_FIELD_NAMES + ["last_report"]
     limits = _json_limits(paths["districts"], DISTRICT_JSON_FIELDS)
     with arcpy.da.InsertCursor(paths["districts"], fields) as cursor:
         for profile in profiles:
             row = int(profile.cell_id[1:3])
             col = int(profile.cell_id[3:5])
-            geom = square_polygon(col * 100.0, row * 100.0, 96.0, sr)
-            cursor.insertRow([
-                geom,
-                profile.cell_id,
-                profile.name,
-                profile.population,
-                profile.activity,
-                profile.friction,
-                profile.trust,
-                profile.exposure,
-                profile.services,
-                profile.district_type,
-                profile.prior_district_type,
-                profile.identity_state,
-                profile.contesting_cell_id,
-                profile.contesting_type,
-                profile.transition_due_turn,
-                profile.buyout_pressure,
-                profile.last_buyout_report,
-                profile.land_use,
-                profile.zoning_overlay,
-                profile.display_state,
-                encode_service_gap(profile.service_gap),
-                ",".join(profile.adjacent_cell_ids),
-                encode_json(profile.network_access, limit=limits["network_access_json"], field="network_access_json"),
-                encode_json(profile.hazards, limit=limits["hazard_json"], field="hazard_json"),
-                profile.housing_capacity,
-                profile.affordability,
-                profile.vacancy_rate,
-                encode_json(profile.displacement, limit=limits["displacement_json"], field="displacement_json"),
-                encode_group_bands(profile.population_mix, maximum=3),
-                encode_group_bands(profile.dissatisfaction, maximum=4),
-                profile.incident_state,
-                profile.incident_group,
-                profile.public_profile,
-                "New district profile generated.",
-                profile.prosperity_band,
-            ])
+            values = _encode_district(profile, DISTRICT_CODEC, limits)
+            values["SHAPE@"] = square_polygon(col * 100.0, row * 100.0, 96.0, sr)
+            values["last_report"] = "New district profile generated."
+            cursor.insertRow([values[field] for field in fields])
     _log(messages, "NEW", f"inserted {len(profiles)} districts")
 
 
@@ -343,84 +275,220 @@ def _clamped_int_map(value, allowed, maximum=None):
     return dict(sorted(out.items()))
 
 
+class DistrictField(NamedTuple):
+    """One district column: its rule attribute and how it crosses the cursor."""
+
+    field: str
+    attr: str
+    encode: Callable
+    decode: Callable
+    default: object = None
+    on_update: bool = True
+
+
+def _same(value, _limit=None):
+    """Pass a value through unchanged."""
+
+    return value
+
+
+def _as_int(value):
+    """Decode a numeric column as an int."""
+
+    return int(value)
+
+
+def _json_codec(field):
+    """Return an encoder that writes a JSON map within the field's real width."""
+
+    return lambda value, limit: encode_json(value, limit=limit, field=field)
+
+
+def _cell_list(value):
+    """Decode a comma-separated district id list."""
+
+    return [part for part in value.split(",") if part]
+
+
+# One row per persisted district column. read_districts, write_district_updates,
+# and create_district_board all run over this table, so a new column is one
+# line. A blank or null cell reads as `default` (if any) before decoding. cell_id and
+# district_name are fixed after New Game; last_report is written separately
+# because updates change it only for affected districts.
+DISTRICT_CODEC = (
+    DistrictField("cell_id", "cell_id", _same, _same, on_update=False),
+    DistrictField("district_name", "name", _same, _same, on_update=False),
+    DistrictField("population", "population", _same, _as_int, 0),
+    DistrictField("activity", "activity", _same, _as_int, 0),
+    DistrictField("friction", "friction", _same, _as_int, 0),
+    DistrictField("trust", "trust", _same, _as_int, 0),
+    DistrictField("exposure", "exposure", _same, _as_int, 0),
+    DistrictField("services", "services", _same, _as_int, 0),
+    DistrictField("district_type", "district_type", _same, _same, "mercantile"),
+    DistrictField("prior_district_type", "prior_district_type", _same, _same, ""),
+    DistrictField("identity_state", "identity_state", _same, _same, "stable"),
+    DistrictField("contesting_cell_id", "contesting_cell_id", _same, _same, ""),
+    DistrictField("contesting_type", "contesting_type", _same, _same, ""),
+    DistrictField("transition_due_turn", "transition_due_turn", _same, _as_int, 0),
+    DistrictField("buyout_pressure", "buyout_pressure", _same, _as_int, 0),
+    DistrictField("last_buyout_report", "last_buyout_report", lambda value, _limit: value[:512], _same, ""),
+    DistrictField("land_use", "land_use", _same, _same, ""),
+    DistrictField("zoning_overlay", "zoning_overlay", _same, _same, ""),
+    DistrictField("display_state", "display_state", _same, _same, "stable"),
+    DistrictField("service_gap_json", "service_gap", lambda value, _limit: encode_service_gap(value), decode_service_gap, ""),
+    DistrictField("adjacent_cell_ids", "adjacent_cell_ids", lambda value, _limit: ",".join(value), _cell_list, ""),
+    DistrictField("network_access_json", "network_access", _json_codec("network_access_json"), decode_json, ""),
+    DistrictField("hazard_json", "hazards", _json_codec("hazard_json"), decode_json, ""),
+    DistrictField("housing_capacity", "housing_capacity", _same, _as_int, 0),
+    DistrictField("affordability", "affordability", _same, _as_int, 0),
+    DistrictField("vacancy_rate", "vacancy_rate", _same, _as_int, 0),
+    DistrictField("displacement_json", "displacement", _json_codec("displacement_json"), decode_json, ""),
+    DistrictField(
+        "population_mix_json",
+        "population_mix",
+        lambda value, _limit: encode_group_bands(value, maximum=3),
+        lambda text: decode_group_bands(text, maximum=3),
+        "",
+    ),
+    DistrictField(
+        "dissatisfaction_json",
+        "dissatisfaction",
+        lambda value, _limit: encode_group_bands(value, maximum=4),
+        lambda text: decode_group_bands(text, maximum=4),
+        "",
+    ),
+    DistrictField("incident_state", "incident_state", _same, _same, "none"),
+    DistrictField("incident_group", "incident_group", _same, _same, ""),
+    DistrictField("public_profile", "public_profile", _same, _same, ""),
+    DistrictField("prosperity_band", "prosperity_band", _same, _same, "stable"),
+)
+DISTRICT_CODEC_FIELDS = [spec.field for spec in DISTRICT_CODEC]
+
+
+def _encode_district(profile, specs, limits):
+    """Return {field: cursor value} for a profile over the given codec rows."""
+
+    return {spec.field: spec.encode(getattr(profile, spec.attr), limits.get(spec.field)) for spec in specs}
+
+
+def _decode_district_value(spec, raw):
+    """Decode one district cell, reading blank or null as the codec default.
+
+    A default of None means the column has none and passes through raw.
+    """
+
+    if spec.default is not None and raw in (None, ""):
+        raw = spec.default
+    return spec.decode(raw)
+
+
+class DistrictField(NamedTuple):
+    """One district column: its profile attribute, codec, and blank default.
+
+    encode(value, limit) gets the save's real field width, which only the JSON
+    encoders use. read() swaps a blank cell for default before decoding.
+    """
+
+    field: str
+    attr: str
+    encode: Callable
+    decode: Callable
+    default: object = None
+    on_update: bool = True
+
+    def read(self, raw):
+        """Decode one cell, using default when it is None or empty."""
+
+        return self.decode(self.default if raw in (None, "") else raw)
+
+
+def _same(value, _limit=None):
+    """Pass a value through unchanged."""
+
+    return value
+
+
+def _json_codec(field):
+    """Return an encoder that fits dict JSON to the field's real width."""
+
+    return lambda value, limit: encode_json(value, limit=limit, field=field)
+
+
+def _cell_ids(value):
+    """Split a comma-joined district id list."""
+
+    return [part for part in value.split(",") if part]
+
+
+# One row per persisted district column. A new column is one line here plus its
+# schema entry. last_report is written separately (per-decision report text).
+DISTRICT_CODEC = (
+    DistrictField("cell_id", "cell_id", _same, _same, on_update=False),
+    DistrictField("district_name", "name", _same, _same, on_update=False),
+    DistrictField("population", "population", _same, int, 0),
+    DistrictField("activity", "activity", _same, int, 0),
+    DistrictField("friction", "friction", _same, int, 0),
+    DistrictField("trust", "trust", _same, int, 0),
+    DistrictField("exposure", "exposure", _same, int, 0),
+    DistrictField("services", "services", _same, int, 0),
+    DistrictField("district_type", "district_type", _same, _same, "mercantile"),
+    DistrictField("prior_district_type", "prior_district_type", _same, _same, ""),
+    DistrictField("identity_state", "identity_state", _same, _same, "stable"),
+    DistrictField("contesting_cell_id", "contesting_cell_id", _same, _same, ""),
+    DistrictField("contesting_type", "contesting_type", _same, _same, ""),
+    DistrictField("transition_due_turn", "transition_due_turn", _same, int, 0),
+    DistrictField("buyout_pressure", "buyout_pressure", _same, int, 0),
+    DistrictField("last_buyout_report", "last_buyout_report", lambda value, _limit: value[:512], _same, ""),
+    DistrictField("land_use", "land_use", _same, _same, ""),
+    DistrictField("zoning_overlay", "zoning_overlay", _same, _same, ""),
+    DistrictField("display_state", "display_state", _same, _same, "stable"),
+    DistrictField("service_gap_json", "service_gap", lambda value, _limit: encode_service_gap(value), decode_service_gap, ""),
+    DistrictField("adjacent_cell_ids", "adjacent_cell_ids", lambda value, _limit: ",".join(value), _cell_ids, ""),
+    DistrictField("network_access_json", "network_access", _json_codec("network_access_json"), decode_json, ""),
+    DistrictField("hazard_json", "hazards", _json_codec("hazard_json"), decode_json, ""),
+    DistrictField("housing_capacity", "housing_capacity", _same, int, 0),
+    DistrictField("affordability", "affordability", _same, int, 0),
+    DistrictField("vacancy_rate", "vacancy_rate", _same, int, 0),
+    DistrictField("displacement_json", "displacement", _json_codec("displacement_json"), decode_json, ""),
+    DistrictField(
+        "population_mix_json",
+        "population_mix",
+        lambda value, _limit: encode_group_bands(value, maximum=3),
+        lambda text: decode_group_bands(text, maximum=3),
+        "",
+    ),
+    DistrictField(
+        "dissatisfaction_json",
+        "dissatisfaction",
+        lambda value, _limit: encode_group_bands(value, maximum=4),
+        lambda text: decode_group_bands(text, maximum=4),
+        "",
+    ),
+    DistrictField("incident_state", "incident_state", _same, _same, "none"),
+    DistrictField("incident_group", "incident_group", _same, _same, ""),
+    DistrictField("public_profile", "public_profile", _same, _same, ""),
+    DistrictField("prosperity_band", "prosperity_band", _same, _same, "stable"),
+)
+DISTRICT_FIELD_NAMES = [spec.field for spec in DISTRICT_CODEC]
+DISTRICT_UPDATE_CODEC = tuple(spec for spec in DISTRICT_CODEC if spec.on_update)
+
+
+def _encode_district(profile, codec, limits):
+    """Return {field: stored value} for one profile over the given codec rows."""
+
+    return {spec.field: spec.encode(getattr(profile, spec.attr), limits.get(spec.field)) for spec in codec}
+
+
 def read_districts(paths):
     """Read district feature rows into normalized rule profiles."""
 
     out = {}
     # ArcGIS stores nested fields as delimited or JSON text; decode them back
     # into rule dataclasses before normalizing derived fields.
-    fields = [
-        "cell_id",
-        "district_name",
-        "population",
-        "activity",
-        "friction",
-        "trust",
-        "exposure",
-        "services",
-        "district_type",
-        "prior_district_type",
-        "identity_state",
-        "contesting_cell_id",
-        "contesting_type",
-        "transition_due_turn",
-        "buyout_pressure",
-        "last_buyout_report",
-        "land_use",
-        "zoning_overlay",
-        "display_state",
-        "service_gap_json",
-        "adjacent_cell_ids",
-        "network_access_json",
-        "hazard_json",
-        "housing_capacity",
-        "affordability",
-        "vacancy_rate",
-        "displacement_json",
-        "population_mix_json",
-        "dissatisfaction_json",
-        "incident_state",
-        "incident_group",
-        "public_profile",
-        "prosperity_band",
-    ]
-    with arcpy.da.SearchCursor(paths["districts"], fields) as cursor:
+    with arcpy.da.SearchCursor(paths["districts"], DISTRICT_FIELD_NAMES) as cursor:
         for row in cursor:
-            profile = rules.DistrictProfile(
-                cell_id=row[0],
-                name=row[1],
-                population=int(row[2] or 0),
-                activity=int(row[3] or 0),
-                friction=int(row[4] or 0),
-                trust=int(row[5] or 0),
-                exposure=int(row[6] or 0),
-                services=int(row[7] or 0),
-                district_type=row[8] or "mercantile",
-                prior_district_type=row[9] or "",
-                identity_state=row[10] or "stable",
-                contesting_cell_id=row[11] or "",
-                contesting_type=row[12] or "",
-                transition_due_turn=int(row[13] or 0),
-                buyout_pressure=int(row[14] or 0),
-                last_buyout_report=row[15] or "",
-                land_use=row[16] or "",
-                zoning_overlay=row[17] or "",
-                display_state=row[18] or "stable",
-                service_gap=decode_service_gap(row[19]),
-                adjacent_cell_ids=[part for part in (row[20] or "").split(",") if part],
-                network_access=decode_json(row[21]),
-                hazards=decode_json(row[22]),
-                housing_capacity=int(row[23] or 0),
-                affordability=int(row[24] or 0),
-                vacancy_rate=int(row[25] or 0),
-                displacement=decode_json(row[26]),
-                population_mix=decode_group_bands(row[27], maximum=3),
-                dissatisfaction=decode_group_bands(row[28], maximum=4),
-                incident_state=row[29] or "none",
-                incident_group=row[30] or "",
-                public_profile=row[31] or "",
-                prosperity_band=row[32] or "stable",
-            )
+            values = dict(zip(DISTRICT_FIELD_NAMES, row))
+            profile = rules.DistrictProfile(**{spec.attr: spec.read(values[spec.field]) for spec in DISTRICT_CODEC})
             rules.normalize_profile(profile)
             out[profile.cell_id] = profile
     return out
@@ -433,83 +501,20 @@ def write_district_updates(paths, districts, report, affected_ids=None):
     affected = set(affected_ids or districts)
     # Every district row is refreshed from normalized state, while last_report is
     # only changed for affected districts so unrelated map notes survive.
-    fields = [
-        "cell_id",
-        "population",
-        "activity",
-        "friction",
-        "trust",
-        "exposure",
-        "services",
-        "district_type",
-        "prior_district_type",
-        "identity_state",
-        "contesting_cell_id",
-        "contesting_type",
-        "transition_due_turn",
-        "buyout_pressure",
-        "last_buyout_report",
-        "land_use",
-        "zoning_overlay",
-        "display_state",
-        "service_gap_json",
-        "adjacent_cell_ids",
-        "network_access_json",
-        "hazard_json",
-        "housing_capacity",
-        "affordability",
-        "vacancy_rate",
-        "displacement_json",
-        "population_mix_json",
-        "dissatisfaction_json",
-        "incident_state",
-        "incident_group",
-        "public_profile",
-        "last_report",
-        "prosperity_band",
-    ]
+    fields = ["cell_id"] + [spec.field for spec in DISTRICT_UPDATE_CODEC] + ["last_report"]
     limits = _json_limits(paths["districts"], DISTRICT_JSON_FIELDS)
     with arcpy.da.UpdateCursor(paths["districts"], fields) as cursor:
         for row in cursor:
-            cid = row[0]
+            values = dict(zip(fields, row))
+            cid = values["cell_id"]
             if cid not in districts:
                 continue
             profile = districts[cid]
             rules.normalize_profile(profile)
-            row[1] = profile.population
-            row[2] = profile.activity
-            row[3] = profile.friction
-            row[4] = profile.trust
-            row[5] = profile.exposure
-            row[6] = profile.services
-            row[7] = profile.district_type
-            row[8] = profile.prior_district_type
-            row[9] = profile.identity_state
-            row[10] = profile.contesting_cell_id
-            row[11] = profile.contesting_type
-            row[12] = profile.transition_due_turn
-            row[13] = profile.buyout_pressure
-            row[14] = profile.last_buyout_report[:512]
-            row[15] = profile.land_use
-            row[16] = profile.zoning_overlay
-            row[17] = profile.display_state
-            row[18] = encode_service_gap(profile.service_gap)
-            row[19] = ",".join(profile.adjacent_cell_ids)
-            row[20] = encode_json(profile.network_access, limit=limits["network_access_json"], field="network_access_json")
-            row[21] = encode_json(profile.hazards, limit=limits["hazard_json"], field="hazard_json")
-            row[22] = profile.housing_capacity
-            row[23] = profile.affordability
-            row[24] = profile.vacancy_rate
-            row[25] = encode_json(profile.displacement, limit=limits["displacement_json"], field="displacement_json")
-            row[26] = encode_group_bands(profile.population_mix, maximum=3)
-            row[27] = encode_group_bands(profile.dissatisfaction, maximum=4)
-            row[28] = profile.incident_state
-            row[29] = profile.incident_group
-            row[30] = profile.public_profile
+            values.update(_encode_district(profile, DISTRICT_UPDATE_CODEC, limits))
             if cid in affected:
-                row[31] = report[:512]
-            row[32] = profile.prosperity_band
-            cursor.updateRow(row)
+                values["last_report"] = report[:512]
+            cursor.updateRow([values[field] for field in fields])
 
 
 @perf_traced("write_daily_pressure_overlays")
@@ -519,14 +524,11 @@ def write_daily_pressure_overlays(paths, districts, pressure):
     pressure = {str(cid): max(0, min(4, int(value or 0))) for cid, value in (pressure or {}).items()}
     fields = ["cell_id", "display_state", "last_report"]
     with arcpy.da.UpdateCursor(paths["districts"], fields) as cursor:
-        for row in cursor:
-            cid = row[0]
+        for cid, _display_state, _last_report in cursor:
             profile = districts.get(cid) if districts else None
             amount = pressure.get(cid, 0)
             overlay = _daily_overlay_state(profile, amount)
-            row[1] = overlay
-            row[2] = _daily_overlay_report(cid, overlay, amount, profile)
-            cursor.updateRow(row)
+            cursor.updateRow([cid, overlay, _daily_overlay_report(cid, overlay, amount, profile)])
 
 
 def _daily_overlay_state(profile, pressure):

@@ -528,3 +528,137 @@ def test_ensure_lookup_indexes_adds_missing_indexes_once(monkeypatch):
     schema.ensure_lookup_indexes(paths, None)
 
     assert calls["add_index"] == [(paths["commands"], ["command_id"], "idx_command_id")]
+
+
+class _DictRowTable:
+    """In-memory feature table of dict rows; cursors project any field list."""
+
+    def __init__(self):
+        self.rows = []
+
+    def _cursor(self, fields, rows):
+        table = self
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def __iter__(self):
+                for current in rows:
+                    self.current = current
+                    yield [current.get(field) for field in fields]
+
+            def insertRow(self, values):
+                table.rows.append(dict(zip(fields, values)))
+
+            def updateRow(self, values):
+                self.current.update(zip(fields, values))
+
+        return Cursor()
+
+    def search_cursor(self, _path, fields, where_clause=None):
+        return self._cursor(fields, list(self.rows))
+
+    def insert_cursor(self, _path, fields):
+        return self._cursor(fields, [])
+
+    def update_cursor(self, _path, fields, where_clause=None):
+        return self._cursor(fields, self.rows)
+
+
+def _district_store(monkeypatch):
+    """Return store wired to one in-memory district table."""
+
+    store = _store()
+    table = _DictRowTable()
+    monkeypatch.setattr(
+        store.arcpy,
+        "da",
+        SimpleNamespace(
+            SearchCursor=table.search_cursor,
+            InsertCursor=table.insert_cursor,
+            UpdateCursor=table.update_cursor,
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(store.arcpy, "Describe", lambda _path: SimpleNamespace(spatialReference=None), raising=False)
+    monkeypatch.setattr(store, "square_polygon", lambda *args: "square")
+    monkeypatch.setattr(store, "_log", lambda *args: None)
+    monkeypatch.setattr(schema, "_FIELD_LENGTHS", {"districts": {}})
+    return store, table
+
+
+def _every_field_set(store, profile):
+    """Give one district a non-default value in every persisted field."""
+
+    rules = store.rules
+    profile.prior_district_type = "residential"
+    profile.identity_state = "contested"
+    profile.contesting_cell_id = "D0001"
+    profile.contesting_type = "industrial"
+    profile.transition_due_turn = 7
+    profile.buyout_pressure = 3
+    profile.last_buyout_report = "Buyout offer filed."
+    profile.land_use = "industrial"
+    profile.zoning_overlay = "flood_overlay"
+    profile.network_access = {service: 5 for service in rules.SERVICE_TYPES}
+    profile.hazards = {hazard: 2 for hazard in rules.HAZARD_TYPES}
+    profile.housing_capacity = 900
+    profile.affordability = 40
+    profile.vacancy_rate = 6
+    profile.displacement = {group: 1 for group in rules.CITIZEN_GROUPS}
+    profile.population_mix = {group: 2 for group in rules.CITIZEN_GROUPS}
+    profile.dissatisfaction = {group: 3 for group in rules.CITIZEN_GROUPS}
+    return rules.normalize_profile(profile)
+
+
+def test_district_codec_round_trips_every_field(monkeypatch):
+    """Verify a fully set district survives create, update, and read unchanged."""
+
+    from dataclasses import asdict
+
+    store, table = _district_store(monkeypatch)
+    paths = {"districts": "districts"}
+    store.create_district_board(paths, 2026, None)
+    board = store.read_districts(paths)
+    target = _every_field_set(store, board["D0000"])
+    expected = {cid: asdict(profile) for cid, profile in board.items()}
+
+    store.write_district_updates(paths, board, "Decision report.", affected_ids=["D0000"])
+    loaded = store.read_districts(paths)
+
+    assert {cid: asdict(profile) for cid, profile in loaded.items()} == expected
+    assert loaded["D0000"].name == target.name
+    reports = {row["cell_id"]: row["last_report"] for row in table.rows}
+    assert reports["D0000"] == "Decision report."
+    assert reports["D0001"] == "New district profile generated."
+    assert all(row["SHAPE@"] == "square" for row in table.rows)
+
+
+def test_district_read_applies_defaults_to_blank_rows(monkeypatch):
+    """Verify blank district columns read back with the documented defaults."""
+
+    store, table = _district_store(monkeypatch)
+    table.rows.append({"cell_id": "D0000", "district_name": "Blank"})
+
+    profile = store.read_districts({"districts": "districts"})["D0000"]
+
+    assert profile.name == "Blank"
+    assert profile.population == 0
+    assert profile.district_type == "mercantile"
+    assert profile.identity_state == "stable"
+    assert profile.incident_state == "none"
+    assert profile.adjacent_cell_ids == []
+
+
+def test_district_codec_covers_every_schema_district_field():
+    """Verify the codec and DISTRICT_FIELDS list the same columns."""
+
+    store = _store()
+    schema_names = {name for name, *_rest in schema.DISTRICT_FIELDS}
+
+    assert set(store.DISTRICT_FIELD_NAMES) | {"last_report"} == schema_names
+    assert len(store.DISTRICT_FIELD_NAMES) == len(set(store.DISTRICT_FIELD_NAMES))
