@@ -40,8 +40,12 @@ Idempotent creation guarded by `arcpy.Exists`:
   — `POINT` / `POLYLINE` / `POLYGON`.
 - `arcpy.management.AddField(table, name, type, field_alias=…, field_length=…)`
   via an `add_field_if_missing` wrapper; types are `TEXT/LONG/DOUBLE/SHORT/DATE`.
-  Wide JSON blobs are `TEXT` with explicit lengths (e.g. `state_json` 4000).
-- `arcpy.ListFields(table)` to diff existing fields (case-insensitive).
+  JSON fields are `TEXT` with `JSON_TEXT_LENGTH` (32768) in new saves. Older
+  saves keep their old widths (e.g. `state_json` 4000), since `AddField` never
+  widens a field. `store.encode_json` never slices JSON: an oversized payload
+  logs a `[STORE]` warning naming the field and size, and stores `{}`.
+- `arcpy.ListFields(table)` to diff existing fields (case-insensitive), and once
+  per table per run to read real JSON field widths (`text_field_length`).
 - `arcpy.management.DeleteRows(table)` to reset gameplay while keeping schema
   (`clear_game_rows`); `DeleteField` for the legacy city-health field migration.
 

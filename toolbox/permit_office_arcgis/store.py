@@ -9,12 +9,13 @@ import uuid
 import arcpy
 
 from ._perf import perf_traced
-from .messages import _log
+from .messages import _log, _warn
 from .rules_loader import rules
-from .schema import DOCKET_FIELDS, PROJECT_FIELDS
+from .schema import DOCKET_FIELDS, JSON_TEXT_LENGTH, PROJECT_FIELDS, text_field_length
 
 
 DOCKET_FIELD_NAMES = [field[0] for field in DOCKET_FIELDS]
+DISTRICT_JSON_FIELDS = ("network_access_json", "hazard_json", "displacement_json")
 DOCKET_UPDATE_FIELDS = [
     name
     for name in DOCKET_FIELD_NAMES
@@ -98,6 +99,7 @@ def create_district_board(paths, seed, messages):
         "last_report",
         "prosperity_band",
     ]
+    limits = _json_limits(paths["districts"], DISTRICT_JSON_FIELDS)
     with arcpy.da.InsertCursor(paths["districts"], fields) as cursor:
         for profile in profiles:
             row = int(profile.cell_id[1:3])
@@ -126,12 +128,12 @@ def create_district_board(paths, seed, messages):
                 profile.display_state,
                 encode_service_gap(profile.service_gap),
                 ",".join(profile.adjacent_cell_ids),
-                encode_json(profile.network_access, limit=1024),
-                encode_json(profile.hazards, limit=1024),
+                encode_json(profile.network_access, limit=limits["network_access_json"], field="network_access_json"),
+                encode_json(profile.hazards, limit=limits["hazard_json"], field="hazard_json"),
                 profile.housing_capacity,
                 profile.affordability,
                 profile.vacancy_rate,
-                encode_json(profile.displacement, limit=1024),
+                encode_json(profile.displacement, limit=limits["displacement_json"], field="displacement_json"),
                 encode_group_bands(profile.population_mix, maximum=3),
                 encode_group_bands(profile.dissatisfaction, maximum=4),
                 profile.incident_state,
@@ -147,6 +149,13 @@ def create_district_board(paths, seed, messages):
 def write_state(paths, state):
     """Persist city state as key/value rows for ArcGIS-friendly storage."""
 
+    limit = json_field_limit(paths["state"], "value_text")
+
+    def as_json(key, value):
+        """Return a (value_text, value_num) pair for one JSON state key."""
+
+        return (encode_json(value, limit=limit, field=f"state.{key}"), None)
+
     values = {
         "turn": (str(state.turn), state.turn),
         "max_turns": (str(state.max_turns), state.max_turns),
@@ -161,16 +170,16 @@ def write_state(paths, state):
         "trust": (str(state.trust), state.trust),
         "exposure": (str(state.exposure), state.exposure),
         "scenario_id": (state.scenario_id, None),
-        "stakeholder_heat": (json.dumps(state.stakeholder_heat, sort_keys=True), None),
+        "stakeholder_heat": as_json("stakeholder_heat", state.stakeholder_heat),
         "last_revenue": (str(state.last_revenue), state.last_revenue),
         "last_upkeep": (str(state.last_upkeep), state.last_upkeep),
         "last_net": (str(state.last_net), state.last_net),
         "maintenance_backlog": (str(state.maintenance_backlog), state.maintenance_backlog),
-        "stakeholder_memory": (json.dumps(state.stakeholder_memory, sort_keys=True), None),
-        "type_ledger": (json.dumps(state.type_ledger, sort_keys=True), None),
-        "pending_followups": (json.dumps(state.pending_followups, sort_keys=True), None),
+        "stakeholder_memory": as_json("stakeholder_memory", state.stakeholder_memory),
+        "type_ledger": as_json("type_ledger", state.type_ledger),
+        "pending_followups": as_json("pending_followups", state.pending_followups),
         "week_day": (str(getattr(state, "week_day", 0)), getattr(state, "week_day", 0)),
-        "daily_pressure": (json.dumps(getattr(state, "daily_pressure", {}) or {}, sort_keys=True), None),
+        "daily_pressure": as_json("daily_pressure", getattr(state, "daily_pressure", {})),
     }
     arcpy.management.DeleteRows(paths["state"])
     with arcpy.da.InsertCursor(paths["state"], ["key", "value_text", "value_num"]) as cursor:
@@ -257,10 +266,30 @@ def decode_service_gap(text):
     return _clamped_int_map(_decode_json_dict(text), rules.SERVICE_TYPES)
 
 
-def encode_json(value, limit=4000):
-    """Encode a dictionary into a bounded ArcGIS text field."""
+def encode_json(value, limit=JSON_TEXT_LENGTH, field="json", messages=None):
+    """Encode a dictionary for a bounded ArcGIS text field, never cutting it.
 
-    return json.dumps(value or {}, sort_keys=True)[:limit]
+    Slicing JSON leaves invalid text that decodes to {} with no trace. An
+    oversized payload is instead logged by field and size and stored as {}.
+    """
+
+    text = json.dumps(value or {}, sort_keys=True)
+    if len(text) <= limit:
+        return text
+    _warn(messages, "STORE", f"{field} payload is {len(text)} chars, over its {limit}-char field; stored {{}} instead")
+    return "{}"
+
+
+def json_field_limit(table, field):
+    """Return the real width of a JSON text field, or the new-save width."""
+
+    return text_field_length(table, field, JSON_TEXT_LENGTH)
+
+
+def _json_limits(table, fields):
+    """Return {field: width} for the JSON fields a writer fills on one table."""
+
+    return {field: json_field_limit(table, field) for field in fields}
 
 
 def decode_json(text):
@@ -426,6 +455,7 @@ def write_district_updates(paths, districts, report, affected_ids=None):
         "last_report",
         "prosperity_band",
     ]
+    limits = _json_limits(paths["districts"], DISTRICT_JSON_FIELDS)
     with arcpy.da.UpdateCursor(paths["districts"], fields) as cursor:
         for row in cursor:
             cid = row[0]
@@ -452,12 +482,12 @@ def write_district_updates(paths, districts, report, affected_ids=None):
             row[17] = profile.display_state
             row[18] = encode_service_gap(profile.service_gap)
             row[19] = ",".join(profile.adjacent_cell_ids)
-            row[20] = encode_json(profile.network_access, limit=1024)
-            row[21] = encode_json(profile.hazards, limit=1024)
+            row[20] = encode_json(profile.network_access, limit=limits["network_access_json"], field="network_access_json")
+            row[21] = encode_json(profile.hazards, limit=limits["hazard_json"], field="hazard_json")
             row[22] = profile.housing_capacity
             row[23] = profile.affordability
             row[24] = profile.vacancy_rate
-            row[25] = encode_json(profile.displacement, limit=1024)
+            row[25] = encode_json(profile.displacement, limit=limits["displacement_json"], field="displacement_json")
             row[26] = encode_group_bands(profile.population_mix, maximum=3)
             row[27] = encode_group_bands(profile.dissatisfaction, maximum=4)
             row[28] = profile.incident_state
@@ -601,6 +631,7 @@ def write_active_features(paths, features):
         "report",
     ]
     for fc in (paths["points"], paths["lines"], paths["zones"]):
+        limits = _json_limits(fc, ("state_json", "metadata_json"))
         with arcpy.da.UpdateCursor(fc, fields) as cursor:
             for row in cursor:
                 feature = by_id.get(row[0])
@@ -612,8 +643,8 @@ def write_active_features(paths, features):
                 row[3] = feature.condition
                 row[4] = feature.maintenance_due_turn
                 row[5] = feature.last_maintained_turn
-                row[6] = encode_json(feature.state_json)
-                row[7] = encode_json(feature.metadata, limit=2048)
+                row[6] = encode_json(feature.state_json, limit=limits["state_json"], field="state_json")
+                row[7] = encode_json(feature.metadata, limit=limits["metadata_json"], field="metadata_json")
                 row[8] = f"Feature {feature.feature_id}: {feature.status}, condition {feature.condition}"[:1024]
                 cursor.updateRow(row)
 
@@ -664,6 +695,7 @@ def write_projects(paths, projects):
         return
     arcpy.management.DeleteRows(project_path)
     fields = [field[0] for field in PROJECT_FIELDS]
+    limit = json_field_limit(project_path, "payload_json")
     with arcpy.da.InsertCursor(project_path, fields) as cursor:
         for project in sorted(projects.values(), key=lambda item: item.project_id):
             cursor.insertRow([
@@ -675,7 +707,7 @@ def write_projects(paths, projects):
                 project.due_turn,
                 project.stakeholder,
                 ",".join(project.target_cell_ids),
-                encode_json(project.payload),
+                encode_json(project.payload, limit=limit, field="payload_json"),
                 project.last_report[:1024],
             ])
 
@@ -706,6 +738,7 @@ def generate_docket_rows(paths, seed, messages):
     )
     # Docket rows mirror rule items exactly enough for the dashboard to reload
     # without recomputing follow-up priority or case metadata.
+    limit = json_field_limit(paths["docket"], "case_json")
     with arcpy.da.InsertCursor(paths["docket"], DOCKET_FIELD_NAMES) as cursor:
         for item in items:
             cursor.insertRow([
@@ -729,7 +762,7 @@ def generate_docket_rows(paths, seed, messages):
                 item.priority,
                 item.due_turn,
                 item.subject_feature_id,
-                encode_json(item.case_json),
+                encode_json(item.case_json, limit=limit, field="case_json", messages=messages),
             ])
     seed_docket_proposals(paths, items, seed, messages)
     write_state(paths, state)
@@ -795,7 +828,7 @@ def write_docket_item(paths, item):
             row[13] = item.priority
             row[14] = item.due_turn
             row[15] = item.subject_feature_id
-            row[16] = encode_json(item.case_json)
+            row[16] = encode_json(item.case_json, limit=json_field_limit(paths["docket"], "case_json"), field="case_json")
             cursor.updateRow(row)
             return
 
@@ -805,9 +838,10 @@ def command_insert(paths, action, item_id, target_ids, payload=None):
     """Create a command row before a dashboard action begins."""
 
     command_id = str(uuid.uuid4())
+    payload_text = encode_json(payload, limit=json_field_limit(paths["commands"], "payload_json"), field="command.payload_json")
     fields = ["command_id", "created_utc", "action", "item_id", "status", "attempt_count", "target_cell_ids", "payload_json", "message"]
     with arcpy.da.InsertCursor(paths["commands"], fields) as cursor:
-        cursor.insertRow([command_id, now_utc(), action, item_id, "created", 0, ",".join(target_ids), json.dumps(payload or {})[:4000], "created"])
+        cursor.insertRow([command_id, now_utc(), action, item_id, "created", 0, ",".join(target_ids), payload_text, "created"])
     return command_id
 
 
@@ -836,6 +870,7 @@ def command_finish(paths, command_id, status, message="", error=""):
 def action_log(paths, state, result):
     """Append a compact audit trail entry for a resolved decision."""
 
+    city_delta = encode_json(result.city_delta, limit=json_field_limit(paths["action_log"], "city_delta"), field="city_delta")
     with arcpy.da.InsertCursor(paths["action_log"], ["created_utc", "turn", "action", "item_id", "target_cell_ids", "result", "city_delta"]) as cursor:
         cursor.insertRow([
             now_utc(),
@@ -844,5 +879,5 @@ def action_log(paths, state, result):
             result.item_id,
             ",".join(result.affected_cell_ids),
             result.report[:2048],
-            json.dumps(result.city_delta)[:512],
+            city_delta,
         ])

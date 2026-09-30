@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from types import SimpleNamespace
 import sys
@@ -275,3 +276,83 @@ def test_ensure_schema_fast_path_skips_field_scans_when_marker_current(monkeypat
 
     assert schema.ensure_schema(gdb_path, None) == paths
     assert ("exists", paths["districts"]) in calls
+
+
+def _store():
+    """Import the store module lazily so the arcpy stub is already installed."""
+
+    from toolbox.permit_office_arcgis import store
+
+    return store
+
+
+def test_encode_json_fits_returns_full_payload():
+    """Verify a payload inside its limit is stored whole."""
+
+    store = _store()
+
+    assert store.encode_json({"b": 1, "a": 2}, limit=64) == '{"a": 2, "b": 1}'
+
+
+def test_encode_json_overflow_warns_and_stays_valid(monkeypatch):
+    """Verify an oversized payload is named in a warning and never cut mid-JSON."""
+
+    store = _store()
+    warnings = []
+    monkeypatch.setattr(store, "_warn", lambda messages, tag, text: warnings.append((tag, text)))
+    payload = {"history": "x" * 500}
+
+    text = store.encode_json(payload, limit=100, field="case_json")
+
+    assert json.loads(text) == {}
+    assert len(text) <= 100
+    assert len(warnings) == 1
+    tag, line = warnings[0]
+    assert tag == "STORE"
+    assert "case_json" in line and "100" in line and str(len(json.dumps(payload, sort_keys=True))) in line
+
+
+def test_json_field_limit_uses_real_width_of_old_saves(monkeypatch):
+    """Verify an old save's narrower field sets the overflow limit, not the new width."""
+
+    store = _store()
+    monkeypatch.setattr(schema, "_FIELD_LENGTHS", {})
+    fields = [SimpleNamespace(name="case_json", length=4000), SimpleNamespace(name="item_id", length=96)]
+    monkeypatch.setattr(schema.arcpy, "ListFields", lambda _path: fields, raising=False)
+
+    assert store.json_field_limit("C:/old.gdb/PermitDocket", "case_json") == 4000
+
+
+def test_json_field_limit_falls_back_to_schema_width(monkeypatch):
+    """Verify a failed field lookup falls back to the declared schema width."""
+
+    store = _store()
+    monkeypatch.setattr(schema, "_FIELD_LENGTHS", {})
+    monkeypatch.setattr(schema.arcpy, "ListFields", _raise, raising=False)
+
+    assert store.json_field_limit("C:/game.gdb/PermitDocket", "case_json") == schema.JSON_TEXT_LENGTH
+
+
+def test_json_fields_are_widened_for_new_saves():
+    """Verify every JSON-bearing text field uses the wide JSON length."""
+
+    json_fields = {
+        (table, name): length
+        for table, fields in (
+            ("districts", schema.DISTRICT_FIELDS),
+            ("support", schema.SUPPORT_FIELDS),
+            ("docket", schema.DOCKET_FIELDS),
+            ("state", schema.STATE_FIELDS),
+            ("projects", schema.PROJECT_FIELDS),
+            ("commands", schema.COMMAND_FIELDS),
+            ("action_log", schema.ACTION_LOG_FIELDS),
+        )
+        for name, _type, _alias, length in fields
+        if name.endswith("_json") or (table, name) in {("state", "value_text"), ("action_log", "city_delta")}
+    }
+
+    assert ("docket", "case_json") in json_fields
+    assert ("support", "state_json") in json_fields
+    assert ("districts", "hazard_json") in json_fields
+    assert set(json_fields.values()) == {schema.JSON_TEXT_LENGTH}
+    assert schema.JSON_TEXT_LENGTH > 4000

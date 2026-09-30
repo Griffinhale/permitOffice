@@ -22,9 +22,13 @@ PROJECTS = "PermitProjects"
 COMMANDS = "PermitUICommand"
 ACTION_LOG = "PermitActionLog"
 SCHEMA_META = "PermitSchemaMeta"
-SCHEMA_VERSION = "2026-06-12-startup-schema-v1"
+SCHEMA_VERSION = "2026-09-30-json-width-v2"
 SCHEMA_VERSION_KEY = "schema_version"
 WEB_MERCATOR_WKID = 3857
+# File-geodatabase text is variable length, so a wide limit costs nothing on
+# disk. AddField never widens an existing field: older saves keep their old
+# widths, and store.encode_json warns instead of truncating on those.
+JSON_TEXT_LENGTH = 32768
 
 P_WORKSPACE = 0
 P_OUTPUT = 1
@@ -51,16 +55,16 @@ DISTRICT_FIELDS = [
     ("zoning_overlay", "TEXT", "Zoning Overlay", 32),
     ("display_state", "TEXT", "Display State", 32),
     ("prosperity_band", "TEXT", "Prosperity Band", 16),
-    ("service_gap_json", "TEXT", "Service Gaps", 1024),
+    ("service_gap_json", "TEXT", "Service Gaps", JSON_TEXT_LENGTH),
     ("adjacent_cell_ids", "TEXT", "Adjacent District IDs", 512),
-    ("network_access_json", "TEXT", "Network Access", 1024),
-    ("hazard_json", "TEXT", "Hazards", 1024),
+    ("network_access_json", "TEXT", "Network Access", JSON_TEXT_LENGTH),
+    ("hazard_json", "TEXT", "Hazards", JSON_TEXT_LENGTH),
     ("housing_capacity", "LONG", "Housing Capacity", None),
     ("affordability", "LONG", "Affordability", None),
     ("vacancy_rate", "SHORT", "Vacancy Rate", None),
-    ("displacement_json", "TEXT", "Displacement", 1024),
-    ("population_mix_json", "TEXT", "Population Mix", 1024),
-    ("dissatisfaction_json", "TEXT", "Dissatisfaction", 1024),
+    ("displacement_json", "TEXT", "Displacement", JSON_TEXT_LENGTH),
+    ("population_mix_json", "TEXT", "Population Mix", JSON_TEXT_LENGTH),
+    ("dissatisfaction_json", "TEXT", "Dissatisfaction", JSON_TEXT_LENGTH),
     ("incident_state", "TEXT", "Civic Incident State", 32),
     ("incident_group", "TEXT", "Civic Incident Group", 32),
     ("public_profile", "TEXT", "Public Profile", 512),
@@ -85,7 +89,7 @@ SUPPORT_FIELDS = [
     ("incident_type", "TEXT", "Incident Type", 32),
     ("owner_group", "TEXT", "Owner Group", 64),
     ("intensity", "LONG", "Intensity", None),
-    ("metadata_json", "TEXT", "Metadata JSON", 2048),
+    ("metadata_json", "TEXT", "Metadata JSON", JSON_TEXT_LENGTH),
     ("hazard_summary", "TEXT", "Hazard Summary", 512),
     ("mitigation_summary", "TEXT", "Mitigation Summary", 512),
     ("status", "TEXT", "Status", 32),
@@ -97,7 +101,7 @@ SUPPORT_FIELDS = [
     ("condition", "LONG", "Condition", None),
     ("maintenance_due_turn", "LONG", "Maintenance Due Turn", None),
     ("last_maintained_turn", "LONG", "Last Maintained Turn", None),
-    ("state_json", "TEXT", "Feature State JSON", 4000),
+    ("state_json", "TEXT", "Feature State JSON", JSON_TEXT_LENGTH),
 ]
 
 DOCKET_FIELDS = [
@@ -121,12 +125,12 @@ DOCKET_FIELDS = [
     ("priority", "LONG", "Priority", None),
     ("due_turn", "LONG", "Due Turn", None),
     ("subject_feature_id", "TEXT", "Subject Feature ID", 64),
-    ("case_json", "TEXT", "Case JSON", 4000),
+    ("case_json", "TEXT", "Case JSON", JSON_TEXT_LENGTH),
 ]
 
 STATE_FIELDS = [
     ("key", "TEXT", "Key", 64),
-    ("value_text", "TEXT", "Value Text", 2048),
+    ("value_text", "TEXT", "Value Text", JSON_TEXT_LENGTH),
     ("value_num", "DOUBLE", "Value Number", None),
 ]
 
@@ -139,7 +143,7 @@ PROJECT_FIELDS = [
     ("due_turn", "LONG", "Due Turn", None),
     ("stakeholder", "TEXT", "Stakeholder", 64),
     ("target_cell_ids", "TEXT", "Target District IDs", 512),
-    ("payload_json", "TEXT", "Payload JSON", 4000),
+    ("payload_json", "TEXT", "Payload JSON", JSON_TEXT_LENGTH),
     ("last_report", "TEXT", "Last Report", 1024),
 ]
 
@@ -152,7 +156,7 @@ COMMAND_FIELDS = [
     ("status", "TEXT", "Status", 32),
     ("attempt_count", "LONG", "Attempt Count", None),
     ("target_cell_ids", "TEXT", "Target District IDs", 512),
-    ("payload_json", "TEXT", "Payload JSON", 4000),
+    ("payload_json", "TEXT", "Payload JSON", JSON_TEXT_LENGTH),
     ("message", "TEXT", "Message", 1024),
     ("error_message", "TEXT", "Error Message", 1024),
 ]
@@ -164,13 +168,17 @@ ACTION_LOG_FIELDS = [
     ("item_id", "TEXT", "Docket Item ID", 96),
     ("target_cell_ids", "TEXT", "Target District IDs", 512),
     ("result", "TEXT", "Result", 2048),
-    ("city_delta", "TEXT", "City Delta", 512),
+    ("city_delta", "TEXT", "City Delta", JSON_TEXT_LENGTH),
 ]
 
 SCHEMA_META_FIELDS = [
     ("key", "TEXT", "Key", 64),
     ("value_text", "TEXT", "Value Text", 2048),
 ]
+
+# Real text widths as {table path: {lower-case field name: length}}, filled by
+# one ListFields per table on first write. ensure_schema resets it each run.
+_FIELD_LENGTHS = {}
 
 LEGACY_CITY_HEALTH_FIELD_MIGRATIONS = {
     "prosperity": "activity",
@@ -253,6 +261,23 @@ def add_field_if_missing(table, name, field_type, alias=None, length=None):
         kwargs["field_length"] = length
     arcpy.management.AddField(table, name, field_type, **kwargs)
     return True
+
+
+def text_field_length(table, field, default):
+    """Return a text field's width in this save, or default if unknown."""
+
+    lengths = _FIELD_LENGTHS.get(table)
+    if lengths is None:
+        try:
+            lengths = {
+                info.name.lower(): info.length
+                for info in arcpy.ListFields(table)
+                if isinstance(getattr(info, "length", None), int) and info.length > 0
+            }
+        except Exception:
+            return default
+        _FIELD_LENGTHS[table] = lengths
+    return lengths.get(field.lower(), default)
 
 
 def _spatial_reference_wkid(spatial_ref):
@@ -401,6 +426,7 @@ def _mark_schema_current(paths, messages):
 def ensure_schema(gdb_path, messages):
     """Ensure all active feature classes and tables exist in the game geodatabase."""
 
+    _FIELD_LENGTHS.clear()
     ensure_gdb(gdb_path, messages)
     paths = schema_paths(gdb_path)
     if _schema_fast_path_current(paths, messages):
