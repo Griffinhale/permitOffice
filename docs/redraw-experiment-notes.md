@@ -1,7 +1,7 @@
 # Live ArcGIS Redraw Experiment Notes
 
 Canonical notes for redraw experiments that changed or nearly changed the map
-refresh strategy. Scratch specs/plans stay in ignored `docs/superpowers/`; this
+refresh strategy. Superseded spike designs live in `docs/archive/`; this
 file records only live findings that should survive.
 
 ## 2026-06-08 rehydrate/swap benchmark

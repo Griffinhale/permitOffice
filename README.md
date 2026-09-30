@@ -9,10 +9,17 @@ The joke is bureaucratic, but the game loop is real: every permit is tied to
 map geometry, district state, stakeholder pressure, recurring costs, and visible
 city consequences.
 
-> **Status: public beta - v0.95.0.** Playable end to end; the current work is
-> focused on ArcGIS Pro redraw polish, packaging, and balance. Requires ArcGIS
+> **Status: public beta - v0.95.0.** Playable end to end. `main` carries a
+> dashboard redesign since that release that has not yet had a live ArcGIS Pro
+> pass; use the v0.95.0 release for the tested build. Requires ArcGIS
 > Pro 3.3+ with ArcPy to run (tested on 3.6); the pure-Python rules run and test
 > without it.
+
+![Permit Office running as a geoprocessing tool in ArcGIS Pro, with the labeled
+district grid and two districts selected from the active docket](docs/images/01-arcgis-engine-selection.png)
+
+![The district grid: each tile is a district, and approved permits add the point
+and line features drawn on it](docs/images/02-district-board.png)
 
 ## How It Plays
 
@@ -42,6 +49,12 @@ Permit Office is an experiment in using ArcGIS Pro as a game engine rather than
 only a mapping tool. Feature classes are the save file, map selections are the
 input device, and ArcPy geometry operations become part of the rules system.
 
+The longer aim is a platform for live-updating city simulations built from the
+standard ArcGIS tools analysts already use: disaster readiness, service
+disruption, emergency rerouting. A game is the hardest first test of that idea,
+because it has to stay correct and responsive while the map changes every turn.
+Permit Office is that test.
+
 The project is also a small design study in "paperwork as play": the player is
 not an all-powerful mayor, but an audit-facing office that shapes the city by
 filing, approving, delaying, and explaining official decisions.
@@ -64,6 +77,14 @@ filing, approving, delaying, and explaining official decisions.
   culture, and name.
 - **Dry municipal absurdism:** the interface is built like a cluttered permit
   desk, with filed reports and audit language instead of fantasy UI tropes.
+- **Designed around ArcGIS Pro's limits:** ArcPy and the map must stay on one
+  thread, and `RefreshLayer` does not reload changed attributes. So only
+  ArcPy-free work runs in the background, from copied rows; a one-ply decision
+  cache predicts which districts and layers each choice will change; and a
+  three-slot display ring rebuilds a hidden layer and shows it only once it
+  succeeds, replacing a 4-5 second full redraw. The alternatives that were
+  measured and rejected are in
+  [`docs/failed-experiments.md`](docs/failed-experiments.md).
 
 ## Quick Start
 
@@ -137,37 +158,33 @@ do not replace a live ArcGIS Pro smoke test.
 
 - `docs/systems-overview.md` - architecture, persisted state, stat model, and the
   turn loop. Start here.
-- `docs/docket-items.md` - docket template/item shape with worked examples.
+- `docs/decisions.md` - concise ADRs: choices made and alternatives rejected.
+- `docs/failed-experiments.md` - probes that were tried live and retired, and why.
+- `docs/redraw-experiment-notes.md` - live ArcGIS Pro redraw measurements.
 - `docs/arcpy-usage.md` - which stock ArcPy APIs we use and how (cursors, schema,
   geometry, map refresh/redraw, selection).
+- `docs/docket-items.md` - docket template/item shape with worked examples.
 - `docs/writing-and-tone.md` - the municipal voice and real copy examples.
-- `docs/decisions.md` - concise ADRs: choices made and alternatives rejected.
+- `docs/arcgis-pro-smoke-checklist.md` - the manual live test in ArcGIS Pro.
+- `docs/archive/` - superseded spike designs, kept for history.
 
 ## Current Status
 
-Permit Office is a playable prototype. It has generated districts, seeded city
-detail, weighted docket templates (driven by district type and citizen culture),
-inspections, approvals, no-AP ordinary denials, mitigation, incidents,
-maintenance follow-ups, recurring economy, projects, audits, map symbology,
-human-readable district identity with multi-bidder buyout pressure, start/help
-flow, selected-case exhibit controls, an inline final audit receipt, and a
-Tkinter dashboard.
+**Playable:** generated districts and seeded city detail, weighted docket
+templates driven by district type and citizen culture, inspections, approvals,
+mitigation, denials, incidents, maintenance follow-ups, recurring economy,
+multi-week projects, district identity and multi-bidder buyouts, a final audit,
+and a Tkinter dashboard.
 
-The current ArcGIS redraw path uses a small **district display ring** plus
-support-feature rings for points/lines/zones. Real decisions still resolve
-against current GDB-backed state and write the GDB once; redraw planning then
-uses dirty scopes and cache hints to refresh only the relevant display layers.
-If the display ring fails, the toolbox falls back to the older remove/add/refresh
-path for live ArcGIS safety.
+**Redraw:** a district display ring plus point/line/zone rings. Decisions resolve
+against the geodatabase and write it once; redraw planning refreshes only the
+layers that decision changed. If a ring fails, the toolbox falls back to the
+older remove/add/refresh path.
 
-The next public-readiness work is focused on evidence and balance: running the
-live ArcGIS Pro smoke test (`docs/arcgis-pro-smoke-checklist.md`: workspace
-routing, feature-ring repaint, cold-start resume, legacy `.gdb` migration,
-symbology), tuning a fair 12-week route, and deepening map symbology only where
-the live map proves it is still hard to read.
-
-See `docs/systems-overview.md` for the implementation map, current status, and
-the live ArcGIS validation walkthrough.
+**Not yet verified live:** the ArcGIS Pro smoke checklist (workspace routing,
+feature-ring repaint, cold-start resume, legacy `.gdb` migration, symbology), a
+fair 12-week balance route, and the dashboard changes listed under Unreleased in
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 

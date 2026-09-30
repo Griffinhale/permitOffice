@@ -4,6 +4,28 @@ All notable changes to Permit Office are recorded here. This project uses
 [semantic versioning](https://semver.org/); pre-1.0 releases may change
 behavior between minor versions.
 
+## Unreleased
+
+Work since v0.95.0. The rules tests pass; none of it has had the live ArcGIS Pro
+smoke test yet.
+
+### Added
+- A public pressure model: a small set of player-facing city meters derived from
+  the hidden internals.
+- Evidence widgets and live trend symbology on the dashboard.
+
+### Changed
+- Redesigned the dashboard desk: layout, action cards, map key, report and help
+  reference.
+- Startup is more resilient: schema versioning and repair on open, and ArcPy-free
+  precompute on a worker thread from copied rows, with a timeout that falls back
+  to running it on the main thread.
+
+### Removed
+- Redraw experiment and benchmark controls from the public toolbox. The display
+  ring is the production redraw path (ADR-16); retired probes are recorded in
+  `docs/failed-experiments.md`.
+
 ## v0.95.0 - 2026-06-10
 
 Performance/refactor spike release. The gameplay rules and save format remain
