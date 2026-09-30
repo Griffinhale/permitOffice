@@ -104,9 +104,10 @@ varies by ArcGIS build. Districts render by `district_type`, support layers by
 
 - `SelectLayerByAttribute(layer, "NEW_SELECTION"|"CLEAR_SELECTION", where)` — drives
   district/support selection from docket context and clears it after commands.
-- Spillover: `MakeFeatureLayer` → `arcpy.analysis.Buffer(layer, mem_fc, "{r} Meters")`
-  → `SelectLayerByLocation(districts, "INTERSECT", buffer, selection_type="NEW_SELECTION")`
-  → read ids → `arcpy.management.Delete` the temp layers.
+- Spillover: read the proposal's `SHAPE@` with a where-narrowed `SearchCursor`,
+  `geom.buffer(r)` in memory (radius converted from meters via
+  `spatialReference.metersPerUnit`), then keep the cached district shapes that are
+  not `disjoint` from the buffer. No GP tools or temp layers.
 - Reading a selection: `arcpy.da.Describe(layer).get("FIDSet")` (fallback to
   `arcpy.Describe(layer).FIDSet`), then a `SearchCursor` over the cell-id field.
 

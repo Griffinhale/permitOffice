@@ -741,29 +741,29 @@ def inset_polygon(geom):
 
 
 def proposal_spillover(paths, item):
-    """Find districts touched by the proposed feature's coverage buffer."""
+    """Find districts touched by the proposed feature's coverage buffer.
+
+    Buffers the proposal geometry in memory and tests it against the cached
+    district shapes, so no geoprocessing tool or temp layer is involved.
+    """
 
     proposed_fc = {"POINT": paths["points"], "LINE": paths["lines"], "POLYGON": paths["zones"]}[item.geometry_type]
-    where = "item_id = '{0}' AND status = 'proposed'".format(item.item_id.replace("'", "''"))
-    layer_name = f"proposal_{uuid.uuid4().hex[:8]}"
-    arcpy.management.MakeFeatureLayer(proposed_fc, layer_name, where)
-    buffer_fc = r"memory\permit_office_spillover"
-    if arcpy.Exists(buffer_fc):
-        arcpy.management.Delete(buffer_fc)
     archetype = rules.feature_archetype_for_template(item.template_id)
     radius = max(1, int(archetype.coverage_radius_m or 125))
+    districts = district_geometry_lookup(paths)
+    touched = set()
     # ArcGIS does the geometric spillover calculation; the rules layer only sees
     # the resulting district ids.
-    arcpy.analysis.Buffer(layer_name, buffer_fc, f"{radius} Meters")
-    district_layer = f"district_spill_{uuid.uuid4().hex[:8]}"
-    arcpy.management.MakeFeatureLayer(paths["districts"], district_layer)
-    arcpy.management.SelectLayerByLocation(district_layer, "INTERSECT", buffer_fc, selection_type="NEW_SELECTION")
-    ids = selected_cell_ids(district_layer)
-    arcpy.management.Delete(layer_name)
-    arcpy.management.Delete(district_layer)
-    if arcpy.Exists(buffer_fc):
-        arcpy.management.Delete(buffer_fc)
-    return ids
+    where = _where_item_status(item.item_id, "proposed")
+    with arcpy.da.SearchCursor(proposed_fc, ["item_id", "status", "SHAPE@"], where) as cursor:
+        for row_item_id, status, geom in cursor:
+            if row_item_id != item.item_id or status != "proposed" or geom is None:
+                continue
+            # The radius rule is in meters; buffer() uses the feature class unit.
+            meters_per_unit = getattr(geom.spatialReference, "metersPerUnit", None) or 1.0
+            coverage = geom.buffer(radius / meters_per_unit)
+            touched.update(cid for cid, district in districts.items() if not coverage.disjoint(district))
+    return sorted(touched)
 
 
 def activate_proposal(paths, item, report):

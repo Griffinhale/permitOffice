@@ -847,3 +847,90 @@ def test_hide_show_affects_only_selected_proposed_feature(monkeypatch):
         ("A-3", "active"),
         ("CITY-1", "context"),
     ]
+
+
+class _SpillGeom:
+    """Fake geometry whose buffer() reports which districts it touches."""
+
+    def __init__(self, touches, meters_per_unit=1.0):
+        """Store the district ids the buffer reaches and the SR's linear unit."""
+
+        self.touches = set(touches)
+        self.spatialReference = SimpleNamespace(metersPerUnit=meters_per_unit)
+        self.radii = []
+
+    def buffer(self, distance):
+        """Record the buffer distance and return a disjoint-aware fake."""
+
+        self.radii.append(distance)
+        touches = self.touches
+        return SimpleNamespace(disjoint=lambda other: other.cell_id not in touches)
+
+
+def _spill_arcpy(rows):
+    """ArcPy stub with cursors only, so any GP tool call raises AttributeError."""
+
+    return SimpleNamespace(da=FakeDA(rows))
+
+
+def _spill_setup(monkeypatch, proposal_geom, radius=None):
+    """Seed five districts, one real proposal, and two decoy rows."""
+
+    rows = _rows()
+    rows["districts"].extend(
+        {"cell_id": f"D000{index}", "SHAPE@": SimpleNamespace(cell_id=f"D000{index}")} for index in range(5)
+    )
+    decoy = _SpillGeom({"D0000", "D0001", "D0002", "D0003", "D0004"})
+    rows["points"].extend(
+        [
+            {"item_id": "CASE-9", "status": "active", "SHAPE@": decoy},
+            {"item_id": "OTHER", "status": "proposed", "SHAPE@": decoy},
+            {"item_id": "CASE-9", "status": "proposed", "SHAPE@": proposal_geom},
+        ]
+    )
+    monkeypatch.setattr(geometry, "arcpy", _spill_arcpy(rows))
+    monkeypatch.setattr(
+        geometry.rules,
+        "feature_archetype_for_template",
+        lambda _template_id: SimpleNamespace(coverage_radius_m=radius),
+    )
+    geometry.clear_geometry_cache()
+    return rules.DocketItem("CASE-9", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
+
+
+def test_proposal_spillover_uses_geometry_buffer_not_gp_tools(monkeypatch):
+    """Verify spillover buffers in memory and returns sorted touched district ids."""
+
+    proposal = _SpillGeom({"D0003", "D0001"})
+    item = _spill_setup(monkeypatch, proposal)
+
+    try:
+        assert geometry.proposal_spillover(_paths(), item) == ["D0001", "D0003"]
+    finally:
+        geometry.clear_geometry_cache()
+    assert proposal.radii == [125]
+
+
+def test_proposal_spillover_keeps_radius_in_meters_for_foot_saves(monkeypatch):
+    """Verify a legacy foot-based save still buffers the archetype radius in meters."""
+
+    proposal = _SpillGeom({"D0002"}, meters_per_unit=0.3048)
+    item = _spill_setup(monkeypatch, proposal, radius=200)
+
+    try:
+        assert geometry.proposal_spillover(_paths(), item) == ["D0002"]
+    finally:
+        geometry.clear_geometry_cache()
+    assert proposal.radii == [200 / 0.3048]
+
+
+def test_proposal_spillover_without_proposed_row_is_empty(monkeypatch):
+    """Verify a missing proposal row yields no spillover instead of an error."""
+
+    _spill_setup(monkeypatch, _SpillGeom({"D0001"}))
+    item = rules.DocketItem("CASE-404", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
+
+    try:
+        assert geometry.proposal_spillover(_paths(), item) == []
+    finally:
+        geometry.clear_geometry_cache()

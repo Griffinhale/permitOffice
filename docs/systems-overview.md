@@ -138,7 +138,7 @@ spends AP and enriches the `DocketItem` with risk band + evidence. No geometry
 changes.
 
 **Issue / Add Conditions (approve).** Ensures a proposed exhibit, computes
-spillover via buffer/select (except maintenance), reads state/districts/features/
+spillover via an in-memory geometry buffer (except maintenance), reads state/districts/features/
 projects, resolves effects (targets, spillover, mitigation, failure risk,
 population, incidents, projects), writes everything, activates the proposed
 exhibit into its support layer, and does a targeted layer rebuild for
