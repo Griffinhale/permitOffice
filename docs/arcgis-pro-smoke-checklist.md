@@ -133,6 +133,10 @@ lands and this check passes live.
       Decisions log `district-flip`, district colors match each filed report,
       the board never flickers or blanks, and `rebuild` drops below the ring's
       section 10 numbers. On Pro older than 3.7, decisions log `district-ring`.
+- [ ] (after AR14) After the first district-changing decision, Zones still draw
+      above the district fill, and District Prosperity and District Identity stay
+      on with updated colors. In Contents, `Permit Office Predrawn N` sits just
+      above `PermitDistricts`, below Zones.
 - [ ] (after AR16, Pro 3.7+) Make three decisions that change only points. Each
       logs `[REDRAW] feature-query target=...` and no `district-flip`; the map
       background never flashes white and the city stays drawn. Then make one

@@ -1034,3 +1034,52 @@ def test_district_redraw_uses_ring_when_visible_slot_reads_another_save(monkeypa
     assert ("add", "districts") in calls
     assert slot.definitionQuery == "1=1"
     geometry._PRO_VERSION_CACHE.clear()
+
+
+def test_district_flip_keeps_overlays_visible_and_requeries_them(monkeypatch):
+    """Verify Pro 3.7+ flips prosperity/identity instead of hiding them for good."""
+
+    fake, slot, base, calls = _district_flip_map("3.7")
+    _patch_flip(monkeypatch, fake)
+    layers = fake.mp.ArcGISProject("CURRENT").activeMap.listLayers()
+    overlays = [SimpleNamespace(name=name, visible=False, definitionQuery="1=1", dataSource="districts") for name in (geometry.DISTRICT_PROSPERITY, geometry.DISTRICT_IDENTITY)]
+    fake.mp.ArcGISProject("CURRENT").activeMap.listLayers = lambda: layers + overlays
+
+    assert geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.DISTRICTS}) is True
+
+    assert [(layer.visible, layer.definitionQuery) for layer in overlays] == [(True, "2=2"), (True, "2=2")]
+    assert base.visible is False
+    geometry._PRO_VERSION_CACHE.clear()
+
+
+def test_ring_slots_move_back_under_zones_and_overlays():
+    """Verify a slot added on top of the polygons returns to just above its base."""
+
+    class OrderedMap:
+        def __init__(self, names):
+            self.layers = [SimpleNamespace(name=name) for name in names]
+
+        def listLayers(self):
+            return list(self.layers)
+
+        def moveLayer(self, reference_layer, move_layer, insert_position):
+            self.layers.remove(move_layer)
+            index = self.layers.index(reference_layer)
+            self.layers.insert(index if insert_position == "BEFORE" else index + 1, move_layer)
+
+    names = [
+        geometry.LINES, geometry.POINTS, "Permit Office Predrawn Points 0", "Permit Office Predrawn 1",
+        geometry.ZONES, geometry.DISTRICT_IDENTITY, geometry.DISTRICT_PROSPERITY, "Permit Office Predrawn 0", geometry.DISTRICTS,
+    ]
+    active_map = OrderedMap(names)
+
+    geometry._place_ring_slots_above_base(active_map)
+
+    assert [layer.name for layer in active_map.layers] == [
+        geometry.LINES, "Permit Office Predrawn Points 0", geometry.POINTS,
+        geometry.ZONES, geometry.DISTRICT_IDENTITY, geometry.DISTRICT_PROSPERITY,
+        "Permit Office Predrawn 0", "Permit Office Predrawn 1", geometry.DISTRICTS,
+    ]
+    moved = list(active_map.layers)
+    geometry._place_ring_slots_above_base(active_map)
+    assert active_map.layers == moved

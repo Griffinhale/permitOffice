@@ -1110,6 +1110,7 @@ def _rehydrate_feature_display_ring(paths, messages, layer_name):
     try:
         ring = DisplayLayerRing(active_map, prefix=prefix, arcpy_module=arcpy, style_copier=_copy_style)
         ring.prepare_and_swap(paths[path_key])
+        _place_ring_slots_above_base(active_map)
         _hide_base_feature_layer(active_map, layer_name)
         return True
     except Exception as exc:
@@ -1253,7 +1254,9 @@ def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None)
         flipped = _flip_visible_district_slot(active_map, paths["districts"], messages)
         phases.mark("query_flip")
         if flipped is not None:
-            _hide_non_ring_district_family(active_map)
+            _hide_non_ring_district_family(active_map, keep_overlays=True)
+            _flip_district_overlays(active_map, paths["districts"], messages)
+            _place_ring_slots_above_base(active_map)
             phases.mark("hide_base_districts")
             _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
             phases.mark("feature_layers")
@@ -1264,6 +1267,7 @@ def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None)
     phases.mark("ring_discovery")
     prepared = ring.prepare_and_swap(paths["districts"])
     phases.mark("prepare_visibility_swap")
+    _place_ring_slots_above_base(active_map)
     _hide_non_ring_district_family(active_map)
     phases.mark("hide_base_districts")
     _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
@@ -1289,16 +1293,68 @@ def apply_ring_redraw(paths, messages, layer_names=None, remove_scope=None):
         return False
 
 
-def _hide_non_ring_district_family(active_map):
-    """Hide district layers superseded by the active predrawn ring slot."""
+def _hide_non_ring_district_family(active_map, keep_overlays=False):
+    """Hide district layers superseded by the active predrawn ring slot.
 
-    names = {DISTRICTS, DISTRICT_PROSPERITY, DISTRICT_IDENTITY}
+    The ring rehydrate cannot refresh the prosperity/identity overlays, so they
+    hide; the Pro 3.7+ query flip refreshes them and passes keep_overlays.
+    """
+
+    names = {DISTRICTS} if keep_overlays else {DISTRICTS, DISTRICT_PROSPERITY, DISTRICT_IDENTITY}
     for layer in active_map.listLayers():
         layer_name = getattr(layer, "name", "")
         legacy_predrawn = _is_predrawn_district_layer_name(layer_name) and not _is_ring_slot_name(layer_name)
         if layer_name in names or legacy_predrawn:
             try:
                 layer.visible = False
+            except Exception:
+                pass
+
+
+def _flip_district_overlays(active_map, district_path, messages):
+    """Flip and show the prosperity/identity overlays so they requery fresh values."""
+
+    for layer in active_map.listLayers():
+        name = getattr(layer, "name", "")
+        if name not in (DISTRICT_PROSPERITY, DISTRICT_IDENTITY) or not _same_source(layer, district_path):
+            continue
+        try:
+            current = layer.definitionQuery or ""
+            layer.definitionQuery = QUERY_FLIP_VALUES[1] if current == QUERY_FLIP_VALUES[0] else QUERY_FLIP_VALUES[0]
+            layer.visible = True
+        except Exception as exc:
+            _warn(messages, "REDRAW", f"overlay query flip failed on {name!r}: {exc}")
+
+
+def _place_ring_slots_above_base(active_map):
+    """Keep each ring slot directly above its hidden base layer.
+
+    addDataFromPath puts a new polygon layer above the existing polygons, so a
+    district slot added mid-game would otherwise cover the Zones layer.
+    """
+
+    move = getattr(active_map, "moveLayer", None)
+    if move is None:
+        return
+    prefixes = {DISTRICTS: PREDRAWN_LAYER_PREFIX, **_feature_ring_prefixes()}
+    for base_name, prefix in prefixes.items():
+
+        def is_slot(layer, prefix=prefix):
+            name = getattr(layer, "name", "")
+            return name.startswith(prefix) and name.removeprefix(prefix).strip().isdigit()
+
+        layers = list(active_map.listLayers())
+        base = next((layer for layer in layers if getattr(layer, "name", "") == base_name), None)
+        if base is None:
+            continue
+        for slot in [layer for layer in layers if is_slot(layer)]:
+            layers = list(active_map.listLayers())
+            index, base_index = layers.index(slot), layers.index(base)
+            # In place when only sibling slots sit between this slot and the base.
+            if index < base_index and all(is_slot(other) for other in layers[index + 1:base_index]):
+                continue
+            try:
+                move(base, slot, "BEFORE")
             except Exception:
                 pass
 
