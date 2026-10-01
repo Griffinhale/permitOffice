@@ -144,11 +144,10 @@ do not replace a live ArcGIS Pro smoke test.
 
 - `toolbox/arcpy_permit_office.pyt` - ArcGIS Pro toolbox entrypoint.
 - `toolbox/permit_office/` - ArcPy-free gameplay rules, catalogs, decisions,
-  turn advancement, audits, city systems, cache keys, dirty scopes, speculative
-  future nodes.
+  turn advancement, audits, and city systems.
 - `toolbox/permit_office_arcgis/` - ArcPy/Tkinter adapter: schema, geodatabase
   store helpers, geometry operations, symbology, dashboard command flow,
-  hydrated redraw planning, and district/support display rings.
+  redraw planning, and district/support display rings.
 - `tests/` - regression tests for the rules and ArcGIS adapter shims.
 - `docs/` - the core reference set (see below).
 

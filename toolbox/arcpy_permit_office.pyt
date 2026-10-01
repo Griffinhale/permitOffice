@@ -29,9 +29,6 @@ def _module_is_from_this_toolbox(module):
 
 for _module_name in (
     "permit_office",
-    "permit_office.cache_keys",
-    "permit_office.dirty",
-    "permit_office.futures",
     "permit_office_arcgis",
     "permit_office_arcgis.rules_loader",
     "permit_office_arcgis.schema",
@@ -42,6 +39,7 @@ for _module_name in (
     "permit_office_arcgis.layer_ring",
     "permit_office_arcgis.geometry",
     "permit_office_arcgis.redraw_plan",
+    "permit_office_arcgis.map_redraw",
     "permit_office_arcgis.desk_model",
     "permit_office_arcgis.desk_view",
     "permit_office_arcgis.dashboard",

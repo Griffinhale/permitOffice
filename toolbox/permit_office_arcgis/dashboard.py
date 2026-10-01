@@ -8,16 +8,10 @@ import traceback
 import threading
 from concurrent import futures as concurrent_futures
 from copy import deepcopy
-from dataclasses import dataclass
 
 import arcpy
 
-try:
-    from toolbox.permit_office import cache_keys, futures
-except ModuleNotFoundError:
-    from permit_office import cache_keys, futures
-
-from ._perf import perf_active, perf_block, perf_session
+from ._perf import perf_block, perf_session
 from .geometry import (
     add_outputs_to_map,
     activate_proposal,
@@ -32,7 +26,6 @@ from .geometry import (
     proposal_visible_map,
     refresh_all,
     remove_outputs_from_map,
-    apply_ring_redraw,
     select_case_context,
     selected_cell_ids,
     seed_city_features,
@@ -60,7 +53,17 @@ from .store import (
 )
 from . import desk_model
 from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, ReportTab, build_desk_model, receipt_metrics
-from .redraw_plan import hydrate_decision_redraw_plan, layer_names_for_plan
+from .map_redraw import rebuild_output_layers
+from .redraw_plan import (
+    DIRTY_DESK_ONLY,
+    DIRTY_DISTRICTS,
+    _GEOM_TYPE_TO_LAYER,
+    _decision_layer_names,
+    _feature_layer_key_for_item,
+    _week_close_redraw_layers,
+    hydrate_decision_redraw_plan,
+    layer_names_for_plan,
+)
 
 
 WEEK_DEADLINE_SECONDS = 150
@@ -305,8 +308,6 @@ class DashboardController:
         # selection-only reloads reuse the last computed grade.
         self._audit_grade = None
         self._grade_dirty = True
-        self._command_index = 0
-        self._future_cache = None
 
     def _run_pure_precompute_once(self, state, districts, items, active_features, saved_game):
         """Run ArcPy-free startup precompute from main-thread row snapshots."""
@@ -1088,24 +1089,6 @@ class DashboardController:
                     districts = read_districts(self.paths)
                     active_features = read_active_features(self.paths)
                     projects = read_projects(self.paths)
-                future_hint = None
-                with perf_block("cache_lookup"):
-                    try:
-                        generation = cache_keys.GenerationToken(str(self.paths.get("workspace", "")), state.turn, self._command_index, state.turn)
-                        self._future_cache = futures.DecisionFutureCache(generation, game_id=generation.game_id, seed=self.seed)
-                        self._future_cache.build_one_ply(
-                            state,
-                            districts,
-                            [item],
-                            active_features,
-                            projects,
-                            spillover_provider=lambda _item: spillover,
-                        )
-                        future_hint = self._future_cache.lookup(self._future_cache.current_state_hash, item.item_id, action)
-                    except Exception as exc:
-                        future_hint = None
-                        self._future_cache = None
-                        _warn(self.messages, "CACHE", f"future cache lookup skipped: {exc}")
                 with perf_block("resolve"):
                     result = rules.resolve_decision(
                         state,
@@ -1133,16 +1116,10 @@ class DashboardController:
                 with perf_block("redraw_plan_hydration"):
                     hydrated_plan = hydrate_decision_redraw_plan(
                         result,
-                        future_hint,
                         feature_layer_key=_feature_layer_key_for_item(item),
                         feature_layer_dirty=bool(activated or result.feature_updates),
                     )
                 self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item), hydrated_plan)
-                with perf_block("future_invalidation"):
-                    if future_hint is not None:
-                        self._future_cache.promote_chosen(future_hint)
-                    self._command_index += 1
-                    self._future_cache = None
                 # state and districts are fully persisted here; active_features is
                 # re-read because activate_proposal mutated support rows in the GDB
                 # directly, and items is re-read because triage just reselected.
@@ -1349,66 +1326,6 @@ class DashboardController:
         self._report_week = int(getattr(state, "turn", 0) or 0)
 
 
-def clear_output_selections(paths):
-    """Clear nonempty base-layer selections without creating path-based aliases."""
-
-    with perf_block("sel"):
-        try:
-            active_map = arcpy.mp.ArcGISProject("CURRENT").activeMap
-        except Exception:
-            return
-        if active_map is None:
-            return
-        sources = {name: paths.get(key) for name, key in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones"))}
-        for layer in active_map.listLayers():
-            name = getattr(layer, "name", "")
-            if name not in sources or not sources[name]:
-                continue
-            try:
-                if os.path.normcase(os.path.normpath(layer.dataSource)) != os.path.normcase(os.path.normpath(sources[name])):
-                    continue
-                if layer.getSelectionSet():
-                    layer.setSelectionSet([], "NEW")
-            except Exception:
-                # Never turn an unresolved map layer into a GP feature-class input.
-                continue
-
-
-_GEOM_TYPE_TO_LAYER = {"POINT": POINTS, "LINE": LINES, "POLYGON": ZONES}
-DIRTY_DESK_ONLY = "desk"
-DIRTY_SELECTION_ONLY = "selection"
-DIRTY_DISTRICTS = "districts"
-FEATURE_READD_LAYERS = frozenset((POINTS,))
-WEEK_CLOSE_READD_LAYERS = frozenset((DISTRICTS, POINTS, LINES, ZONES))
-GEOMETRY_LAYER_BY_TYPE = {
-    "POINT": POINTS,
-    "LINE": LINES,
-    "POLYGON": ZONES,
-    "ZONE": ZONES,
-}
-
-
-def _week_close_redraw_layers(generated_items):
-    """Return precise week-close redraw layers, falling back broad if unknown."""
-
-    if generated_items is None:
-        return WEEK_CLOSE_READD_LAYERS
-    layers = {DISTRICTS}
-    for item in generated_items:
-        layer = GEOMETRY_LAYER_BY_TYPE.get(str(getattr(item, "geometry_type", "")).upper())
-        if layer:
-            layers.add(layer)
-    return frozenset(layers)
-@dataclass(frozen=True)
-class RedrawPlan:
-    """Concrete map work chosen for a dirty scope."""
-
-    mode: str
-    layer_names: frozenset[str]
-    remove_scope: frozenset[str] | None = None
-    clear_selections: bool = True
-
-
 def _pressure_status_text(target_day, pressure):
     """Return a compact desk status for daily pressure changes."""
 
@@ -1419,107 +1336,6 @@ def _pressure_status_text(target_day, pressure):
     day_label = WORK_WEEK_DAYS[day_index][0].split()[0].title()
     noun = "district" if active_count == 1 else "districts"
     return f"{day_label}: {active_count} {noun} pressure rising."
-
-
-def _decision_layer_names(item):
-    """Return the layer set a decision on this item actually changes, or None.
-
-    None signals "rebuild all" so unknown geometry types fall back safely.
-    """
-
-    feature_layer = _GEOM_TYPE_TO_LAYER.get(getattr(item, "geometry_type", None))
-    if feature_layer is None:
-        return None
-    return {DISTRICTS, feature_layer}
-
-
-def _feature_layer_key_for_item(item):
-    return {
-        "POINT": "points",
-        "LINE": "lines",
-        "POLYGON": "zones",
-    }.get(getattr(item, "geometry_type", None), "")
-
-
-def _normalize_layer_names(layer_names):
-    """Return an immutable layer-name scope, preserving None as all layers."""
-
-    if layer_names is None:
-        return None
-    return frozenset(layer_names)
-
-
-def _redraw_plan(layer_names=None, force_readd=False, dirty_scope=None):
-    """Return concrete map work for a dirty scope."""
-
-    if dirty_scope in (DIRTY_DESK_ONLY, DIRTY_SELECTION_ONLY):
-        return RedrawPlan("desk-only", frozenset(), clear_selections=False)
-    names = _normalize_layer_names(layer_names)
-    if force_readd:
-        return RedrawPlan("force-readd", frozenset() if names is None else names, None if names is None else names)
-    district_in_scope = names is None or DISTRICTS in names or dirty_scope == DIRTY_DISTRICTS
-    explicit_names = names or frozenset()
-    effective_names = names
-    if district_in_scope and effective_names is None:
-        effective_names = frozenset((DISTRICTS, POINTS, LINES, ZONES))
-    if district_in_scope:
-        remove_scope = frozenset((DISTRICTS,)) | (explicit_names & FEATURE_READD_LAYERS)
-        return RedrawPlan("district-readd", effective_names or frozenset((DISTRICTS,)), remove_scope)
-    return RedrawPlan("refresh-only", effective_names or frozenset())
-
-
-def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, dirty_scope=None, remove_scope_override=None):
-    """Refresh (or, when forced, recreate) map layers after GDB edits.
-
-    layer_names: optional iterable restricting the work to those names. None
-    covers all four (plus district overlays). Unknown values pass through.
-
-    force_readd: remove and re-add *every* in-scope layer from scratch. Needed
-    when the layer set or symbology changes (e.g. a new game).
-
-    The default district path is district-ring: one numeric predrawn district
-    slot is re-added from the GDB, symbolized, made visible, then refreshed.
-    This preserves the district re-add correctness requirement while avoiding
-    the full district family remove/add cycle on every decision.
-    ``force_readd=True`` still uses the full legacy path when the layer set or
-    symbology changes. On Pro 3.7+ the district step first tries flipping the
-    visible slot's definition query (see QUERY_FLIP_MIN_PRO in geometry.py).
-    """
-
-    plan = _redraw_plan(layer_names=layer_names, force_readd=force_readd, dirty_scope=dirty_scope)
-    if plan.mode == "desk-only":
-        _log(messages, "REBUILD", f"desk-only mode=desk-only dirty={dirty_scope}")
-        return plan
-    effective_layer_names = None if layer_names is None and plan.mode in ("force-readd", "district-readd") else set(plan.layer_names)
-    perf_messages = None if perf_active() else messages
-    with perf_block("rebuild", perf_messages):
-        if plan.clear_selections:
-            clear_output_selections(paths)
-        mode = plan.mode
-        scope = "all" if effective_layer_names is None else f"targeted={sorted(effective_layer_names)}"
-        dirty = dirty_scope or "layers"
-        _log(messages, "REBUILD", f"{scope} mode={mode} dirty={dirty}")
-        if plan.mode in ("district-readd", "refresh-only"):
-            remove_scope = set(remove_scope_override) if remove_scope_override is not None else None if plan.remove_scope is None else set(plan.remove_scope)
-            with perf_block("ring_redraw"):
-                handled = apply_ring_redraw(
-                    paths,
-                    messages,
-                    layer_names=effective_layer_names,
-                    remove_scope=remove_scope,
-                )
-            if handled:
-                return plan
-            _warn(messages, "REBUILD", f"district-ring failed; falling back to {mode}")
-        fallback_remove_scope = set(remove_scope_override) if remove_scope_override is not None else None if plan.remove_scope is None else set(plan.remove_scope)
-        if fallback_remove_scope is not None or plan.mode == "force-readd":
-            with perf_block("remove"):
-                remove_outputs_from_map(messages, layer_names=fallback_remove_scope)
-        with perf_block("add"):
-            add_outputs_to_map(paths, messages, layer_names=effective_layer_names)
-        with perf_block("refresh"):
-            refresh_all(paths, messages, layer_names=effective_layer_names)
-    return plan
 
 
 def _filed_report_text(result, districts=None):

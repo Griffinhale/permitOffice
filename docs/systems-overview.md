@@ -31,9 +31,6 @@ The codebase is split so the game is testable without ArcGIS Pro.
 - `turns.py` - turn advancement, scorecards, audit results, deadlines.
 - `systems.py` - projects, feature lifecycle, economy, networks, hazards, housing.
 - `helpers.py` - district math, population, stakeholder heat, effect math.
-- `cache_keys.py`, `dirty.py`, `futures.py` - stable cache hashing, generation
-  tokens, dirty scopes, and speculative one-ply decision futures. These are
-  ArcPy-free cache data; they never replace the GDB as persistence.
 - `expiration.py`, `type_pressure.py`, `buyouts.py`, `city_detail.py` - unattended
   item policy, hidden district-type ledger, buyout transitions, civic texture.
 
@@ -43,10 +40,13 @@ The codebase is split so the game is testable without ArcGIS Pro.
   cursor I/O for game state).
 - `geometry.py` - map selection, proposed geometry, spillover buffers, feature
   activation, map refresh, symbology, and district/support display rings.
-- `redraw_plan.py`, `layer_ring.py` - hydrated redraw intent and reusable ArcGIS
-  layer-ring helpers.
+- `redraw_plan.py` - ArcPy-free redraw planning: which layers a command
+  changes and whether they are refreshed or re-added.
+- `map_redraw.py` - `rebuild_output_layers`, which carries out a redraw plan on
+  the map.
+- `layer_ring.py` - reusable ArcGIS layer-ring helpers.
 - `dashboard.py` - the Tkinter `DashboardController`, per-action command flow,
-  one-ply future-cache lookup, authoritative resolve/write, and redraw planning.
+  and authoritative resolve/write.
 - `desk_view.py` / `desk_model.py` - canvas rendering and its pure data model.
 - `symbology_config.py`, `messages.py`, `rules_loader.py`, `_perf.py` - support.
 
@@ -115,11 +115,10 @@ season is **12 weeks**, **2 AP/week**, ordinary permit denials cost 0 AP, week 6
 files the mid-season audit, week 12 files the final audit.
 
 The shared command flow for every action (`dashboard.py`): insert a command row ->
-read game rows (`store.py`) -> optionally build/consult one-ply cache futures ->
-resolve via `rules` against current state -> write authoritative results to the
-GDB once -> hydrate a redraw plan from the actual `DecisionResult` plus cache
-hints -> refresh/rehydrate affected display-ring layers (`geometry.py`) -> file a
-report -> reload the desk. All synchronous, on the Tk thread (see
+read game rows (`store.py`) -> resolve via `rules` against current state -> write
+authoritative results to the GDB once -> build a redraw plan from the actual
+`DecisionResult` (`redraw_plan.py`) -> refresh/rehydrate affected display-ring
+layers (`map_redraw.py`, `geometry.py`) -> file a report -> reload the desk. All synchronous, on the Tk thread (see
 `decisions.md`).
 
 **Launch / resume / new game.** The `.pyt` resolves the workspace, runs

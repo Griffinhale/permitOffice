@@ -25,6 +25,9 @@ smoke test yet.
 - Redraw experiment and benchmark controls from the public toolbox. The display
   ring is the production redraw path (ADR-16); retired probes are recorded in
   `docs/failed-experiments.md`.
+- The one-ply decision-future cache (`futures.py`, `cache_keys.py`, `dirty.py`).
+  Each decision now resolves once; redraw planning lives in `redraw_plan.py` and
+  `map_redraw.py`.
 
 ## v0.95.0 - 2026-06-10
 

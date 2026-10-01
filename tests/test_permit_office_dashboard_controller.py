@@ -18,6 +18,7 @@ sys.modules.setdefault(
 from toolbox import arcpy_permit_office_rules as rules
 from toolbox.permit_office_arcgis import dashboard
 from toolbox.permit_office_arcgis import desk_model
+from toolbox.permit_office_arcgis import map_redraw
 from toolbox.permit_office_arcgis import _perf
 from toolbox.permit_office_arcgis.desk_model import build_desk_model
 from toolbox.permit_office_arcgis import schema
@@ -181,11 +182,13 @@ def test_decision_exception_status_uses_neutral_action_copy(monkeypatch):
     assert controller.status_text == "Decision failed: proposal locked"
 
 
-def test_approval_continues_when_future_cache_lookup_fails(monkeypatch):
-    """Verify speculative cache failures never block authoritative decisions."""
+def test_approve_resolves_decision_once_per_click(monkeypatch):
+    """Verify an approval does no speculative resolve before the real one."""
+
+    from toolbox.permit_office import decisions as pure_decisions
 
     item = rules.DocketItem(
-        "CASE-cache",
+        "CASE-once",
         "street_vendor_compact",
         "Street Vendor Compact",
         "POINT",
@@ -200,22 +203,7 @@ def test_approval_continues_when_future_cache_lookup_fails(monkeypatch):
     controller.status_var = dashboard._StatusProxy(controller)
     controller.reload = lambda **kwargs: None
     calls = []
-    warnings = []
 
-    class BrokenFutureCache:
-        current_state_hash = "parent"
-
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def build_one_ply(self, *args, **kwargs):
-            raise TypeError("unhashable type: 'FeatureInstance'")
-
-        def lookup(self, *args, **kwargs):
-            return None
-
-    monkeypatch.setattr(dashboard.futures, "DecisionFutureCache", BrokenFutureCache)
-    monkeypatch.setattr(dashboard, "_warn", lambda messages, tag, text: warnings.append((tag, text)))
     monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
     monkeypatch.setattr(dashboard, "selected_cell_ids", lambda layer: [])
     monkeypatch.setattr(dashboard, "ensure_case_proposal", lambda paths, docket_item, seed, messages, target_ids=None: ["D0000"])
@@ -230,18 +218,17 @@ def test_approval_continues_when_future_cache_lookup_fails(monkeypatch):
     monkeypatch.setattr(dashboard, "activate_proposal", lambda paths, docket_item, report: 1)
     monkeypatch.setattr(controller, "_finish_decision", lambda *args: calls.append(("finish", args)))
 
-    def resolve(state_arg, docket_item, district_arg, action, targets, spillovers, **kwargs):
-        calls.append(("resolve", action, tuple(targets), tuple(spillovers)))
-        docket_item.status = "active"
-        return rules.DecisionResult(True, action, docket_item.item_id, "approved", affected_cell_ids=targets)
+    def resolve(state_arg, docket_item, district_arg, action, targets, spillovers=(), **kwargs):
+        calls.append(("resolve", action, tuple(targets or ())))
+        return rules.DecisionResult(True, action, docket_item.item_id, "approved", affected_cell_ids=list(targets or ()))
 
     monkeypatch.setattr(dashboard.rules, "resolve_decision", resolve)
+    monkeypatch.setattr(pure_decisions, "resolve_decision", resolve)
 
     controller.apply_decision("approve", False)
 
-    assert ("resolve", "approve", ("D0000",), ()) in calls
+    assert [call for call in calls if call[0] == "resolve"] == [("resolve", "approve", ("D0000",))]
     assert any(call[0] == "finish" for call in calls)
-    assert any("future cache lookup skipped" in text for _tag, text in warnings)
 
 
 def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypatch):
@@ -281,17 +268,17 @@ def test_rebuild_defaults_to_district_ring_for_district_scope(monkeypatch):
     """
 
     calls = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: None)
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
     monkeypatch.setattr(
-        dashboard,
+        map_redraw,
         "apply_ring_redraw",
         lambda paths, messages, **kwargs: calls.append(("ring", kwargs)) or True,
     )
 
-    dashboard.rebuild_output_layers({}, object())
+    map_redraw.rebuild_output_layers({}, object())
 
     assert calls == [
         (
@@ -308,12 +295,12 @@ def test_rebuild_force_readd_removes_every_layer(monkeypatch):
     """Verify an explicit force_readd still clears the full output set."""
 
     calls = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: None)
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
 
-    dashboard.rebuild_output_layers({}, object(), force_readd=True)
+    map_redraw.rebuild_output_layers({}, object(), force_readd=True)
 
     assert ("remove", None) in calls
 
@@ -322,17 +309,17 @@ def test_rebuild_planner_uses_production_ring_for_district_scope(monkeypatch):
     """Verify district dirty scope routes through district ring by default."""
 
     calls = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
     monkeypatch.setattr(
-        dashboard,
+        map_redraw,
         "apply_ring_redraw",
         lambda paths, messages, **kwargs: calls.append(("ring", kwargs)) or True,
     )
 
-    plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS})
+    plan = map_redraw.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS})
 
     assert plan.mode == "district-readd"
     assert plan.remove_scope == frozenset((dashboard.DISTRICTS,))
@@ -352,17 +339,17 @@ def test_rebuild_planner_readds_dirty_point_layer_when_in_scope(monkeypatch):
     """Verify point decisions can re-add points instead of relying on refresh."""
 
     calls = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
     monkeypatch.setattr(
-        dashboard,
+        map_redraw,
         "apply_ring_redraw",
         lambda paths, messages, **kwargs: calls.append(("ring", kwargs)) or True,
     )
 
-    plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS, dashboard.POINTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+    plan = map_redraw.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS, dashboard.POINTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
 
     assert plan.mode == "district-readd"
     assert plan.remove_scope == frozenset((dashboard.DISTRICTS, dashboard.POINTS))
@@ -382,17 +369,17 @@ def test_rebuild_hydrated_plan_can_override_remove_scope(monkeypatch):
     """Verify hydrated redraw plans can ring-swap districts while refreshing features."""
 
     calls = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
     monkeypatch.setattr(
-        dashboard,
+        map_redraw,
         "apply_ring_redraw",
         lambda paths, messages, **kwargs: calls.append(("ring", kwargs)) or True,
     )
 
-    plan = dashboard.rebuild_output_layers(
+    plan = map_redraw.rebuild_output_layers(
         {},
         object(),
         layer_names={dashboard.DISTRICTS, dashboard.POINTS},
@@ -417,12 +404,12 @@ def test_rebuild_planner_allows_desk_only_without_map_work(monkeypatch):
     """Verify desk-only dirty scopes do not touch ArcGIS map layers."""
 
     calls = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
 
-    plan = dashboard.rebuild_output_layers({}, object(), dirty_scope=dashboard.DIRTY_DESK_ONLY)
+    plan = map_redraw.rebuild_output_layers({}, object(), dirty_scope=dashboard.DIRTY_DESK_ONLY)
 
     assert plan.mode == "desk-only"
     assert plan.layer_names == frozenset()
@@ -433,13 +420,13 @@ def test_rebuild_planner_refreshes_feature_only_scope(monkeypatch):
     """Verify feature-only dirty scopes avoid district re-adds."""
 
     calls = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
-    monkeypatch.setattr(dashboard, "apply_ring_redraw", lambda paths, messages, layer_names=None, remove_scope=None: calls.append(("ring", layer_names)) or True)
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(map_redraw, "apply_ring_redraw", lambda paths, messages, layer_names=None, remove_scope=None: calls.append(("ring", layer_names)) or True)
 
-    plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.POINTS})
+    plan = map_redraw.rebuild_output_layers({}, object(), layer_names={dashboard.POINTS})
 
     assert plan.mode == "refresh-only"
     assert calls == [
@@ -453,14 +440,14 @@ def test_rebuild_logs_dirty_scope_and_mode(monkeypatch):
 
     messages = object()
     logs = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: None)
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: None)
-    monkeypatch.setattr(dashboard, "apply_ring_redraw", lambda *args, **kwargs: True)
-    monkeypatch.setattr(dashboard, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: None)
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: None)
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(map_redraw, "apply_ring_redraw", lambda *args, **kwargs: True)
+    monkeypatch.setattr(map_redraw, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
 
-    dashboard.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+    map_redraw.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
 
     assert ("REBUILD", "targeted=['PermitDistricts'] mode=district-readd dirty=districts") in logs
 
@@ -469,17 +456,17 @@ def test_rebuild_uses_production_ring_without_env_override(monkeypatch):
     """Verify district redraws use the production ring path without GP switches."""
 
     calls = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
     monkeypatch.setattr(
-        dashboard,
+        map_redraw,
         "apply_ring_redraw",
         lambda paths, messages, **kwargs: calls.append(("ring", kwargs)) or True,
     )
 
-    plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+    plan = map_redraw.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
 
     assert plan.mode == "district-readd"
     assert calls == [
@@ -499,18 +486,18 @@ def test_rebuild_falls_back_when_default_rehydrate_fails(monkeypatch):
 
     calls = []
     logs = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
     monkeypatch.setattr(
-        dashboard,
+        map_redraw,
         "apply_ring_redraw",
         lambda paths, messages, **kwargs: calls.append(("ring", kwargs)) or False,
     )
-    monkeypatch.setattr(dashboard, "_warn", lambda messages_arg, tag, text: logs.append((tag, text)))
+    monkeypatch.setattr(map_redraw, "_warn", lambda messages_arg, tag, text: logs.append((tag, text)))
 
-    plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+    plan = map_redraw.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
 
     assert plan.mode == "district-readd"
     assert calls == [
@@ -534,15 +521,15 @@ def test_standalone_rebuild_emits_perf_summary(monkeypatch):
 
     messages = object()
     logs = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: None)
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: None)
-    monkeypatch.setattr(dashboard, "apply_ring_redraw", lambda *args, **kwargs: True)
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: None)
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: None)
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(map_redraw, "apply_ring_redraw", lambda *args, **kwargs: True)
     monkeypatch.setattr(_perf, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
     _perf.set_enabled(True)
     try:
-        dashboard.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+        map_redraw.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
     finally:
         _perf.set_enabled(None)
 
@@ -557,15 +544,15 @@ def test_rebuild_inside_turn_session_does_not_emit_duplicate_perf_summary(monkey
 
     messages = object()
     logs = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: None)
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths: None)
+    monkeypatch.setattr(map_redraw, "remove_outputs_from_map", lambda messages, layer_names=None: None)
+    monkeypatch.setattr(map_redraw, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(map_redraw, "refresh_all", lambda paths, messages, layer_names=None: None)
     monkeypatch.setattr(_perf, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
     _perf.set_enabled(True)
     try:
         with _perf.perf_session("turn=test", messages):
-            dashboard.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+            map_redraw.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
     finally:
         _perf.set_enabled(None)
 
@@ -2419,9 +2406,9 @@ def test_clear_base_selections_skips_empty_wrong_source_and_ring(monkeypatch):
             setSelectionSet=lambda ids, mode: calls.append((name, ids, mode)))
     layers = [layer(dashboard.POINTS, 'points', []), layer(dashboard.LINES, 'other-save', [1]),
               layer(dashboard.DISTRICTS, 'districts', [2]), layer('Permit Office Predrawn 1', 'districts', [3])]
-    monkeypatch.setattr(dashboard, 'arcpy', SimpleNamespace(mp=SimpleNamespace(
+    monkeypatch.setattr(map_redraw, 'arcpy', SimpleNamespace(mp=SimpleNamespace(
         ArcGISProject=lambda _: SimpleNamespace(activeMap=SimpleNamespace(listLayers=lambda: layers)))))
-    dashboard.clear_output_selections(dict(points='points', lines='lines', districts='districts'))
+    map_redraw.clear_output_selections(dict(points='points', lines='lines', districts='districts'))
     assert calls == [(dashboard.DISTRICTS, [], 'NEW')]
 
 

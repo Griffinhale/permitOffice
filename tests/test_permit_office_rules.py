@@ -2698,10 +2698,32 @@ def test_arcpy_toolbox_execute_uses_three_parameter_contract():
     assert "return [p_workspace, p_output, p_perf]" in toolbox_text
 
 
+def test_toolbox_reload_list_matches_modules_on_disk():
+    """Verify the .pyt reloads every toolbox module that exists, and only those."""
+
+    import re
+
+    toolbox_dir = Path(__file__).parents[1] / "toolbox"
+    toolbox_text = (toolbox_dir / "arcpy_permit_office.pyt").read_text()
+    block = toolbox_text.split("for _module_name in (", 1)[1].split(")", 1)[0]
+    listed = re.findall(r'"([\w.]+)"', block)
+
+    for name in listed:
+        path = toolbox_dir.joinpath(*name.split("."))
+        assert path.with_suffix(".py").is_file() or (path / "__init__.py").is_file(), name
+    adapter_modules = {
+        f"permit_office_arcgis.{path.stem}"
+        for path in (toolbox_dir / "permit_office_arcgis").glob("*.py")
+        if path.stem != "__init__"
+    }
+    assert adapter_modules <= set(listed)
+
+
 def test_dashboard_uses_production_redraw_names_not_experiment_harness():
     """Verify promoted ring redraw is no longer routed through experiment naming."""
 
-    dashboard_text = (Path(__file__).parents[1] / "toolbox" / "permit_office_arcgis" / "dashboard.py").read_text()
+    adapter_dir = Path(__file__).parents[1] / "toolbox" / "permit_office_arcgis"
+    dashboard_text = (adapter_dir / "dashboard.py").read_text() + (adapter_dir / "map_redraw.py").read_text()
 
     assert "apply_ring_redraw" in dashboard_text
     for retired in (

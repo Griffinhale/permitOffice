@@ -69,5 +69,7 @@ the precomputed-decision-cache spike.
 **Finding:** no active runtime caller after the spike. Keeping the file preserved
 an abstraction without leverage.
 
-**Decision:** removed. Keep active cache primitives limited to stable keys, dirty
-scopes, speculative futures, and hydrated redraw planning.
+**Decision:** removed. The one-ply decision-future cache (`futures.py`,
+`cache_keys.py`, `dirty.py`) was later removed too: each click resolved the
+decision once for the cache and again for real, and the hint never changed what
+was redrawn. Redraw planning now comes from the actual result alone.

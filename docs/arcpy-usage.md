@@ -70,7 +70,7 @@ District board and proposals are built by hand from coordinates:
   always create feature classes in `arcpy.SpatialReference(3857)` (Web Mercator),
   whatever the active map uses; Pro reprojects them for display.
 
-## 4. Map / display & refresh-redraw (`geometry.py`, `dashboard.py`)
+## 4. Map / display & refresh-redraw (`geometry.py`, `map_redraw.py`)
 
 Map access is via `arcpy.mp.ArcGISProject("CURRENT").activeMap` (None-checked —
 the dashboard must tolerate no open map).
