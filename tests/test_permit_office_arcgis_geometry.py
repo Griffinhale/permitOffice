@@ -1083,3 +1083,77 @@ def test_ring_slots_move_back_under_zones_and_overlays():
     moved = list(active_map.layers)
     geometry._place_ring_slots_above_base(active_map)
     assert active_map.layers == moved
+
+
+def _district_flip_map_with_base_lines(version="3.7"):
+    """Return the district flip fakes plus a visible PermitLines base and no lines ring."""
+
+    fake, slot, base, calls = _district_flip_map(version)
+    active_map = fake.mp.ArcGISProject("CURRENT").activeMap
+    layers = active_map.listLayers()
+    lines = SimpleNamespace(name=geometry.LINES, visible=True, definitionQuery="", dataSource="lines")
+    active_map.listLayers = lambda: layers + [lines]
+    geometry._PRO_VERSION_CACHE.clear()
+    return fake, slot, lines, calls
+
+
+def test_district_redraw_flips_base_feature_layer_when_it_has_no_ring_slot(monkeypatch):
+    """Verify week close on Pro 3.7+ requeries a ringless feature layer in place.
+
+    Seeding a feature ring calls RefreshLayer, which AR15 recorded as a
+    whole-map white flash.
+    """
+
+    fake, slot, lines, calls = _district_flip_map_with_base_lines()
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
+    messages = CapturingMessages()
+
+    handled = geometry.apply_ring_redraw(
+        _paths(),
+        messages,
+        layer_names={geometry.DISTRICTS, geometry.LINES},
+        remove_scope={geometry.DISTRICTS, geometry.LINES},
+    )
+
+    assert handled is True
+    assert calls == []
+    assert slot.definitionQuery == "2=2"
+    assert lines.definitionQuery == "(1=1) AND 271828=271828"
+    assert lines.visible is True
+    assert any("feature-query target='PermitLines'" in text for text in messages.messages)
+    geometry._PRO_VERSION_CACHE.clear()
+
+
+def test_district_redraw_keeps_feature_ring_seed_below_query_flip_version(monkeypatch):
+    """Verify Pro builds below 3.7 still seed the feature ring for a ringless layer."""
+
+    fake, _slot, lines, calls = _district_flip_map_with_base_lines("3.6")
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
+    monkeypatch.setattr(geometry, "_prepare_district_display_layer", lambda *args, **kwargs: None)
+
+    geometry.apply_ring_redraw(
+        _paths(),
+        CapturingMessages(),
+        layer_names={geometry.DISTRICTS, geometry.LINES},
+        remove_scope={geometry.DISTRICTS, geometry.LINES},
+    )
+
+    assert ("ring", geometry.LINES) in calls
+    assert lines.definitionQuery == ""
+    geometry._PRO_VERSION_CACHE.clear()
+
+
+def test_feature_only_redraw_still_seeds_ring_for_ringless_layer(monkeypatch):
+    """Verify AR16's feature-only path is unchanged by the district-path base flip."""
+
+    fake, _slot, lines, calls = _district_flip_map_with_base_lines()
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
+
+    assert geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.LINES}) is True
+
+    assert calls == [("ring", geometry.LINES)]
+    assert lines.definitionQuery == ""
+    geometry._PRO_VERSION_CACHE.clear()

@@ -1126,7 +1126,15 @@ def _feature_layer_scope(layer_names):
     return set(layer_names) & feature_layers
 
 
-def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None, phase_marker=None):
+def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None, phase_marker=None, base_flip=False):
+    """Redraw in-scope feature layers, cheapest proven path first.
+
+    base_flip lets a layer with no visible ring slot requery its visible base
+    layer in place (Pro 3.7+) instead of seeding a ring, whose RefreshLayer
+    flashes the whole map. The district path passes it; feature-only redraws
+    keep the AR16 path.
+    """
+
     phase_marker = phase_marker or (lambda _name: None)
     feature_scope = _feature_layer_scope(layer_names)
     if not feature_scope:
@@ -1136,6 +1144,9 @@ def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None, phas
     for layer_name in sorted(readd_scope):
         if _refresh_visible_feature_display_ring(paths, messages, layer_name):
             phase_marker(f"feature_{layer_name}_ring_refresh")
+            continue
+        if base_flip and _flip_visible_base_feature_layer(paths, messages, layer_name):
+            phase_marker(f"feature_{layer_name}_base_query")
             continue
         if not _rehydrate_feature_display_ring(paths, messages, layer_name):
             fallback_readd.add(layer_name)
@@ -1201,16 +1212,37 @@ def _refresh_visible_feature_display_ring(paths, messages, layer_name):
     if visible is None:
         return False
     _hide_base_feature_layer(active_map, layer_name)
+    return _toggle_feature_query(visible, messages, layer_name)
+
+
+def _flip_visible_base_feature_layer(paths, messages, layer_name):
+    """Requery a visible base feature layer in place when it has no ring yet."""
+
+    path_key = _feature_path_keys().get(layer_name)
+    if not path_key or not _query_flip_supported():
+        return False
+    active_map = ensure_active_map(messages)
+    if active_map is None:
+        return False
+    base = next((layer for layer in active_map.listLayers() if getattr(layer, "name", "") == layer_name), None)
+    if base is None or not bool(getattr(base, "visible", False)) or not _same_source(base, paths[path_key]):
+        return False
+    return _toggle_feature_query(base, messages, layer_name)
+
+
+def _toggle_feature_query(layer, messages, layer_name):
+    """Toggle a no-op marker on a layer's query so Pro requeries just that layer."""
+
     try:
         # RefreshLayer invalidates every visible layer in the containing view.
         # Change only this layer's query, preserving any existing filter.
-        current = visible.definitionQuery or ""
+        current = layer.definitionQuery or ""
         marker = " AND 271828=271828"
         if current.endswith(marker) and current.startswith("("):
-            visible.definitionQuery = current[1:-len(marker)-1]
+            layer.definitionQuery = current[1:-len(marker)-1]
         else:
-            visible.definitionQuery = f"({current or '1=1'}){marker}"
-        _log(messages, "REDRAW", f"feature-query target={visible.name!r}")
+            layer.definitionQuery = f"({current or '1=1'}){marker}"
+        _log(messages, "REDRAW", f"feature-query target={layer.name!r}")
         return True
     except Exception as exc:
         _warn(messages, "REDRAW", f"feature-ring refresh {layer_name} failed: {exc}")
@@ -1321,7 +1353,7 @@ def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None)
             _flip_district_overlays(active_map, paths["districts"], messages)
             _place_ring_slots_above_base(active_map)
             phases.mark("hide_base_districts")
-            _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
+            _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark, base_flip=True)
             phases.mark("feature_layers")
             _log_redraw(messages, "district-flip", "ok", started, f"target={getattr(flipped, 'name', '')!r} {phases.summary()}")
             return
@@ -1339,7 +1371,7 @@ def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None)
     _place_ring_slots_above_base(active_map)
     _hide_non_ring_district_family(active_map)
     phases.mark("hide_base_districts")
-    _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
+    _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark, base_flip=True)
     phases.mark("feature_layers")
     _log_redraw(messages, "district-ring", "ok", started, f"target={getattr(prepared, 'name', '')!r} {phases.summary()}")
 

@@ -68,6 +68,14 @@ that reads another save still use the ring. The whole-map white flash seen on
 each redraw in both builds came from the points `RefreshLayer`, which repaints
 every visible layer. Feature-only decisions now toggle that layer's query
 instead.
+**October 1 follow-up (Pro 3.7, offline; not yet recorded):** week close and
+other district redraws also redraw the feature layers they touch. A feature
+layer with no ring slot yet (often lines or zones at the first week close) used
+to get one seeded, and seeding calls `RefreshLayer`, the whole-map white flash.
+On 3.7+ the district path now toggles that layer's own query in place instead.
+The district flip itself still drops the city shapes briefly; the recorded
+probes fit a query change redrawing the changed layer and every layer drawn
+above it.
 *(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
 reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
 later. Supersedes the earlier district-family remove+add default with a measured
@@ -222,4 +230,6 @@ display-cache probes as runtime options. Details live in
 `docs/failed-experiments.md`.
 **September 30 follow-up:** the ring is still the path below Pro 3.7 and the
 fallback above it. On 3.7+ the first step is a query flip on the visible slot
-(see the ADR-4 follow-up).
+(see the ADR-4 follow-up). From October 1, a feature layer redrawn as part of a
+district redraw is requeried in place when it has no slot yet, instead of
+seeding a slot.

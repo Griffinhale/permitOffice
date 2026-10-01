@@ -149,6 +149,15 @@ lands and this check passes live.
 - [ ] (after AR16) Show and hide the selected case's exhibit, then use Update
       from Map. Each logs `feature-query` and no `RefreshLayer`; the map never
       flashes white.
+- [ ] (after AR18, Pro 3.7+) With `PERMIT_OFFICE_PERF=1` and
+      `PERMIT_OFFICE_HOLD_DAY` set, close a week where the new docket has a
+      line or zone case. The log shows `district-flip` and
+      `feature-query target='PermitLines'` (or zones), with no ring seed and no
+      `RefreshLayer`; the background never flashes white. Note whether the
+      city shapes blink, and which layers.
+- [ ] (after AR18) Drag `PermitPoints` (and its `Permit Office Predrawn Points`
+      slots) above `PermitLines` in Contents, then make a points-only
+      decision. Note whether the lines still blink.
 - [ ] (after AR6) Swap the district ring a few times. Every slot keeps its full
       style from the shipped `.lyrx` files: base type, prosperity, and identity
       look right, with no default single-symbol layer.
