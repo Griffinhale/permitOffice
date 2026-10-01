@@ -1119,7 +1119,8 @@ def _rehydrate_feature_display_ring(paths, messages, layer_name):
 
 def _refresh_visible_feature_display_ring(paths, messages, layer_name):
     prefix = _feature_ring_prefixes().get(layer_name)
-    if not prefix:
+    path_key = _feature_path_keys().get(layer_name)
+    if not prefix or not path_key or not _query_flip_supported():
         return False
     active_map = ensure_active_map(messages)
     if active_map is None:
@@ -1127,14 +1128,25 @@ def _refresh_visible_feature_display_ring(paths, messages, layer_name):
     visible = None
     for layer in active_map.listLayers():
         name = getattr(layer, "name", "")
-        if name.startswith(prefix) and bool(getattr(layer, "visible", False)):
+        suffix = name.removeprefix(prefix + " ")
+        if name.startswith(prefix + " ") and suffix.isdigit() and bool(getattr(layer, "visible", False)):
+            if not _same_source(layer, paths[path_key]):
+                return False
             visible = layer
             break
     if visible is None:
         return False
     _hide_base_feature_layer(active_map, layer_name)
     try:
-        arcpy.RefreshLayer(getattr(visible, "name", prefix))
+        # RefreshLayer invalidates every visible layer in the containing view.
+        # Change only this layer's query, preserving any existing filter.
+        current = visible.definitionQuery or ""
+        marker = " AND 271828=271828"
+        if current.endswith(marker) and current.startswith("("):
+            visible.definitionQuery = current[1:-len(marker)-1]
+        else:
+            visible.definitionQuery = f"({current or '1=1'}){marker}"
+        _log(messages, "REDRAW", f"feature-query target={visible.name!r}")
         return True
     except Exception as exc:
         _warn(messages, "REDRAW", f"feature-ring refresh {layer_name} failed: {exc}")
@@ -1267,6 +1279,9 @@ def apply_ring_redraw(paths, messages, layer_names=None, remove_scope=None):
     """
 
     try:
+        if layer_names is not None and DISTRICTS not in layer_names:
+            _refresh_feature_scope(paths, messages, layer_names, remove_scope=set(layer_names))
+            return True
         _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=remove_scope)
         return True
     except Exception as exc:

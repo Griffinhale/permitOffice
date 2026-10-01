@@ -409,14 +409,14 @@ def test_rebuild_planner_refreshes_feature_only_scope(monkeypatch):
     monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
     monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
     monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(dashboard, "apply_ring_redraw", lambda paths, messages, layer_names=None, remove_scope=None: calls.append(("ring", layer_names)) or True)
 
     plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.POINTS})
 
     assert plan.mode == "refresh-only"
     assert calls == [
         ("clear", None),
-        ("add", {dashboard.POINTS}),
-        ("refresh", {dashboard.POINTS}),
+        ("ring", {dashboard.POINTS}),
     ]
 
 
@@ -2349,3 +2349,32 @@ def test_ticker_tick_resumes_after_transient_command_status_expires(monkeypatch)
 
     assert controller.status_text == ""
     assert updates == [dashboard.TICKER_STEP_PX]
+
+def test_finish_decision_skips_unchanged_district_display(monkeypatch):
+    controller = dashboard.DashboardController({}, 'district_layer', 2026, object())
+    controller.status_var = dashboard._StatusProxy(controller)
+    item = rules.DocketItem('case', 'street_vendor_compact', 'Case', 'POINT', 1)
+    result = rules.DecisionResult(True, 'approve', item.item_id, 'Applied', affected_cell_ids=['D0000'])
+    plan = dashboard.hydrate_decision_redraw_plan(result, feature_layer_key='points')
+    calls = []
+    monkeypatch.setattr(dashboard, 'write_district_updates', lambda *a, **k: False)
+    for name in ('write_state', 'write_projects', 'write_docket_item', 'action_log', 'command_finish'):
+        monkeypatch.setattr(dashboard, name, lambda *a, **k: None)
+    monkeypatch.setattr(controller, '_record_receipt', lambda *a: None)
+    monkeypatch.setattr(controller, '_advance_triage_selection', lambda *a: None)
+    monkeypatch.setattr(dashboard, 'rebuild_output_layers', lambda *a, **k: calls.append(k))
+    controller._finish_decision('cmd', item, rules.CityState(), {}, {}, result, hydrated_plan=plan)
+    assert calls == [dict(layer_names={dashboard.POINTS}, dirty_scope=None, remove_scope_override={dashboard.POINTS})]
+
+
+def test_clear_base_selections_skips_empty_wrong_source_and_ring(monkeypatch):
+    calls = []
+    def layer(name, source, selected):
+        return SimpleNamespace(name=name, dataSource=source, getSelectionSet=lambda: selected,
+            setSelectionSet=lambda ids, mode: calls.append((name, ids, mode)))
+    layers = [layer(dashboard.POINTS, 'points', []), layer(dashboard.LINES, 'other-save', [1]),
+              layer(dashboard.DISTRICTS, 'districts', [2]), layer('Permit Office Predrawn 1', 'districts', [3])]
+    monkeypatch.setattr(dashboard, 'arcpy', SimpleNamespace(mp=SimpleNamespace(
+        ArcGISProject=lambda _: SimpleNamespace(activeMap=SimpleNamespace(listLayers=lambda: layers)))))
+    dashboard.clear_output_selections(dict(points='points', lines='lines', districts='districts'))
+    assert calls == [(dashboard.DISTRICTS, [], 'NEW')]

@@ -638,6 +638,17 @@ def test_district_codec_round_trips_every_field(monkeypatch):
     assert all(row["SHAPE@"] == "square" for row in table.rows)
 
 
+def test_district_write_distinguishes_display_changes_from_report_changes(monkeypatch):
+    store, table = _district_store(monkeypatch)
+    paths = {"districts": "districts"}
+    store.create_district_board(paths, 2026, None)
+    board = store.read_districts(paths)
+    assert store.write_district_updates(paths, board, "New report only") is False
+    board["D0000"].district_type = "industrial" if board["D0000"].district_type != "industrial" else "natural"
+    assert store.write_district_updates(paths, board, "Type changed") is True
+    assert store.write_district_updates(paths, board, "Another report") is False
+
+
 def test_district_read_applies_defaults_to_blank_rows(monkeypatch):
     """Verify blank district columns read back with the documented defaults."""
 

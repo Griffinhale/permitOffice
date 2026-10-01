@@ -520,7 +520,7 @@ def test_feature_display_ring_refreshes_visible_slot_without_rehydrate(monkeypat
 
     calls = []
     base_points = SimpleNamespace(name=geometry.POINTS, visible=True)
-    visible = SimpleNamespace(name="Permit Office Predrawn Points 0", visible=True)
+    visible = SimpleNamespace(name="Permit Office Predrawn Points 0", visible=True, dataSource="points", definitionQuery="status = 'proposed' OR status = 'active'")
     hidden = SimpleNamespace(name="Permit Office Predrawn Points 1", visible=False)
     layers = [base_points, visible, hidden]
     fake_map = SimpleNamespace(
@@ -533,12 +533,16 @@ def test_feature_display_ring_refreshes_visible_slot_without_rehydrate(monkeypat
         RefreshLayer=lambda name: calls.append(("refresh", name)),
     )
     monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "_query_flip_supported", lambda: True)
     monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
 
     handled = geometry._refresh_visible_feature_display_ring(_paths(), CapturingMessages(), geometry.POINTS)
 
     assert handled is True
-    assert calls == [("refresh", "Permit Office Predrawn Points 0")]
+    assert calls == []
+    assert visible.definitionQuery == "(status = 'proposed' OR status = 'active') AND 271828=271828"
+    assert geometry._refresh_visible_feature_display_ring(_paths(), CapturingMessages(), geometry.POINTS)
+    assert visible.definitionQuery == "status = 'proposed' OR status = 'active'"
     assert base_points.visible is False
 
 
@@ -547,7 +551,21 @@ def test_feature_display_ring_refresh_failure_falls_back_to_rehydrate(monkeypatc
 
     calls = []
     base_points = SimpleNamespace(name=geometry.POINTS, visible=True)
-    visible = SimpleNamespace(name="Permit Office Predrawn Points 0", visible=True)
+    class FailingQueryLayer:
+        name = "Permit Office Predrawn Points 0"
+        visible = True
+        dataSource = "points"
+
+        @property
+        def definitionQuery(self):
+            return "1=1"
+
+        @definitionQuery.setter
+        def definitionQuery(self, value):
+            calls.append(("query", value))
+            raise RuntimeError("query update failed")
+
+    visible = FailingQueryLayer()
     layers = [base_points, visible]
     fake_map = SimpleNamespace(listLayers=lambda: list(layers))
     fake = SimpleNamespace(
@@ -555,6 +573,7 @@ def test_feature_display_ring_refresh_failure_falls_back_to_rehydrate(monkeypatc
         RefreshLayer=lambda name: (_ for _ in ()).throw(RuntimeError("refresh failed")),
     )
     monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "_query_flip_supported", lambda: True)
     monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: calls.append(("rehydrate", layer_name)) or True)
 
     geometry._refresh_feature_scope(
@@ -564,7 +583,7 @@ def test_feature_display_ring_refresh_failure_falls_back_to_rehydrate(monkeypatc
         remove_scope={geometry.POINTS},
     )
 
-    assert calls == [("rehydrate", geometry.POINTS)]
+    assert calls == [("query", "(1=1) AND 271828=271828"), ("rehydrate", geometry.POINTS)]
 
 
 def test_apply_ring_redraw_dispatches_to_district_ring(monkeypatch):

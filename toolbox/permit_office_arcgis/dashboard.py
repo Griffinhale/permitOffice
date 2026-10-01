@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import os
 import traceback
 import threading
 from concurrent import futures as concurrent_futures
@@ -1171,19 +1172,24 @@ class DashboardController:
         filed_report = _filed_report_text(result, districts)
         self._grade_dirty = True
         with perf_block("writes"):
-            write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
+            district_display_changed = write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
             write_state(self.paths, state)
             write_projects(self.paths, projects)
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
             command_finish(self.paths, command_id, result.command_status, filed_report)
         if hydrated_plan is not None:
+            redraw_names = layer_names_for_plan(hydrated_plan)
+            remove_names = set(hydrated_plan.remove_readd_names)
+            if district_display_changed is False:
+                redraw_names.discard(DISTRICTS)
+                remove_names.discard(DISTRICTS)
             rebuild_output_layers(
                 self.paths,
                 self.messages,
-                layer_names=layer_names_for_plan(hydrated_plan) or layer_names,
-                dirty_scope=DIRTY_DISTRICTS,
-                remove_scope_override=set(hydrated_plan.remove_readd_names),
+                layer_names=redraw_names,
+                dirty_scope=(DIRTY_DESK_ONLY if not redraw_names else None) if district_display_changed is False else DIRTY_DISTRICTS,
+                remove_scope_override=remove_names,
             )
         else:
             rebuild_output_layers(self.paths, self.messages, layer_names=layer_names, dirty_scope=DIRTY_DISTRICTS)
@@ -1300,17 +1306,28 @@ class DashboardController:
 
 
 def clear_output_selections(paths):
-    """Clear lingering dashboard selections from output layers and feature classes."""
+    """Clear nonempty base-layer selections without creating path-based aliases."""
 
     with perf_block("sel"):
-        for name, key in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones")):
+        try:
+            active_map = arcpy.mp.ArcGISProject("CURRENT").activeMap
+        except Exception:
+            return
+        if active_map is None:
+            return
+        sources = {name: paths.get(key) for name, key in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones"))}
+        for layer in active_map.listLayers():
+            name = getattr(layer, "name", "")
+            if name not in sources or not sources[name]:
+                continue
             try:
-                arcpy.management.SelectLayerByAttribute(name, "CLEAR_SELECTION")
+                if os.path.normcase(os.path.normpath(layer.dataSource)) != os.path.normcase(os.path.normpath(sources[name])):
+                    continue
+                if layer.getSelectionSet():
+                    layer.setSelectionSet([], "NEW")
             except Exception:
-                try:
-                    arcpy.management.SelectLayerByAttribute(paths[key], "CLEAR_SELECTION")
-                except Exception:
-                    pass
+                # Never turn an unresolved map layer into a GP feature-class input.
+                continue
 
 
 _GEOM_TYPE_TO_LAYER = {"POINT": POINTS, "LINE": LINES, "POLYGON": ZONES}
@@ -1438,7 +1455,7 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
         scope = "all" if effective_layer_names is None else f"targeted={sorted(effective_layer_names)}"
         dirty = dirty_scope or "layers"
         _log(messages, "REBUILD", f"{scope} mode={mode} dirty={dirty}")
-        if plan.mode == "district-readd":
+        if plan.mode in ("district-readd", "refresh-only"):
             remove_scope = set(remove_scope_override) if remove_scope_override is not None else None if plan.remove_scope is None else set(plan.remove_scope)
             with perf_block("ring_redraw"):
                 handled = apply_ring_redraw(

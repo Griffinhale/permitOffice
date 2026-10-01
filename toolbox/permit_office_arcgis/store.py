@@ -496,13 +496,15 @@ def read_districts(paths):
 
 @perf_traced("write_district_updates")
 def write_district_updates(paths, districts, report, affected_ids=None):
-    """Write changed district profiles and per-district reports back to ArcGIS."""
+    """Persist profiles and return whether built-in district display fields changed."""
 
     affected = set(affected_ids or districts)
     # Every district row is refreshed from normalized state, while last_report is
     # only changed for affected districts so unrelated map notes survive.
     fields = ["cell_id"] + [spec.field for spec in DISTRICT_UPDATE_CODEC] + ["last_report"]
     limits = _json_limits(paths["districts"], DISTRICT_JSON_FIELDS)
+    display_changed = False
+    display_fields = ("district_type", "display_state", "prosperity_band", "identity_state")
     with arcpy.da.UpdateCursor(paths["districts"], fields) as cursor:
         for row in cursor:
             values = dict(zip(fields, row))
@@ -511,10 +513,13 @@ def write_district_updates(paths, districts, report, affected_ids=None):
                 continue
             profile = districts[cid]
             rules.normalize_profile(profile)
-            values.update(_encode_district(profile, DISTRICT_UPDATE_CODEC, limits))
+            encoded = _encode_district(profile, DISTRICT_UPDATE_CODEC, limits)
+            display_changed |= any(values.get(field) != encoded.get(field) for field in display_fields)
+            values.update(encoded)
             if cid in affected:
                 values["last_report"] = report[:512]
             cursor.updateRow([values[field] for field in fields])
+    return display_changed
 
 
 @perf_traced("write_daily_pressure_overlays")
