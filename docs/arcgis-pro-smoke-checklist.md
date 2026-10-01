@@ -133,6 +133,12 @@ lands and this check passes live.
       Decisions log `district-flip`, district colors match each filed report,
       the board never flickers or blanks, and `rebuild` drops below the ring's
       section 10 numbers. On Pro older than 3.7, decisions log `district-ring`.
+- [ ] (after AR16, Pro 3.7+) Make three decisions that change only points. Each
+      logs `[REDRAW] feature-query target=...` and no `district-flip`; the map
+      background never flashes white and the city stays drawn. Then make one
+      decision that changes a district's type, display state, prosperity, or
+      identity: it logs `district-flip`. Every changed feature and district
+      shows its new color, and nothing unchanged looks stale.
 - [ ] (after AR6) Swap the district ring a few times. Every slot keeps its full
       style from the shipped `.lyrx` files: base type, prosperity, and identity
       look right, with no default single-symbol layer.
