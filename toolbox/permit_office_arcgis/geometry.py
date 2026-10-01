@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import json
 import os
 import random
 import time
@@ -397,8 +396,9 @@ def seed_docket_proposals(paths, items, seed, messages):
 def purge_proposed_features(paths):
     """Remove unresolved proposed features without touching active city rows."""
 
+    where = _where_equals("status", "proposed")
     for fc in (paths["points"], paths["lines"], paths["zones"]):
-        with arcpy.da.UpdateCursor(fc, ["status"]) as cursor:
+        with arcpy.da.UpdateCursor(fc, ["status"], where) as cursor:
             for row in cursor:
                 if row[0] == "proposed":
                     cursor.deleteRow()
@@ -537,7 +537,7 @@ def _support_attrs(item, template, archetype, target_ids, status, display_state,
         archetype.incident_type,
         item.stakeholder or template.stakeholder,
         max(1, archetype.capacity or 1),
-        json.dumps(metadata, sort_keys=True)[:2048],
+        encode_json(metadata, limit=2048),
         _summary_map(metadata.get("hazard_effects")),
         _summary_map(metadata.get("mitigation_effects")),
         status,
@@ -1074,22 +1074,9 @@ def _set_definition_query(layer, definition_query):
         pass
 
 
-def _district_display_style_hash(definition_query):
-    query = definition_query or ""
-    return f"districts|labels=districts|query={query}|transparency=10"
-
-
-def _prepare_district_display_layer(layer, messages, definition_query=None, skip_if_style_matches=False):
+def _prepare_district_display_layer(layer, messages, definition_query=None):
     _set_definition_query(layer, definition_query)
-    style_hash = _district_display_style_hash(definition_query)
-    if skip_if_style_matches and getattr(layer, "_permit_office_style_hash", "") == style_hash:
-        return True
     _style_in_code(layer, "districts", messages)
-    try:
-        layer._permit_office_style_hash = style_hash
-    except Exception:
-        pass
-    return False
 
 
 def _prepare_feature_display_layer(layer, messages, layer_key, definition_query=None):

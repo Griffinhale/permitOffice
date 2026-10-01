@@ -357,34 +357,6 @@ def test_legacy_predrawn_rehydrate_helpers_are_retired():
     assert not hasattr(geometry, "PREDRAWN_IDLE_LAYER")
 
 
-def test_district_display_style_hash_is_stable():
-    """Verify the district display style cache key changes only with style inputs."""
-
-    first = geometry._district_display_style_hash("1=1")
-    second = geometry._district_display_style_hash("1=1")
-    changed_query = geometry._district_display_style_hash("display_state = 'daily_pressure'")
-
-    assert first == second
-    assert first != changed_query
-    assert "districts" in first
-
-
-def test_prepare_district_display_layer_can_skip_style_when_hash_matches(monkeypatch):
-    """Verify style-cache probe can skip label/symbology transforms."""
-
-    calls = []
-    layer = SimpleNamespace(definitionQuery="", _permit_office_style_hash=geometry._district_display_style_hash("1=1"))
-    monkeypatch.setattr(geometry, "_configure_labels", lambda target, key: calls.append(("labels", key)))
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", key)))
-    monkeypatch.setattr(geometry, "_tune_layer_visibility", lambda target, key: calls.append(("tune", key)))
-
-    skipped = geometry._prepare_district_display_layer(layer, CapturingMessages(), "1=1", skip_if_style_matches=True)
-
-    assert skipped is True
-    assert calls == []
-    assert layer.definitionQuery == "1=1"
-
-
 def test_apply_ring_redraw_reports_failure_to_caller(monkeypatch):
     """Verify callers can fall back when production ring redraw fails."""
 
@@ -1157,3 +1129,50 @@ def test_feature_only_redraw_still_seeds_ring_for_ringless_layer(monkeypatch):
     assert calls == [("ring", geometry.LINES)]
     assert lines.definitionQuery == ""
     geometry._PRO_VERSION_CACHE.clear()
+
+
+def test_purge_proposed_features_filters_in_the_cursor_and_keeps_active_rows(monkeypatch):
+    """Verify the purge asks the GDB for proposed rows only and still guards in Python."""
+
+    rows = _rows()
+    rows["points"] = [{"status": "proposed"}, {"status": "active"}]
+    rows["lines"] = [{"status": "active"}]
+    rows["zones"] = [{"status": "proposed"}]
+    fake = FakeArcpy(rows)
+    wheres = []
+    update_cursor = fake.da.UpdateCursor
+
+    def recording_update_cursor(path, fields, where_clause=None):
+        wheres.append((path, where_clause))
+        return update_cursor(path, fields, where_clause)
+
+    fake.da.UpdateCursor = recording_update_cursor
+    monkeypatch.setattr(geometry, "arcpy", fake)
+
+    geometry.purge_proposed_features(_paths())
+
+    assert wheres == [(name, "status = 'proposed'") for name in ("points", "lines", "zones")]
+    assert rows["points"] == [{"status": "active"}]
+    assert rows["lines"] == [{"status": "active"}]
+    assert rows["zones"] == []
+
+
+def test_support_metadata_goes_through_encode_json(monkeypatch):
+    """Verify proposal metadata is never sliced into invalid JSON."""
+
+    template = next(iter(rules.TEMPLATES.values()))
+    archetype = rules.feature_archetype_for_template(template)
+    item = rules.DocketItem("CASE-json", template.template_id, template.title, "POINT", 1)
+    calls = []
+    monkeypatch.setattr(geometry, "encode_json", lambda value, **kwargs: calls.append((value, kwargs)) or "{}")
+
+    attrs = geometry._support_attrs(item, template, archetype, ["D0000"], "proposed", "proposed", "", {"note": "x" * 5000})
+
+    assert ({"note": "x" * 5000}, {"limit": 2048}) in calls
+    assert all(not (isinstance(value, str) and value.startswith('{"note"')) for value in attrs)
+
+
+def test_district_display_layer_has_no_style_skip_flag():
+    import inspect
+
+    assert "skip_if_style_matches" not in inspect.signature(geometry._prepare_district_display_layer).parameters
