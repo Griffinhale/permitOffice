@@ -158,6 +158,12 @@ lands and this check passes live.
 - [ ] (after AR18) Drag `PermitPoints` (and its `Permit Office Predrawn Points`
       slots) above `PermitLines` in Contents, then make a points-only
       decision. Note whether the lines still blink.
+- [ ] (after AR19, Pro 3.7) In `ar_probe.aprx` on `probe_save.gdb`, save,
+      then restart Pro. Open the dashboard, close it right away with no
+      decisions, then run one
+      `arcpy.management.GetCount(r"...\probe_save.gdb\PermitPoints")` in the
+      Python window. Pro must not crash with `Tcl_AsyncDelete`. If it does,
+      keep event 1000 and the dump, restart Pro, and stop after two crashes.
 - [ ] (after AR6) Swap the district ring a few times. Every slot keeps its full
       style from the shipped `.lyrx` files: base type, prosperity, and identity
       look right, with no default single-symbol layer.

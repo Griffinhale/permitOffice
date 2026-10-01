@@ -213,6 +213,12 @@ row snapshots.
 **Rejected:** threaded ArcPy reads/writes/map refresh; making worker results
 authoritative persistence; GP-selectable threading diagnostics in the public
 tool.
+**Tk teardown:** Tk must also be freed on the thread that made it. ArcPy runs a
+full GC pass at the start of every GP tool call, on the calling thread, so a Tk
+root left in a reference cycle can be freed on another thread and abort Pro
+with `Tcl_AsyncDelete`. `DashboardController.open()` breaks its controller/view
+cycle in a `finally` so refcounting frees Tk before `open()` returns. Do not
+use `gc.collect()` for this.
 
 ### ADR-16 - Display-ring redraw is production, not an experiment
 **Decision:** the promoted district/support display-ring redraw path is normal

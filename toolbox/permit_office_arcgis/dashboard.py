@@ -391,19 +391,33 @@ class DashboardController:
             raise RuntimeError(f"tkinter is not available: {exc}")
 
         self.root = tk.Tk()
-        self.root.title("Permit Office")
-        _configure_dashboard_window(self.root)
         try:
-            self.root.attributes("-topmost", True)
-        except Exception:
-            pass
+            self.root.title("Permit Office")
+            _configure_dashboard_window(self.root)
+            try:
+                self.root.attributes("-topmost", True)
+            except Exception:
+                pass
 
-        self.selected_item_id = ""
-        self.status_text = ""
-        self.status_var = _StatusProxy(self)
-        # The view owns drawing and hit targets; the controller owns actions
-        # that mutate ArcGIS-backed game state.
-        callbacks = DeskCallbacks(
+            self.selected_item_id = ""
+            self.status_text = ""
+            self.status_var = _StatusProxy(self)
+            # The view owns drawing and hit targets; the controller owns actions
+            # that mutate ArcGIS-backed game state.
+            self.view = PermitDeskView(self.root, self._desk_callbacks(), self.select_item)
+
+            self.reload()
+            self.schedule_startup_session_preparation()
+            self._schedule_deadline_tick()
+            self._schedule_ticker_tick()
+            self.root.mainloop()
+        finally:
+            self._release_tk()
+
+    def _desk_callbacks(self):
+        """Return the view's action callbacks, all bound to this controller."""
+
+        return DeskCallbacks(
             toggle_exhibit=self.toggle_exhibit,
             update_from_map=self.update_from_map,
             inspect=self.inspect,
@@ -421,13 +435,37 @@ class DashboardController:
             pause_queue_autoclose=self._pause_queue_autoclose,
             close=self.root.destroy,
         )
-        self.view = PermitDeskView(self.root, callbacks, self.select_item)
 
-        self.reload()
-        self.schedule_startup_session_preparation()
-        self._schedule_deadline_tick()
-        self._schedule_ticker_tick()
-        self.root.mainloop()
+    def _release_tk(self):
+        """Break the controller/view cycle so refcounting frees Tk on this thread.
+
+        The callbacks and click targets capture the controller, and the
+        controller holds the view and root, so without this the Tk root lives
+        until some later GC pass. ArcPy runs PyGC_Collect at the start of every
+        GP tool call, often on another thread, and freeing tkapp there makes
+        Tcl_AsyncDelete abort Pro (AR17, ADR-15). Never call gc.collect here.
+        """
+
+        root = getattr(self, "root", None)
+        view = getattr(self, "view", None)
+        if view is not None:
+            view._font_cache.clear()
+            view._click_targets = []
+            view.callbacks = None
+            view.on_select_item = None
+            view.canvas = None
+            view.root = None
+        self.view = None
+        self.root = None
+        self.status_var = None
+        self._newgame_overlay = None
+        if root is not None:
+            # Normal close already destroyed the window; this covers a setup
+            # failure, so Tk widgets go away here and not with the traceback.
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
     def select_item(self, item_id):
         """Select a docket item and redraw the dashboard model."""

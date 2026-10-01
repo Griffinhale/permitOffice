@@ -695,6 +695,125 @@ def test_dashboard_enforces_startup_geometry_after_window_maps():
     assert root.calls.count(("geometry", "1280x1400+0+0")) == 2
 
 
+def _install_fake_tkinter(monkeypatch):
+    """Install a fake tkinter whose root and tkapp can be watched by weakref.
+
+    Widgets keep `master` and the shared tkapp the way real tkinter does, and
+    fonts keep their root, so the dashboard's real reference shape is kept.
+    """
+
+    import types
+    import weakref
+
+    class FakeApp:
+        """Stands in for the C-level tkapp that must die on the Tk thread."""
+
+    class FakeWidget:
+        def __init__(self, master=None, **_kwargs):
+            self.master = master
+            self.tk = master.tk
+
+        def __getattr__(self, _name):
+            return lambda *args, **kwargs: None
+
+    class FakeTk(FakeWidget):
+        def __init__(self):
+            self.master = None
+            self.tk = FakeApp()
+            created.append((weakref.ref(self), weakref.ref(self.tk)))
+
+        def mainloop(self):
+            pass
+
+        def destroy(self):
+            pass
+
+    class FakeFont:
+        def __init__(self, root=None, **_kwargs):
+            self._root = root
+            self._tk = root.tk
+
+        def measure(self, text):
+            return len(text)
+
+    created = []
+    fake_tk = types.ModuleType("tkinter")
+    fake_tk.Tk = FakeTk
+    fake_tk.Canvas = FakeWidget
+    fake_tk.Frame = FakeWidget
+    fake_tk.StringVar = FakeWidget
+    fake_font = types.ModuleType("tkinter.font")
+    fake_font.Font = FakeFont
+    fake_tk.font = fake_font
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+    monkeypatch.setitem(sys.modules, "tkinter.font", fake_font)
+    monkeypatch.setattr(dashboard.DashboardController, "schedule_startup_session_preparation", lambda self: None)
+    monkeypatch.setattr(dashboard.DashboardController, "_schedule_deadline_tick", lambda self: None)
+    monkeypatch.setattr(dashboard.DashboardController, "_schedule_ticker_tick", lambda self: None)
+    return created
+
+
+def test_open_frees_tk_root_by_refcount_when_window_closes(monkeypatch):
+    """Verify Tk is freed on the thread that ran open(), not by a later GC pass.
+
+    AR17: a controller/view/callbacks cycle kept the root alive after open()
+    returned, so ArcPy's PyGC_Collect on another thread freed tkapp there and
+    Tcl_AsyncDelete aborted Pro. With gc disabled, the root must already be gone.
+    """
+
+    import gc
+
+    created = _install_fake_tkinter(monkeypatch)
+
+    def reload(self):
+        # Warm the font cache the way a real render does.
+        self.view._px_measurer(9, "normal")
+        self.view._add_target("docket", "item-1", (0, 0, 10, 10), lambda: self.select_item("item-1"))
+
+    monkeypatch.setattr(dashboard.DashboardController, "reload", reload)
+
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        # Same shape as the .pyt: a temporary controller.
+        dashboard.DashboardController({}, "PermitDistricts", 2026, None).open()
+        root_ref, app_ref = created[0]
+        assert root_ref() is None
+        assert app_ref() is None
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
+def test_open_frees_tk_root_when_setup_raises(monkeypatch):
+    """Verify a failed open() leaves no Tk object reachable from its traceback."""
+
+    import gc
+    import pytest
+
+    created = _install_fake_tkinter(monkeypatch)
+
+    def reload(self):
+        self.view._px_measurer(9, "normal")
+        raise RuntimeError("reload failed")
+
+    monkeypatch.setattr(dashboard.DashboardController, "reload", reload)
+
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        # excinfo keeps the traceback, and so open()'s frame, alive.
+        with pytest.raises(RuntimeError, match="reload failed") as excinfo:
+            dashboard.DashboardController({}, "PermitDistricts", 2026, None).open()
+        root_ref, app_ref = created[0]
+        assert excinfo.traceback
+        assert root_ref() is None
+        assert app_ref() is None
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
 def test_selecting_application_tab_returns_to_applications_and_updates_map_context(monkeypatch):
     """Verify nested application selection owns the active case and map highlight."""
 
