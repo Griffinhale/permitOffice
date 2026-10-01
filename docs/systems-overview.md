@@ -188,3 +188,7 @@ balance tuning toward a fair PASS.
   reports file, and buyout/identity stays legible from map + text.
 - Refresh diagnostics: enable **Log Refresh Timings** in the toolbox or set
   `PERMIT_OFFICE_PERF=1`; output is a nested `[PERF] turn=... total=...` tree.
+- Probe runs: set `PERMIT_OFFICE_HOLD_DAY=<0-4>` before launching Pro to hold
+  the office clock on that day (0 = Monday). The clock runs until mid-way
+  through that day, then stops; the banner shows `HELD`. No later day ticks or
+  Friday deadline fire. End Week still advances by hand.

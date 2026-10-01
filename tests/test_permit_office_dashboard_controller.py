@@ -2395,3 +2395,36 @@ def test_clear_base_selections_skips_empty_wrong_source_and_ring(monkeypatch):
         ArcGISProject=lambda _: SimpleNamespace(activeMap=SimpleNamespace(listLayers=lambda: layers)))))
     dashboard.clear_output_selections(dict(points='points', lines='lines', districts='districts'))
     assert calls == [(dashboard.DISTRICTS, [], 'NEW')]
+
+
+def test_deadline_tick_holds_the_clock_on_the_probe_day(monkeypatch):
+    """Verify PERMIT_OFFICE_HOLD_DAY stops day ticks and the Friday deadline."""
+
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller._deadline_running = True
+    controller._deadline_started = 100.0
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    targets = []
+    views = []
+    controller.root = SimpleNamespace(after=lambda delay, callback: "after-1")
+    controller.view = SimpleNamespace(update_deadline=lambda text, meter, running, status_text=None: views.append(text))
+    monkeypatch.setenv(dashboard.HOLD_DAY_ENV, "1")
+    monkeypatch.setattr(controller, "_advance_daily_pressure_if_due", lambda: targets.append(controller._deadline_day_index()) or "")
+    monkeypatch.setattr(controller, "advance_turn", lambda auto=False: targets.append("advance"))
+    for now in (100.0 + dashboard.WEEK_DEADLINE_SECONDS + 5, 900.0):
+        monkeypatch.setattr(dashboard.time, "monotonic", lambda now=now: now)
+        controller._deadline_tick()
+
+    assert targets == [1, 1]
+    assert controller._deadline_elapsed_seconds() == dashboard.WORK_DAY_SECONDS + dashboard.WORK_DAY_SECONDS // 2
+    assert all(text.startswith("TUE INSPECTION") and text.endswith(" HELD") for text in views)
+
+
+def test_held_office_day_ignores_unset_or_invalid_values(monkeypatch):
+    monkeypatch.delenv(dashboard.HOLD_DAY_ENV, raising=False)
+    assert dashboard._held_office_day() is None
+    monkeypatch.setenv(dashboard.HOLD_DAY_ENV, "tuesday")
+    assert dashboard._held_office_day() is None
+    monkeypatch.setenv(dashboard.HOLD_DAY_ENV, "9")
+    assert dashboard._held_office_day() == len(dashboard.WORK_WEEK_DAYS) - 1

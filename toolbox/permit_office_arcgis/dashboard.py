@@ -79,6 +79,9 @@ WORK_WEEK_DAYS = (
 )
 WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
 MIDWEEK_MAP_REDRAW_DAYS = frozenset((2, 4))
+# Probe-only: hold the office clock mid-way through this zero-based day index so
+# live recordings are not split by day ticks or the Friday deadline.
+HOLD_DAY_ENV = "PERMIT_OFFICE_HOLD_DAY"
 PURE_WORKER_TIMEOUT_SECONDS = 1.0
 STARTUP_SESSION_DELAY_MS = 50
 _pure_worker_state = threading.local()
@@ -226,6 +229,16 @@ class _StatusProxy:
         """Return the controller's current status string."""
 
         return self.controller.status_text
+
+
+def _held_office_day():
+    """Return the office day index set by PERMIT_OFFICE_HOLD_DAY, or None."""
+
+    try:
+        day = int(os.environ.get(HOLD_DAY_ENV, "").strip())
+    except ValueError:
+        return None
+    return max(0, min(len(WORK_WEEK_DAYS) - 1, day))
 
 
 class DashboardController:
@@ -721,7 +734,8 @@ class DashboardController:
         minutes, seconds = divmod(day_remaining, 60)
         elapsed = self._deadline_elapsed_seconds()
         meter = int(100 * elapsed / WEEK_DEADLINE_SECONDS)
-        return (f"{day_label} {minutes}:{seconds:02d}", meter, True)
+        held = " HELD" if _held_office_day() is not None else ""
+        return (f"{day_label} {minutes}:{seconds:02d}{held}", meter, True)
 
     def _display_status_text(self):
         """Return action status when present, otherwise the current office-day note."""
@@ -787,6 +801,7 @@ class DashboardController:
         self._deadline_after_id = None
         try:
             if self._deadline_running and not self._command_busy:
+                self._apply_clock_hold()
                 pressure_status = self._advance_daily_pressure_if_due()
                 text, meter, running = self._deadline_presentation()
                 if getattr(self, "view", None):
@@ -798,6 +813,17 @@ class DashboardController:
                 self.view.update_deadline(*self._deadline_presentation(), self._display_status_text())
         finally:
             self._schedule_deadline_tick()
+
+    def _apply_clock_hold(self):
+        """Pin elapsed week time to the middle of the held day, if one is set."""
+
+        held = _held_office_day()
+        if held is None or not self._deadline_started:
+            return
+        pin = held * WORK_DAY_SECONDS + WORK_DAY_SECONDS // 2
+        now = time.monotonic()
+        if now - self._deadline_started > pin:
+            self._deadline_started = now - pin
 
     def _advance_daily_pressure_if_due(self):
         """Persist district overlays when the office day moves forward."""
