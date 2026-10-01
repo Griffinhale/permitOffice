@@ -1138,7 +1138,7 @@ def test_generate_docket_rows_uses_rules_default_four_item_docket(monkeypatch):
     monkeypatch.setattr(store, "_log", lambda *args: None)
     monkeypatch.setattr(store, "_delete_all_rows", lambda _path: None)
     monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
-    monkeypatch.setattr("toolbox.permit_office_arcgis.geometry.seed_docket_proposals", lambda *args: None)
+    monkeypatch.setattr("toolbox.permit_office_arcgis.proposals.seed_docket_proposals", lambda *args: None)
 
     items = store.generate_docket_rows(paths, 2026, object())
 
@@ -1548,7 +1548,7 @@ def test_generate_docket_rows_persists_consumed_pending_followups(monkeypatch):
     monkeypatch.setattr(store, "_log", lambda *args: None)
     monkeypatch.setattr(store, "_delete_all_rows", lambda _path: None)
     monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
-    monkeypatch.setattr("toolbox.permit_office_arcgis.geometry.seed_docket_proposals", lambda *args: None)
+    monkeypatch.setattr("toolbox.permit_office_arcgis.proposals.seed_docket_proposals", lambda *args: None)
 
     items = store.generate_docket_rows(paths, 2026, object())
 
@@ -1613,7 +1613,7 @@ def test_generate_docket_rows_carries_existing_mandatory_context(monkeypatch):
     monkeypatch.setattr(store, "_log", lambda *args: None)
     monkeypatch.setattr(store, "_delete_all_rows", lambda _path: None)
     monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
-    monkeypatch.setattr("toolbox.permit_office_arcgis.geometry.seed_docket_proposals", lambda *args: None)
+    monkeypatch.setattr("toolbox.permit_office_arcgis.proposals.seed_docket_proposals", lambda *args: None)
 
     items = store.generate_docket_rows(paths, 2026, object())
 

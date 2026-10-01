@@ -1,0 +1,642 @@
+"""Map layer add/remove, refresh, and the district/support display rings."""
+
+from __future__ import annotations
+
+import copy
+import os
+import time
+
+import arcpy
+
+from .layer_ring import DisplayLayerRing, DistrictLayerRing
+from .messages import _log, _warn
+from .schema import DISTRICTS, LINES, POINTS, ZONES
+from .symbology import _apply_code_style, _style_in_code
+from .symbology_config import layer_file_path
+
+
+# District overlay layers reuse the PermitDistricts feature class with different
+# render fields so land-use type, prosperity, and buyout identity each get their
+# own visual channel without one fill having to encode all three.
+DISTRICT_PROSPERITY = "District Prosperity"
+DISTRICT_IDENTITY = "District Identity"
+PREDRAWN_LAYER_PREFIX = "Permit Office Predrawn"
+PREDRAWN_POINTS_PREFIX = "Permit Office Predrawn Points"
+PREDRAWN_LINES_PREFIX = "Permit Office Predrawn Lines"
+PREDRAWN_ZONES_PREFIX = "Permit Office Predrawn Zones"
+
+# Lowest Pro version where flipping a district slot's definition query was seen
+# to show new GDB attribute values without flicker (AR5 spike, Pro 3.7). Older
+# builds keep the ring rehydrate. Lower this only after the probe passes there.
+QUERY_FLIP_MIN_PRO = (3, 7)
+QUERY_FLIP_VALUES = ("1=1", "2=2")
+_PRO_VERSION_CACHE: dict = {}
+
+
+def refresh_all(paths, messages, layer_names=None):
+    """Refresh known map layers; layer_names limits to a subset when given."""
+    targets = [n for n in (DISTRICTS, POINTS, LINES, ZONES) if layer_names is None or n in layer_names]
+    for name in targets:
+        try:
+            arcpy.RefreshLayer(name)
+            _log(messages, "REFRESH", f"RefreshLayer({name!r}) OK")
+        except Exception as exc:
+            _warn(messages, "REFRESH", f"RefreshLayer({name!r}) failed: {exc}")
+
+
+def output_layers_present():
+    """Return True if any Permit Office output layer is on the active map.
+
+    Used to decide whether to auto-resume a saved board: a map with none of our
+    layers is treated as a fresh-start session even when the .gdb still holds a
+    save. Conservative -- returns True unless it can positively confirm an active
+    map that lacks every output layer, so a probe failure never suppresses a
+    normal resume.
+    """
+
+    names = {DISTRICTS, POINTS, LINES, ZONES, DISTRICT_PROSPERITY, DISTRICT_IDENTITY}
+    try:
+        aprx = arcpy.mp.ArcGISProject("CURRENT")
+        active_map = aprx.activeMap
+        if active_map is None:
+            return True
+        return any(layer.name in names for layer in active_map.listLayers())
+    except Exception:
+        return True
+
+
+def ensure_active_map(messages, map_name="Permit Office"):
+    """Ensure the project has an open map for Permit Office layer operations."""
+
+    try:
+        aprx = arcpy.mp.ArcGISProject("CURRENT")
+    except Exception as exc:
+        _warn(messages, "MAP", f"ArcGISProject('CURRENT') unavailable; cannot ensure map: {exc}")
+        return None
+    active_map = getattr(aprx, "activeMap", None)
+    if active_map is not None:
+        return active_map
+    try:
+        maps = list(aprx.listMaps()) if hasattr(aprx, "listMaps") else []
+    except Exception as exc:
+        _warn(messages, "MAP", f"could not list project maps: {exc}")
+        maps = []
+    if maps:
+        target = maps[0]
+        _open_map_view(target, messages)
+        _log(messages, "MAP", f"opened existing map: {getattr(target, 'name', 'Map')}")
+        return target
+    create_map = getattr(aprx, "createMap", None)
+    if create_map is None:
+        _warn(messages, "MAP", "project has no active map and ArcGISProject.createMap is unavailable")
+        return None
+    try:
+        target = create_map(map_name)
+        _open_map_view(target, messages)
+        _log(messages, "MAP", f"created and opened map: {getattr(target, 'name', map_name)}")
+        return target
+    except Exception as exc:
+        _warn(messages, "MAP", f"could not create map: {exc}")
+        return None
+
+
+def _open_map_view(map_obj, messages):
+    opener = getattr(map_obj, "openView", None)
+    if opener is None:
+        return
+    try:
+        opener()
+    except Exception as exc:
+        _warn(messages, "MAP", f"could not open map view: {exc}")
+
+
+def add_outputs_to_map(paths, messages, layer_names=None):
+    """Add active game outputs to the map; layer_names limits to a subset when given."""
+    try:
+        active_map = ensure_active_map(messages)
+        if active_map is None:
+            return
+        existing = {lyr.name: lyr for lyr in active_map.listLayers()}
+        for name, key in [p for p in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones")) if layer_names is None or p[0] in layer_names]:
+            if name not in existing:
+                lyr = _add_styled_layer(active_map, paths[key], key, messages)
+                lyr.name = name
+                existing[name] = lyr
+                _log(messages, "MAP", f"added {name}")
+            _style_in_code(existing[name], key, messages)
+        # Add the prosperity and identity overlays from the same districts source.
+        if layer_names is None or DISTRICTS in layer_names:
+            for name, key in ((DISTRICT_PROSPERITY, "district_prosperity"), (DISTRICT_IDENTITY, "district_identity")):
+                if name not in existing:
+                    lyr = _add_styled_layer(active_map, paths["districts"], key, messages)
+                    lyr.name = name
+                    existing[name] = lyr
+                    _log(messages, "MAP", f"added {name}")
+                _style_in_code(existing[name], key, messages)
+        _order_output_layers(active_map, existing)
+    except Exception as exc:
+        _warn(messages, "MAP", f"add outputs failed: {exc}")
+
+
+def _add_styled_layer(active_map, data_path, layer_key, messages):
+    """Add a layer for data_path, styled from its shipped .lyrx when present.
+
+    Without a .lyrx the layer is added bare and _style_in_code styles it. If
+    the .lyrx layer cannot be pointed at this save, it is dropped and the layer
+    is added from the path and styled in code here.
+    """
+
+    layer_file = layer_file_path(layer_key)
+    if layer_file is None:
+        return active_map.addDataFromPath(data_path)
+    layer = active_map.addLayer(arcpy.mp.LayerFile(layer_file))[0]
+    if _point_layer_at(layer, data_path):
+        _log(messages, "SYM", f"styled {layer_key} from {os.path.basename(layer_file)}")
+        return layer
+    _warn(messages, "SYM", f"could not point {os.path.basename(layer_file)} at {data_path}; styling in code")
+    active_map.removeLayer(layer)
+    layer = active_map.addDataFromPath(data_path)
+    _apply_code_style(layer, layer_key, messages)
+    return layer
+
+
+def _point_layer_at(layer, data_path):
+    """Repoint a layer loaded from a .lyrx at this save's feature class.
+
+    Returns True when the layer now reads data_path. Pro can skip an update
+    that does not validate without raising, so the source is checked after.
+    """
+
+    workspace, dataset = os.path.split(data_path)
+    try:
+        current = layer.connectionProperties
+        new = copy.deepcopy(current)
+        new["dataset"] = dataset
+        new["workspace_factory"] = "File Geodatabase"
+        new.setdefault("connection_info", {})["database"] = workspace
+        layer.updateConnectionProperties(current, new)
+    except Exception:
+        return False
+    return _same_source(layer, data_path)
+
+
+def remove_outputs_from_map(messages, layer_names=None):
+    """Remove stale Permit Office layers; layer_names limits to a subset when given."""
+    try:
+        aprx = arcpy.mp.ArcGISProject("CURRENT")
+        active_map = aprx.activeMap
+        if active_map is None:
+            return
+        base_outputs = {DISTRICTS, POINTS, LINES, ZONES}
+        # The district overlays are tied to the districts source, so they clear
+        # whenever districts (or a full refresh) are being removed.
+        overlay_outputs = {DISTRICT_PROSPERITY, DISTRICT_IDENTITY}
+        if layer_names is None:
+            output_names = base_outputs | overlay_outputs
+        else:
+            output_names = (base_outputs & set(layer_names))
+            if DISTRICTS in layer_names:
+                output_names |= overlay_outputs
+        removed = 0
+        for layer in list(active_map.listLayers()):
+            layer_name = getattr(layer, "name", None)
+            remove_predrawn = (layer_names is None or DISTRICTS in set(layer_names or ())) and _is_predrawn_district_layer_name(layer_name or "")
+            remove_feature_ring = _should_remove_predrawn_feature_layer(layer_name or "", layer_names)
+            if layer_name in output_names or remove_predrawn or remove_feature_ring:
+                active_map.removeLayer(layer)
+                removed += 1
+        if removed:
+            _log(messages, "MAP", f"removed {removed} stale Permit Office layer(s)")
+    except Exception as exc:
+        _warn(messages, "MAP", f"remove stale outputs failed: {exc}")
+
+
+def _active_map():
+    """Return the current active ArcGIS map, or None when unavailable."""
+
+    aprx = arcpy.mp.ArcGISProject("CURRENT")
+    return aprx.activeMap
+
+
+def _layers_by_name(active_map):
+    """Return active map layers keyed by their display name."""
+
+    if active_map is None:
+        return {}
+    return {getattr(layer, "name", ""): layer for layer in active_map.listLayers()}
+
+
+def _log_redraw(messages, path, status, started, detail=""):
+    elapsed = time.perf_counter() - started
+    suffix = f" {detail}" if detail else ""
+    _log(messages, "REDRAW", f"path={path} status={status} elapsed={elapsed:.3f}{suffix}")
+
+
+class _PhaseTimer:
+    def __init__(self):
+        self._last = time.perf_counter()
+        self.parts = []
+
+    def mark(self, name):
+        now = time.perf_counter()
+        self.parts.append((name, now - self._last))
+        self._last = now
+
+    def summary(self):
+        return " ".join(f"{name}={elapsed:.3f}" for name, elapsed in self.parts)
+
+
+def _set_definition_query(layer, definition_query):
+    if definition_query is None:
+        return
+    try:
+        layer.definitionQuery = definition_query
+    except Exception:
+        pass
+
+
+def _prepare_district_display_layer(layer, messages, definition_query=None):
+    _set_definition_query(layer, definition_query)
+    _style_in_code(layer, "districts", messages)
+
+
+def _prepare_feature_display_layer(layer, messages, layer_key, definition_query=None):
+    _set_definition_query(layer, definition_query)
+    _style_in_code(layer, layer_key, messages)
+
+
+def _is_predrawn_district_layer_name(name):
+    return name.startswith(PREDRAWN_LAYER_PREFIX) and not _is_predrawn_feature_layer_name(name)
+
+
+def _is_predrawn_feature_layer_name(name):
+    return any(name.startswith(prefix) for prefix in _feature_ring_prefixes().values())
+
+
+def _should_remove_predrawn_feature_layer(name, layer_names):
+    if not name:
+        return False
+    if layer_names is None:
+        return _is_predrawn_feature_layer_name(name)
+    scoped = set(layer_names or ())
+    return any(layer in scoped and name.startswith(prefix) for layer, prefix in _feature_ring_prefixes().items())
+
+
+def _is_ring_slot_name(name):
+    suffix = name.removeprefix(PREDRAWN_LAYER_PREFIX).strip()
+    return suffix.isdigit()
+
+
+def _feature_layer_scope(layer_names):
+    feature_layers = frozenset((POINTS, LINES, ZONES))
+    if layer_names is None:
+        return set(feature_layers)
+    return set(layer_names) & feature_layers
+
+
+def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None, phase_marker=None, base_flip=False):
+    """Redraw in-scope feature layers, cheapest proven path first.
+
+    base_flip lets a layer with no visible ring slot requery its visible base
+    layer in place (Pro 3.7+) instead of seeding a ring, whose RefreshLayer
+    flashes the whole map. The district path passes it; feature-only redraws
+    keep the AR16 path.
+    """
+
+    phase_marker = phase_marker or (lambda _name: None)
+    feature_scope = _feature_layer_scope(layer_names)
+    if not feature_scope:
+        return
+    readd_scope = feature_scope & set(remove_scope or ())
+    fallback_readd = set()
+    for layer_name in sorted(readd_scope):
+        if _refresh_visible_feature_display_ring(paths, messages, layer_name):
+            phase_marker(f"feature_{layer_name}_ring_refresh")
+            continue
+        if base_flip and _flip_visible_base_feature_layer(paths, messages, layer_name):
+            phase_marker(f"feature_{layer_name}_base_query")
+            continue
+        if not _rehydrate_feature_display_ring(paths, messages, layer_name):
+            fallback_readd.add(layer_name)
+        phase_marker(f"feature_{layer_name}_ring_rehydrate")
+    if fallback_readd:
+        remove_outputs_from_map(messages, layer_names=fallback_readd)
+        add_outputs_to_map(paths, messages, layer_names=fallback_readd)
+        phase_marker("feature_fallback_readd")
+    refresh_scope = (feature_scope - readd_scope) | fallback_readd
+    if refresh_scope:
+        refresh_all(paths, messages, layer_names=refresh_scope)
+        for layer_name in sorted(refresh_scope):
+            phase_marker(f"feature_{layer_name}_refresh")
+
+
+def _rehydrate_feature_display_ring(paths, messages, layer_name):
+    prefix = _feature_ring_prefixes().get(layer_name)
+    path_key = _feature_path_keys().get(layer_name)
+    layer_key = _feature_layer_keys().get(layer_name)
+    if not prefix or not path_key or not layer_key:
+        return False
+    active_map = ensure_active_map(messages)
+    if active_map is None:
+        return False
+
+    def _copy_style(layer):
+        _prepare_feature_display_layer(layer, messages, layer_key, "1=1")
+
+    try:
+        ring = DisplayLayerRing(
+            active_map,
+            prefix=prefix,
+            arcpy_module=arcpy,
+            style_copier=_copy_style,
+            layer_adder=lambda path: _add_styled_layer(active_map, path, layer_key, messages),
+        )
+        ring.prepare_and_swap(paths[path_key])
+        _place_ring_slots_above_base(active_map)
+        _hide_base_feature_layer(active_map, layer_name)
+        return True
+    except Exception as exc:
+        _warn(messages, "REDRAW", f"feature-ring {layer_name} failed: {exc}")
+        return False
+
+
+def _refresh_visible_feature_display_ring(paths, messages, layer_name):
+    prefix = _feature_ring_prefixes().get(layer_name)
+    path_key = _feature_path_keys().get(layer_name)
+    if not prefix or not path_key or not _query_flip_supported():
+        return False
+    active_map = ensure_active_map(messages)
+    if active_map is None:
+        return False
+    visible = None
+    for layer in active_map.listLayers():
+        name = getattr(layer, "name", "")
+        suffix = name.removeprefix(prefix + " ")
+        if name.startswith(prefix + " ") and suffix.isdigit() and bool(getattr(layer, "visible", False)):
+            if not _same_source(layer, paths[path_key]):
+                return False
+            visible = layer
+            break
+    if visible is None:
+        return False
+    _hide_base_feature_layer(active_map, layer_name)
+    return _toggle_feature_query(visible, messages, layer_name)
+
+
+def _flip_visible_base_feature_layer(paths, messages, layer_name):
+    """Requery a visible base feature layer in place when it has no ring yet."""
+
+    path_key = _feature_path_keys().get(layer_name)
+    if not path_key or not _query_flip_supported():
+        return False
+    active_map = ensure_active_map(messages)
+    if active_map is None:
+        return False
+    base = next((layer for layer in active_map.listLayers() if getattr(layer, "name", "") == layer_name), None)
+    if base is None or not bool(getattr(base, "visible", False)) or not _same_source(base, paths[path_key]):
+        return False
+    return _toggle_feature_query(base, messages, layer_name)
+
+
+def _toggle_feature_query(layer, messages, layer_name):
+    """Toggle a no-op marker on a layer's query so Pro requeries just that layer."""
+
+    try:
+        # RefreshLayer invalidates every visible layer in the containing view.
+        # Change only this layer's query, preserving any existing filter.
+        current = layer.definitionQuery or ""
+        marker = " AND 271828=271828"
+        if current.endswith(marker) and current.startswith("("):
+            layer.definitionQuery = current[1:-len(marker)-1]
+        else:
+            layer.definitionQuery = f"({current or '1=1'}){marker}"
+        _log(messages, "REDRAW", f"feature-query target={layer.name!r}")
+        return True
+    except Exception as exc:
+        _warn(messages, "REDRAW", f"feature-ring refresh {layer_name} failed: {exc}")
+        return False
+
+
+def _feature_ring_prefixes():
+    return {
+        POINTS: PREDRAWN_POINTS_PREFIX,
+        LINES: PREDRAWN_LINES_PREFIX,
+        ZONES: PREDRAWN_ZONES_PREFIX,
+    }
+
+
+def _feature_path_keys():
+    return {
+        POINTS: "points",
+        LINES: "lines",
+        ZONES: "zones",
+    }
+
+
+def _feature_layer_keys():
+    return {
+        POINTS: "points",
+        LINES: "lines",
+        ZONES: "zones",
+    }
+
+
+def _hide_base_feature_layer(active_map, layer_name):
+    for layer in active_map.listLayers():
+        if getattr(layer, "name", "") == layer_name:
+            try:
+                layer.visible = False
+            except Exception:
+                pass
+
+
+def _pro_version():
+    """Return the running Pro version as an int tuple, or () when unknown."""
+
+    if "version" not in _PRO_VERSION_CACHE:
+        try:
+            text = str(arcpy.GetInstallInfo().get("Version", ""))
+            _PRO_VERSION_CACHE["version"] = tuple(int(part) for part in text.split(".")[:2] if part.isdigit())
+        except Exception:
+            _PRO_VERSION_CACHE["version"] = ()
+    return _PRO_VERSION_CACHE["version"]
+
+
+def _query_flip_supported():
+    """Return True when this Pro build is proven to requery on a query flip."""
+
+    version = _pro_version()
+    return bool(version) and version >= QUERY_FLIP_MIN_PRO
+
+
+def _same_source(layer, path):
+    """Return True when a layer reads the given feature class."""
+
+    try:
+        source = layer.dataSource
+    except Exception:
+        return False
+    return os.path.normcase(os.path.normpath(source or "")) == os.path.normcase(os.path.normpath(path))
+
+
+def _flip_visible_district_slot(active_map, district_path, messages):
+    """Flip the visible ring slot's query so Pro redraws new attribute values.
+
+    Returns the flipped layer, or None when there is no visible slot reading
+    this save's districts (callers then use the ring rehydrate).
+    """
+
+    for layer in active_map.listLayers():
+        name = getattr(layer, "name", "")
+        if not (_is_ring_slot_name(name) and bool(getattr(layer, "visible", False))):
+            continue
+        if not _same_source(layer, district_path):
+            return None
+        try:
+            current = layer.definitionQuery or ""
+            layer.definitionQuery = QUERY_FLIP_VALUES[1] if current == QUERY_FLIP_VALUES[0] else QUERY_FLIP_VALUES[0]
+            return layer
+        except Exception as exc:
+            _warn(messages, "REDRAW", f"district query flip failed on {name!r}: {exc}")
+            return None
+    return None
+
+
+def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None):
+    started = time.perf_counter()
+    phases = _PhaseTimer()
+    active_map = ensure_active_map(messages)
+    if active_map is None:
+        _log_redraw(messages, "district-ring", "no-active-map", started)
+        return
+
+    def _copy_style(layer):
+        _prepare_district_display_layer(layer, messages, "1=1")
+
+    if _query_flip_supported():
+        flipped = _flip_visible_district_slot(active_map, paths["districts"], messages)
+        phases.mark("query_flip")
+        if flipped is not None:
+            _hide_non_ring_district_family(active_map, keep_overlays=True)
+            _flip_district_overlays(active_map, paths["districts"], messages)
+            _place_ring_slots_above_base(active_map)
+            phases.mark("hide_base_districts")
+            _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark, base_flip=True)
+            phases.mark("feature_layers")
+            _log_redraw(messages, "district-flip", "ok", started, f"target={getattr(flipped, 'name', '')!r} {phases.summary()}")
+            return
+
+    ring = DistrictLayerRing(
+        active_map,
+        arcpy_module=arcpy,
+        style_copier=_copy_style,
+        phase_marker=phases.mark,
+        layer_adder=lambda path: _add_styled_layer(active_map, path, "districts", messages),
+    )
+    phases.mark("ring_discovery")
+    prepared = ring.prepare_and_swap(paths["districts"])
+    phases.mark("prepare_visibility_swap")
+    _place_ring_slots_above_base(active_map)
+    _hide_non_ring_district_family(active_map)
+    phases.mark("hide_base_districts")
+    _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark, base_flip=True)
+    phases.mark("feature_layers")
+    _log_redraw(messages, "district-ring", "ok", started, f"target={getattr(prepared, 'name', '')!r} {phases.summary()}")
+
+
+def apply_ring_redraw(paths, messages, layer_names=None, remove_scope=None):
+    """Apply production display-ring redraw without raising into gameplay.
+
+    Returns True when the path handled the redraw request, or False when callers
+    should fall back to the legacy remove/add/refresh path.
+    """
+
+    try:
+        if layer_names is not None and DISTRICTS not in layer_names:
+            _refresh_feature_scope(paths, messages, layer_names, remove_scope=set(layer_names))
+            return True
+        _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=remove_scope)
+        return True
+    except Exception as exc:
+        _warn(messages, "REDRAW", f"ring redraw failed: {exc}")
+        return False
+
+
+def _hide_non_ring_district_family(active_map, keep_overlays=False):
+    """Hide district layers superseded by the active predrawn ring slot.
+
+    The ring rehydrate cannot refresh the prosperity/identity overlays, so they
+    hide; the Pro 3.7+ query flip refreshes them and passes keep_overlays.
+    """
+
+    names = {DISTRICTS} if keep_overlays else {DISTRICTS, DISTRICT_PROSPERITY, DISTRICT_IDENTITY}
+    for layer in active_map.listLayers():
+        layer_name = getattr(layer, "name", "")
+        legacy_predrawn = _is_predrawn_district_layer_name(layer_name) and not _is_ring_slot_name(layer_name)
+        if layer_name in names or legacy_predrawn:
+            try:
+                layer.visible = False
+            except Exception:
+                pass
+
+
+def _flip_district_overlays(active_map, district_path, messages):
+    """Flip and show the prosperity/identity overlays so they requery fresh values."""
+
+    for layer in active_map.listLayers():
+        name = getattr(layer, "name", "")
+        if name not in (DISTRICT_PROSPERITY, DISTRICT_IDENTITY) or not _same_source(layer, district_path):
+            continue
+        try:
+            current = layer.definitionQuery or ""
+            layer.definitionQuery = QUERY_FLIP_VALUES[1] if current == QUERY_FLIP_VALUES[0] else QUERY_FLIP_VALUES[0]
+            layer.visible = True
+        except Exception as exc:
+            _warn(messages, "REDRAW", f"overlay query flip failed on {name!r}: {exc}")
+
+
+def _place_ring_slots_above_base(active_map):
+    """Keep each ring slot directly above its hidden base layer.
+
+    addDataFromPath puts a new polygon layer above the existing polygons, so a
+    district slot added mid-game would otherwise cover the Zones layer.
+    """
+
+    move = getattr(active_map, "moveLayer", None)
+    if move is None:
+        return
+    prefixes = {DISTRICTS: PREDRAWN_LAYER_PREFIX, **_feature_ring_prefixes()}
+    for base_name, prefix in prefixes.items():
+
+        def is_slot(layer, prefix=prefix):
+            name = getattr(layer, "name", "")
+            return name.startswith(prefix) and name.removeprefix(prefix).strip().isdigit()
+
+        layers = list(active_map.listLayers())
+        base = next((layer for layer in layers if getattr(layer, "name", "") == base_name), None)
+        if base is None:
+            continue
+        for slot in [layer for layer in layers if is_slot(layer)]:
+            layers = list(active_map.listLayers())
+            index, base_index = layers.index(slot), layers.index(base)
+            # In place when only sibling slots sit between this slot and the base.
+            if index < base_index and all(is_slot(other) for other in layers[index + 1:base_index]):
+                continue
+            try:
+                move(base, slot, "BEFORE")
+            except Exception:
+                pass
+
+
+def _order_output_layers(active_map, existing):
+    """Draw district colors as the base, identity/prosperity overlays just above
+    it, and feature lines/points/zones on top."""
+    ordered_names = [LINES, POINTS, ZONES, DISTRICT_IDENTITY, DISTRICT_PROSPERITY, DISTRICTS]
+    if not all(existing.get(name) for name in (LINES, POINTS, ZONES, DISTRICTS)):
+        return
+    present = [existing[name] for name in ordered_names if existing.get(name) is not None]
+    try:
+        for reference_layer, move_layer in zip(present, present[1:]):
+            active_map.moveLayer(reference_layer, move_layer, "AFTER")
+    except Exception:
+        pass

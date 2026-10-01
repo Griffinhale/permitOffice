@@ -742,7 +742,7 @@ def write_projects(paths, projects):
 def generate_docket_rows(paths, seed, messages):
     """Generate the turn docket and replace the persisted docket table."""
 
-    from .geometry import seed_docket_proposals
+    from .proposals import seed_docket_proposals
 
     state = read_state(paths)
     districts = read_districts(paths)

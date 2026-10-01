@@ -7,7 +7,7 @@ import os
 import arcpy
 
 from ._perf import perf_active, perf_block
-from .geometry import add_outputs_to_map, apply_ring_redraw, refresh_all, remove_outputs_from_map
+from .map_layers import add_outputs_to_map, apply_ring_redraw, refresh_all, remove_outputs_from_map
 from .messages import _log, _warn
 from .redraw_plan import _redraw_plan
 from .schema import DISTRICTS, LINES, POINTS, ZONES

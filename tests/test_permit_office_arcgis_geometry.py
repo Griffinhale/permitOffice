@@ -18,6 +18,7 @@ sys.modules.setdefault(
 
 from toolbox import arcpy_permit_office_rules as rules
 from toolbox.permit_office_arcgis import geometry
+from toolbox.permit_office_arcgis import city_features, map_layers, proposals, symbology
 from toolbox.permit_office_arcgis.schema import DISTRICT_FIELDS
 
 
@@ -26,6 +27,14 @@ class FakeField:
     """Minimal ArcPy field object exposing only a name."""
 
     name: str
+
+def _patch_split(monkeypatch, name, value):
+    """Patch a name in each module split out of geometry.py that holds it."""
+
+    for module in (proposals, city_features, map_layers, symbology):
+        if name in vars(module):
+            monkeypatch.setattr(module, name, value)
+
 
 
 class FakeMessages:
@@ -244,7 +253,7 @@ def test_selected_cell_ids_reads_cell_id_directly_without_field_scan(monkeypatch
     """Verify the common path reads the known cell_id column and skips ListFields."""
 
     fake = _SelectionArcpy(fidset="0;1", cursor_rows=["D0000", "D0001"])
-    monkeypatch.setattr(geometry, "arcpy", fake)
+    _patch_split(monkeypatch, "arcpy", fake)
 
     result = geometry.selected_cell_ids("districts_layer")
 
@@ -258,7 +267,7 @@ def test_selected_cell_ids_falls_back_to_field_scan_on_cursor_error(monkeypatch)
     fake = _SelectionArcpy(
         fidset="0", cursor_rows=["D0000"], legacy_field="CELL_ID", fail_cell_id=True
     )
-    monkeypatch.setattr(geometry, "arcpy", fake)
+    _patch_split(monkeypatch, "arcpy", fake)
 
     result = geometry.selected_cell_ids("districts_layer")
 
@@ -283,7 +292,7 @@ def _map_arcpy(layer_names, active=True, raise_err=False):
 def test_output_layers_present_true_when_an_output_layer_is_on_map(monkeypatch):
     """Verify a map carrying a Permit Office layer reports present (resume)."""
 
-    monkeypatch.setattr(geometry, "arcpy", _map_arcpy([geometry.DISTRICTS, "Topographic"]))
+    _patch_split(monkeypatch, "arcpy", _map_arcpy([geometry.DISTRICTS, "Topographic"]))
 
     assert geometry.output_layers_present() is True
 
@@ -291,7 +300,7 @@ def test_output_layers_present_true_when_an_output_layer_is_on_map(monkeypatch):
 def test_output_layers_present_false_when_map_has_no_output_layers(monkeypatch):
     """Verify a map with only basemaps reports absent (offer fresh start)."""
 
-    monkeypatch.setattr(geometry, "arcpy", _map_arcpy(["Topographic", "World Imagery"]))
+    _patch_split(monkeypatch, "arcpy", _map_arcpy(["Topographic", "World Imagery"]))
 
     assert geometry.output_layers_present() is False
 
@@ -299,7 +308,7 @@ def test_output_layers_present_false_when_map_has_no_output_layers(monkeypatch):
 def test_output_layers_present_true_when_probe_unavailable(monkeypatch):
     """Verify a probe failure is conservative and never suppresses a resume."""
 
-    monkeypatch.setattr(geometry, "arcpy", _map_arcpy([], raise_err=True))
+    _patch_split(monkeypatch, "arcpy", _map_arcpy([], raise_err=True))
 
     assert geometry.output_layers_present() is True
 
@@ -320,7 +329,7 @@ def test_ensure_active_map_creates_and_opens_map_when_project_has_none(monkeypat
             calls.append(("create", name))
             return created
 
-    monkeypatch.setattr(geometry, "arcpy", SimpleNamespace(mp=SimpleNamespace(ArcGISProject=lambda _name: FakeProject())))
+    _patch_split(monkeypatch, "arcpy", SimpleNamespace(mp=SimpleNamespace(ArcGISProject=lambda _name: FakeProject())))
     messages = CapturingMessages()
 
     active_map = geometry.ensure_active_map(messages)
@@ -342,7 +351,7 @@ def test_ensure_active_map_opens_existing_map_when_no_active_map(monkeypatch):
         def listMaps(self):
             return [existing]
 
-    monkeypatch.setattr(geometry, "arcpy", SimpleNamespace(mp=SimpleNamespace(ArcGISProject=lambda _name: FakeProject())))
+    _patch_split(monkeypatch, "arcpy", SimpleNamespace(mp=SimpleNamespace(ArcGISProject=lambda _name: FakeProject())))
 
     assert geometry.ensure_active_map(CapturingMessages()) is existing
     assert calls == ["open"]
@@ -361,7 +370,7 @@ def test_apply_ring_redraw_reports_failure_to_caller(monkeypatch):
     """Verify callers can fall back when production ring redraw fails."""
 
     messages = CapturingMessages()
-    monkeypatch.setattr(geometry, "ensure_active_map", lambda messages: (_ for _ in ()).throw(RuntimeError("map unavailable")))
+    _patch_split(monkeypatch, "ensure_active_map", lambda messages: (_ for _ in ()).throw(RuntimeError("map unavailable")))
 
     handled = geometry.apply_ring_redraw(_paths(), messages, layer_names={geometry.DISTRICTS})
 
@@ -373,9 +382,9 @@ def test_refresh_feature_scope_refreshes_without_readd_when_not_in_remove_scope(
     """Verify broad rehydrate rebuilds do not re-symbolize unchanged feature layers."""
 
     calls = []
-    monkeypatch.setattr(geometry, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(geometry, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(geometry, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    _patch_split(monkeypatch, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    _patch_split(monkeypatch, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    _patch_split(monkeypatch, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
 
     geometry._refresh_feature_scope(
         _paths(),
@@ -391,10 +400,10 @@ def test_refresh_feature_scope_uses_feature_ring_for_features_in_remove_scope(mo
     """Verify point decisions use reusable feature display slots."""
 
     calls = []
-    monkeypatch.setattr(geometry, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(geometry, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(geometry, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
-    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: calls.append(("ring", layer_name)) or True)
+    _patch_split(monkeypatch, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    _patch_split(monkeypatch, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    _patch_split(monkeypatch, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: calls.append(("ring", layer_name)) or True)
 
     geometry._refresh_feature_scope(
         _paths(),
@@ -412,8 +421,8 @@ def test_refresh_feature_scope_marks_each_feature_layer_phase(monkeypatch):
     """Verify live logs can split feature ring cost by support layer."""
 
     marks = []
-    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: True)
-    monkeypatch.setattr(geometry, "refresh_all", lambda *args, **kwargs: None)
+    _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: True)
+    _patch_split(monkeypatch, "refresh_all", lambda *args, **kwargs: None)
 
     geometry._refresh_feature_scope(
         _paths(),
@@ -430,10 +439,10 @@ def test_refresh_feature_scope_falls_back_to_readd_when_feature_ring_fails(monke
     """Verify feature ring failures keep the old safe remove/add path."""
 
     calls = []
-    monkeypatch.setattr(geometry, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(geometry, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(geometry, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
-    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: calls.append(("ring", layer_name)) or False)
+    _patch_split(monkeypatch, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    _patch_split(monkeypatch, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    _patch_split(monkeypatch, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: calls.append(("ring", layer_name)) or False)
 
     geometry._refresh_feature_scope(
         _paths(),
@@ -474,8 +483,8 @@ def test_feature_display_ring_rehydrates_points_and_hides_base_layer(monkeypatch
         mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
         RefreshLayer=lambda name: calls.append(("refresh", name, next(layer.visible for layer in layers if layer.name == name))),
     )
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
 
     handled = geometry._rehydrate_feature_display_ring(_paths(), CapturingMessages(), geometry.POINTS)
 
@@ -504,9 +513,9 @@ def test_feature_display_ring_refreshes_visible_slot_without_rehydrate(monkeypat
         mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
         RefreshLayer=lambda name: calls.append(("refresh", name)),
     )
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "_query_flip_supported", lambda: True)
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "_query_flip_supported", lambda: True)
+    _patch_split(monkeypatch, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
 
     handled = geometry._refresh_visible_feature_display_ring(_paths(), CapturingMessages(), geometry.POINTS)
 
@@ -544,9 +553,9 @@ def test_feature_display_ring_refresh_failure_falls_back_to_rehydrate(monkeypatc
         mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
         RefreshLayer=lambda name: (_ for _ in ()).throw(RuntimeError("refresh failed")),
     )
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "_query_flip_supported", lambda: True)
-    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: calls.append(("rehydrate", layer_name)) or True)
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "_query_flip_supported", lambda: True)
+    _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: calls.append(("rehydrate", layer_name)) or True)
 
     geometry._refresh_feature_scope(
         _paths(),
@@ -562,9 +571,7 @@ def test_apply_ring_redraw_dispatches_to_district_ring(monkeypatch):
     """Verify production redraw dispatches to the district ring."""
 
     calls = []
-    monkeypatch.setattr(
-        geometry,
-        "_apply_district_ring_redraw",
+    _patch_split(monkeypatch, "_apply_district_ring_redraw",
         lambda paths, messages, layer_names, remove_scope=None: calls.append((layer_names, remove_scope)),
     )
 
@@ -601,8 +608,8 @@ def test_district_ring_styles_slots_with_base_district_symbology(monkeypatch):
         mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
         RefreshLayer=lambda name: calls.append(("refresh", name)),
     )
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
 
     handled = geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.DISTRICTS})
 
@@ -635,8 +642,8 @@ def test_district_ring_hides_base_district_family_layers(monkeypatch):
         mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
         RefreshLayer=lambda name: calls.append(("refresh", name)),
     )
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
 
     handled = geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.DISTRICTS})
 
@@ -663,7 +670,7 @@ def test_remove_outputs_removes_predrawn_district_layers_on_full_cleanup(monkeyp
         removed.append(layer.name)
 
     fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer)
-    monkeypatch.setattr(geometry, "arcpy", SimpleNamespace(mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map))))
+    _patch_split(monkeypatch, "arcpy", SimpleNamespace(mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map))))
 
     geometry.remove_outputs_from_map(CapturingMessages())
 
@@ -692,7 +699,7 @@ def test_select_case_context_creates_proposal_and_selects_support_feature(monkey
 
     rows = _rows()
     fake = FakeArcpy(rows)
-    monkeypatch.setattr(geometry, "arcpy", fake)
+    _patch_split(monkeypatch, "arcpy", fake)
     item = rules.DocketItem(
         "CASE-1",
         "street_vendor_compact",
@@ -715,7 +722,7 @@ def test_select_case_context_creates_proposal_and_selects_support_feature(monkey
         )
         return list(target_ids)
 
-    monkeypatch.setattr(geometry, "insert_or_replace_proposal", insert)
+    _patch_split(monkeypatch, "insert_or_replace_proposal", insert)
 
     geometry.select_case_context(_paths(), "district_layer", item, 2026, FakeMessages())
 
@@ -742,8 +749,8 @@ def test_select_case_context_falls_back_to_visible_predrawn_district_layer(monke
     fake.management.SelectLayerByAttribute = select
     visible = SimpleNamespace(name="Permit Office Predrawn 1", visible=True)
     hidden = SimpleNamespace(name="Permit Office Predrawn 2", visible=False)
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "_active_map", lambda: SimpleNamespace(listLayers=lambda: [hidden, visible]))
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "_active_map", lambda: SimpleNamespace(listLayers=lambda: [hidden, visible]))
     messages = FakeMessages()
     item = rules.DocketItem(
         "CASE-ring",
@@ -767,7 +774,7 @@ def test_maintenance_selection_includes_referenced_active_feature(monkeypatch):
     rows = _rows()
     rows["points"].append({"item_id": "CASE-2", "status": "proposed", "target_cell_ids": "D0000", "feature_id": "P-2"})
     fake = FakeArcpy(rows)
-    monkeypatch.setattr(geometry, "arcpy", fake)
+    _patch_split(monkeypatch, "arcpy", fake)
     item = rules.DocketItem(
         "CASE-2",
         rules.MAINTENANCE_TEMPLATE_ID,
@@ -792,8 +799,8 @@ def test_support_selection_prefers_visible_feature_ring_layer(monkeypatch):
     fake = FakeArcpy(rows)
     base = SimpleNamespace(name=geometry.POINTS, visible=False)
     ring = SimpleNamespace(name="Permit Office Predrawn Points 1", visible=True)
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "_active_map", lambda: SimpleNamespace(listLayers=lambda: [base, ring]))
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "_active_map", lambda: SimpleNamespace(listLayers=lambda: [base, ring]))
     item = rules.DocketItem(
         "CASE-ring-point",
         "street_vendor_compact",
@@ -820,7 +827,7 @@ def test_hide_show_affects_only_selected_proposed_feature(monkeypatch):
         ]
     )
     fake = FakeArcpy(rows)
-    monkeypatch.setattr(geometry, "arcpy", fake)
+    _patch_split(monkeypatch, "arcpy", fake)
     item = rules.DocketItem(
         "CASE-3",
         "street_vendor_compact",
@@ -879,7 +886,7 @@ def _spill_setup(monkeypatch, proposal_geom, radius=None):
             {"item_id": "CASE-9", "status": "proposed", "SHAPE@": proposal_geom},
         ]
     )
-    monkeypatch.setattr(geometry, "arcpy", _spill_arcpy(rows))
+    _patch_split(monkeypatch, "arcpy", _spill_arcpy(rows))
     monkeypatch.setattr(
         geometry.rules,
         "feature_archetype_for_template",
@@ -959,11 +966,11 @@ def _patch_flip(monkeypatch, fake):
     """Install a fake arcpy and stub the non-district redraw work."""
 
     geometry._PRO_VERSION_CACHE.clear()
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "_refresh_feature_scope", lambda *args, **kwargs: None)
-    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda *args: None)
-    monkeypatch.setattr(geometry, "_configure_labels", lambda *args: None)
-    monkeypatch.setattr(geometry, "_tune_layer_visibility", lambda *args: None)
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "_refresh_feature_scope", lambda *args, **kwargs: None)
+    _patch_split(monkeypatch, "apply_simple_symbology", lambda *args: None)
+    _patch_split(monkeypatch, "_configure_labels", lambda *args: None)
+    _patch_split(monkeypatch, "_tune_layer_visibility", lambda *args: None)
 
 
 def test_district_redraw_flips_visible_slot_query_on_supported_pro(monkeypatch):
@@ -1077,8 +1084,8 @@ def test_district_redraw_flips_base_feature_layer_when_it_has_no_ring_slot(monke
     """
 
     fake, slot, lines, calls = _district_flip_map_with_base_lines()
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
     messages = CapturingMessages()
 
     handled = geometry.apply_ring_redraw(
@@ -1101,9 +1108,9 @@ def test_district_redraw_keeps_feature_ring_seed_below_query_flip_version(monkey
     """Verify Pro builds below 3.7 still seed the feature ring for a ringless layer."""
 
     fake, _slot, lines, calls = _district_flip_map_with_base_lines("3.6")
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
-    monkeypatch.setattr(geometry, "_prepare_district_display_layer", lambda *args, **kwargs: None)
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
+    _patch_split(monkeypatch, "_prepare_district_display_layer", lambda *args, **kwargs: None)
 
     geometry.apply_ring_redraw(
         _paths(),
@@ -1121,8 +1128,8 @@ def test_feature_only_redraw_still_seeds_ring_for_ringless_layer(monkeypatch):
     """Verify AR16's feature-only path is unchanged by the district-path base flip."""
 
     fake, _slot, lines, calls = _district_flip_map_with_base_lines()
-    monkeypatch.setattr(geometry, "arcpy", fake)
-    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
 
     assert geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.LINES}) is True
 
@@ -1147,7 +1154,7 @@ def test_purge_proposed_features_filters_in_the_cursor_and_keeps_active_rows(mon
         return update_cursor(path, fields, where_clause)
 
     fake.da.UpdateCursor = recording_update_cursor
-    monkeypatch.setattr(geometry, "arcpy", fake)
+    _patch_split(monkeypatch, "arcpy", fake)
 
     geometry.purge_proposed_features(_paths())
 
@@ -1164,7 +1171,7 @@ def test_support_metadata_goes_through_encode_json(monkeypatch):
     archetype = rules.feature_archetype_for_template(template)
     item = rules.DocketItem("CASE-json", template.template_id, template.title, "POINT", 1)
     calls = []
-    monkeypatch.setattr(geometry, "encode_json", lambda value, **kwargs: calls.append((value, kwargs)) or "{}")
+    _patch_split(monkeypatch, "encode_json", lambda value, **kwargs: calls.append((value, kwargs)) or "{}")
 
     attrs = geometry._support_attrs(item, template, archetype, ["D0000"], "proposed", "proposed", "", {"note": "x" * 5000})
 

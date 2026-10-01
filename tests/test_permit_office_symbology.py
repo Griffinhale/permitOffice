@@ -16,6 +16,15 @@ sys.modules.setdefault(
 )
 
 from toolbox.permit_office_arcgis.geometry import apply_simple_symbology, remove_outputs_from_map, _configure_labels, _order_output_layers, _tune_layer_visibility
+from toolbox.permit_office_arcgis import city_features, map_layers, proposals, symbology
+
+def _patch_split(monkeypatch, name, value):
+    """Patch a name in each module split out of geometry.py that holds it."""
+
+    for module in (proposals, city_features, map_layers, symbology):
+        if name in vars(module):
+            monkeypatch.setattr(module, name, value)
+
 
 
 class FakeMessages:
@@ -533,7 +542,7 @@ def test_remove_outputs_from_map_removes_stale_permit_layers(monkeypatch):
         AddMessage=lambda text: None,
         AddWarning=lambda text: None,
     )
-    monkeypatch.setattr("toolbox.permit_office_arcgis.geometry.arcpy", fake_arcpy)
+    _patch_split(monkeypatch, "arcpy", fake_arcpy)
     messages = FakeMessages()
 
     remove_outputs_from_map(messages)
@@ -692,7 +701,7 @@ def test_add_outputs_loads_each_layer_from_its_lyrx_and_points_it_at_the_save(mo
 
     monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path)))
     active_map = FakeLyrxMap()
-    monkeypatch.setattr(geometry, "arcpy", _fake_arcpy_with_layer_files(active_map))
+    _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
     paths = {key: f"/saves/game.gdb/Permit{key.title()}" for key in ("districts", "points", "lines", "zones")}
     messages = FakeMessages()
 
@@ -725,8 +734,8 @@ def test_ring_slot_styled_from_lyrx_without_update_renderer(monkeypatch, tmp_pat
     visible.definitionQuery = "1=1"
     visible.dataSource = "/saves/game.gdb/PermitDistricts"
     active_map = FakeLyrxMap([visible])
-    monkeypatch.setattr(geometry, "arcpy", _fake_arcpy_with_layer_files(active_map))
-    monkeypatch.setattr(geometry, "_query_flip_supported", lambda: False)
+    _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
+    _patch_split(monkeypatch, "_query_flip_supported", lambda: False)
 
     geometry._apply_district_ring_redraw({"districts": "/saves/game.gdb/PermitDistricts"}, FakeMessages(), {"PermitDistricts"})
 
@@ -746,7 +755,7 @@ def test_missing_lyrx_falls_back_to_code_styling(monkeypatch, tmp_path):
 
     monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path, names=("districts",))))
     active_map = FakeLyrxMap()
-    monkeypatch.setattr(geometry, "arcpy", _fake_arcpy_with_layer_files(active_map))
+    _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
 
     geometry.add_outputs_to_map({"districts": "/saves/game.gdb/PermitDistricts", "points": "/saves/game.gdb/PermitPoints"}, FakeMessages(), layer_names={"PermitPoints", "PermitDistricts"})
 
@@ -774,7 +783,7 @@ def test_lyrx_layer_that_cannot_be_repointed_falls_back_to_code_styling(monkeypa
 
     monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path, names=("points",))))
     active_map = FakeLyrxMap()
-    monkeypatch.setattr(geometry, "arcpy", _fake_arcpy_with_layer_files(active_map))
+    _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
     monkeypatch.setattr(FakeLyrxLayer, "updateConnectionProperties", lambda self, current, new: None)
     messages = FakeMessages()
 

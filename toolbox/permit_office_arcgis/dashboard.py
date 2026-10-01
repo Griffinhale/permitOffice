@@ -12,23 +12,19 @@ from copy import deepcopy
 import arcpy
 
 from ._perf import perf_block, perf_session
-from .geometry import (
-    add_outputs_to_map,
+from .city_features import seed_city_features
+from .map_layers import add_outputs_to_map, ensure_active_map, output_layers_present, refresh_all, remove_outputs_from_map
+from .proposals import (
     activate_proposal,
     case_proposal_visible,
-    ensure_active_map,
     ensure_case_proposal,
     hide_case_proposal,
     insert_or_replace_proposal,
     mark_proposals,
-    output_layers_present,
     proposal_spillover,
     proposal_visible_map,
-    refresh_all,
-    remove_outputs_from_map,
     select_case_context,
     selected_cell_ids,
-    seed_city_features,
 )
 from .messages import _log, _warn
 from .rules_loader import rules

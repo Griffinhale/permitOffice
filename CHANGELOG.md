@@ -20,6 +20,9 @@ smoke test yet.
 - Startup is more resilient: schema versioning and repair on open, and ArcPy-free
   precompute on a worker thread from copied rows, with a timeout that falls back
   to running it on the main thread.
+- `geometry.py` is split by job into `proposals.py`, `city_features.py`,
+  `map_layers.py`, and `symbology.py`; `geometry.py` re-exports them for one
+  release.
 
 ### Removed
 - Redraw experiment and benchmark controls from the public toolbox. The display

@@ -61,7 +61,7 @@ remains a diagnostic experiment. Retired probes and why are in
 **September 30 follow-up (Pro 3.7):** a live probe found that on Pro 3.7,
 `RefreshLayer` alone does show new attribute values, and so does flipping the
 layer's `definitionQuery` between `1=1` and `2=2`. A later recorded probe showed
-the flip briefly drops the city shapes (labels stay, no white flash). On Pro 3.7+ (`QUERY_FLIP_MIN_PRO` in `geometry.py`), a district redraw now
+the flip briefly drops the city shapes (labels stay, no white flash). On Pro 3.7+ (`QUERY_FLIP_MIN_PRO` in `map_layers.py`), a district redraw now
 flips the visible ring slot's query instead of re-adding a layer. In live play
 the district step took 0.33-0.52 s, down from 1.1-2.3 s. Older Pro and any slot
 that reads another save still use the ring. The whole-map white flash seen on

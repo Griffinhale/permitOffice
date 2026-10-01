@@ -11,7 +11,7 @@ All persistence is `arcpy.da` cursors, always under a `with` block. We pass an
 explicit field list (never `"*"`) and use the `SHAPE@` token for geometry.
 
 - **SearchCursor** — `store.py` reads (state, districts, docket, projects, active
-  features) and `geometry.py` lookups. District geometry uses
+  features) and `proposals.py` lookups. District geometry uses
   `["cell_id", "SHAPE@"]`.
 - **UpdateCursor** — district/feature updates (`updateRow`), proposal deletes
   (`deleteRow`), proposal status changes, and `_delete_all_rows` (`deleteRow`
@@ -70,7 +70,7 @@ District board and proposals are built by hand from coordinates:
   always create feature classes in `arcpy.SpatialReference(3857)` (Web Mercator),
   whatever the active map uses; Pro reprojects them for display.
 
-## 4. Map / display & refresh-redraw (`geometry.py`, `map_redraw.py`)
+## 4. Map / display & refresh-redraw (`map_layers.py`, `map_redraw.py`)
 
 Map access is via `arcpy.mp.ArcGISProject("CURRENT").activeMap` (None-checked —
 the dashboard must tolerate no open map).
@@ -93,7 +93,7 @@ after successful preparation, and leaves the old visible slot intact on failure.
 This keeps the district re-add correctness requirement without rebuilding the
 whole district family every decision.
 
-On Pro 3.7 and newer (`QUERY_FLIP_MIN_PRO` in `geometry.py`), a district-dirty
+On Pro 3.7 and newer (`QUERY_FLIP_MIN_PRO` in `map_layers.py`), a district-dirty
 redraw first flips the visible slot's `definitionQuery` between `1=1` and `2=2`.
 A live probe on 3.7 showed this makes Pro show new attribute values in about
 0.5 s without flicker. `RefreshLayer` also updated the colors there but
@@ -112,7 +112,7 @@ Timings are visible under `PERMIT_OFFICE_PERF=1` as `ring_redraw`,
 with phase labels such as `feature_PermitPoints_ring_refresh` and
 `feature_PermitPoints_ring_rehydrate`.
 
-**Symbology** (`symbology_config.py` + `geometry.py`): a `UniqueValueRenderer` set
+**Symbology** (`symbology_config.py` + `symbology.py`): a `UniqueValueRenderer` set
 via `sym.updateRenderer("UniqueValueRenderer")`, with the render field assigned
 through multiple fallbacks (`renderer.fields` list → `renderer.field` string →
 CIM `getDefinition("V3"/"V2")` + `setDefinition`) because the accessible property

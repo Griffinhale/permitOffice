@@ -38,8 +38,14 @@ The codebase is split so the game is testable without ArcGIS Pro.
 - `schema.py` - geodatabase/table/field declarations; idempotent schema creation.
 - `store.py` - read/write game rows to/from pure-rule dataclasses (the only
   cursor I/O for game state).
-- `geometry.py` - map selection, proposed geometry, spillover buffers, feature
-  activation, map refresh, symbology, and district/support display rings.
+- `proposals.py` - map selection, proposed geometry, spillover buffers, and
+  feature activation.
+- `city_features.py` - baseline city detail seeded onto a new board.
+- `map_layers.py` - map layer add/remove, refresh, and the district/support
+  display rings.
+- `symbology.py` - unique-value symbology, labels, and transparency applied in
+  code when no shipped `.lyrx` covers a layer.
+- `geometry.py` - re-exports the four modules above for one release.
 - `redraw_plan.py` - ArcPy-free redraw planning: which layers a command
   changes and whether they are refreshed or re-added.
 - `map_redraw.py` - `rebuild_output_layers`, which carries out a redraw plan on
@@ -118,8 +124,8 @@ The shared command flow for every action (`dashboard.py`): insert a command row 
 read game rows (`store.py`) -> resolve via `rules` against current state -> write
 authoritative results to the GDB once -> build a redraw plan from the actual
 `DecisionResult` (`redraw_plan.py`) -> refresh/rehydrate affected display-ring
-layers (`map_redraw.py`, `geometry.py`) -> file a report -> reload the desk. All synchronous, on the Tk thread (see
-`decisions.md`).
+layers (`map_redraw.py`, `map_layers.py`) -> file a report -> reload the desk.
+All synchronous, on the Tk thread (see `decisions.md`).
 
 **Launch / resume / new game.** The `.pyt` resolves the workspace, runs
 `ensure_schema`, adds output layers, and opens the controller. Saved districts+
