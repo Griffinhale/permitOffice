@@ -29,12 +29,14 @@ class DisplayLayerRing:
         arcpy_module,
         style_copier: Callable[[object], None] | None = None,
         phase_marker: Callable[[str], None] | None = None,
+        layer_adder: Callable[[str], object] | None = None,
     ):
         self.active_map = active_map
         self.prefix = prefix
         self.arcpy = arcpy_module
         self.style_copier = style_copier or (lambda _layer: None)
         self.phase_marker = phase_marker or (lambda _name: None)
+        self.layer_adder = layer_adder or active_map.addDataFromPath
 
     def discover_or_seed(self, district_path: str) -> list[RingSlot]:
         """Return discovered slots, adding only the first visible slot if needed."""
@@ -47,7 +49,7 @@ class DisplayLayerRing:
             layer = by_name.get(name)
             if layer is None:
                 if not slots and not existing_slot_names:
-                    layer = self.active_map.addDataFromPath(district_path)
+                    layer = self.layer_adder(district_path)
                     layer.name = name
                     self.style_copier(layer)
                     self.phase_marker("seed_visible_slot")
@@ -78,13 +80,13 @@ class DisplayLayerRing:
         old_visibility = [(slot.layer, bool(getattr(slot.layer, "visible", False))) for slot in slots]
         try:
             if prepare_slot is None:
-                prepared = self.active_map.addDataFromPath(district_path)
-                self.phase_marker("addDataFromPath")
+                prepared = self.layer_adder(district_path)
+                self.phase_marker("add_layer")
             else:
                 self.active_map.removeLayer(prepare_slot.layer)
                 self.phase_marker("remove_prepare_slot")
-                prepared = self.active_map.addDataFromPath(district_path)
-                self.phase_marker("addDataFromPath")
+                prepared = self.layer_adder(district_path)
+                self.phase_marker("add_layer")
             prepared.name = prepare_name
             prepared.visible = False
             self.style_copier(prepared)
@@ -123,13 +125,14 @@ class DisplayLayerRing:
 class DistrictLayerRing(DisplayLayerRing):
     """Manage a small reusable ring of predrawn district layers."""
 
-    def __init__(self, active_map, *, arcpy_module, style_copier=None, phase_marker=None):
+    def __init__(self, active_map, *, arcpy_module, style_copier=None, phase_marker=None, layer_adder=None):
         super().__init__(
             active_map,
             prefix=RING_PREFIX,
             arcpy_module=arcpy_module,
             style_copier=style_copier,
             phase_marker=phase_marker,
+            layer_adder=layer_adder,
         )
 
 

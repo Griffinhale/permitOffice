@@ -218,3 +218,24 @@ def test_layer_ring_seeds_missing_slots_without_creating_two_visible_layers():
         "Permit Office Predrawn 1",
     ]
     assert [slot.layer.visible for slot in slots] == [False, True]
+
+
+def test_layer_ring_adds_slots_through_layer_adder():
+    """Verify seeded and prepared slots come from the supplied layer adder."""
+
+    active_map = FakeMap([FakeLayer("Permit Office Predrawn 0", visible=True)])
+    adder_paths = []
+
+    def add_layer(path):
+        adder_paths.append(path)
+        layer = FakeLayer(f"from-lyrx:{path}")
+        active_map.layers.append(layer)
+        return layer
+
+    ring = layer_ring.DistrictLayerRing(active_map, arcpy_module=FakeArcpy(), layer_adder=add_layer)
+    prepared = ring.prepare_and_swap("districts.gdb/PermitDistricts")
+
+    assert adder_paths == ["districts.gdb/PermitDistricts"]
+    assert active_map.added_paths == []
+    assert prepared.name == "Permit Office Predrawn 1"
+    assert prepared.visible is True

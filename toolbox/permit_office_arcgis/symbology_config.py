@@ -1,5 +1,29 @@
 """Map presentation constants for Permit Office ArcGIS layers."""
 
+import os
+
+# Styled layer files exported from Pro (ruling D2). A layer whose file is
+# present is added from it with its full style; code styling covers the rest.
+LAYER_FILE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "layers")
+LAYER_FILE_NAMES = {
+    "districts": "districts.lyrx",
+    "district_prosperity": "prosperity.lyrx",
+    "district_identity": "identity.lyrx",
+    "points": "points.lyrx",
+    "lines": "lines.lyrx",
+    "zones": "zones.lyrx",
+}
+
+
+def layer_file_path(layer_key):
+    """Return the shipped .lyrx path for a layer key, or None when absent."""
+
+    name = LAYER_FILE_NAMES.get(layer_key)
+    if not name:
+        return None
+    path = os.path.join(LAYER_FILE_DIR, name)
+    return path if os.path.isfile(path) else None
+
 DISPLAY_STATE_SYMBOLS = {
     "stable": ([226, 232, 222, 100], "Stable"),
     "daily_pressure": ([205, 132, 78, 100], "Daily Pressure"),

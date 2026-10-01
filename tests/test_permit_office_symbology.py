@@ -621,3 +621,167 @@ def test_order_output_layers_stacks_overlays_above_base_district_fill():
         DISTRICT_PROSPERITY,
         "PermitDistricts",
     ]
+
+
+class FakeLyrxLayer(FakeLayer):
+    """Layer double returned by Map.addLayer for a .lyrx file."""
+
+    def __init__(self, layer_file) -> None:
+        super().__init__(FieldsListRenderer())
+        self.name = f"exported {layer_file}"
+        self.visible = True
+        self.definitionQuery = ""
+        self.connectionProperties = {
+            "dataset": "ExportedDistricts",
+            "workspace_factory": "File Geodatabase",
+            "connection_info": {"database": r"C:\owner\export.gdb"},
+        }
+        self.dataSource = r"C:\owner\export.gdb\ExportedDistricts"
+        self.connection_updates = []
+
+    def updateConnectionProperties(self, current, new) -> None:
+        self.connection_updates.append((current, new))
+        self.connectionProperties = new
+        self.dataSource = new["connection_info"]["database"] + "/" + new["dataset"]
+
+
+class FakeLyrxMap(FakeMap):
+    """Active map double that records addLayer and addDataFromPath calls."""
+
+    def __init__(self, layers=()) -> None:
+        super().__init__(layers)
+        self.added_layer_files = []
+        self.added_paths = []
+
+    def addLayer(self, layer_file):
+        self.added_layer_files.append(layer_file.path)
+        layer = FakeLyrxLayer(layer_file.path)
+        self.layers.append(layer)
+        return [layer]
+
+    def addDataFromPath(self, path):
+        self.added_paths.append(path)
+        layer = FakeLayer(FieldsListRenderer())
+        layer.visible = True
+        layer.definitionQuery = ""
+        layer.dataSource = path
+        self.layers.append(layer)
+        return layer
+
+
+def _fake_arcpy_with_layer_files(active_map):
+    return SimpleNamespace(
+        mp=SimpleNamespace(
+            LayerFile=lambda path: SimpleNamespace(path=path),
+            ArcGISProject=lambda name: SimpleNamespace(activeMap=active_map),
+        ),
+        RefreshLayer=lambda name: None,
+    )
+
+
+def _write_layer_files(tmp_path, names=("districts", "prosperity", "identity", "points", "lines", "zones")):
+    for name in names:
+        (tmp_path / f"{name}.lyrx").write_text("{}")
+    return tmp_path
+
+
+def test_add_outputs_loads_each_layer_from_its_lyrx_and_points_it_at_the_save(monkeypatch, tmp_path):
+    """Verify a shipped .lyrx gives the layer its full style with no renderer rebuild."""
+
+    from toolbox.permit_office_arcgis import geometry, symbology_config
+
+    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path)))
+    active_map = FakeLyrxMap()
+    monkeypatch.setattr(geometry, "arcpy", _fake_arcpy_with_layer_files(active_map))
+    paths = {key: f"/saves/game.gdb/Permit{key.title()}" for key in ("districts", "points", "lines", "zones")}
+    messages = FakeMessages()
+
+    geometry.add_outputs_to_map(paths, messages)
+
+    assert active_map.added_paths == []
+    assert sorted(path.rsplit("/", 1)[-1] for path in active_map.added_layer_files) == [
+        "districts.lyrx", "identity.lyrx", "lines.lyrx", "points.lyrx", "prosperity.lyrx", "zones.lyrx",
+    ]
+    by_name = {layer.name: layer for layer in active_map.layers}
+    assert set(by_name) == {"PermitDistricts", "PermitPoints", "PermitLines", "PermitZones", "District Prosperity", "District Identity"}
+    districts = by_name["PermitDistricts"]
+    assert districts.connectionProperties["dataset"] == "PermitDistricts"
+    assert districts.connectionProperties["connection_info"]["database"] == "/saves/game.gdb"
+    assert by_name["District Identity"].connectionProperties["dataset"] == "PermitDistricts"
+    assert all(layer.symbology.updated_renderer is None for layer in active_map.layers)
+    assert not any("unique-value" in text for text in messages.messages)
+    assert any("styled districts from districts.lyrx" in text for text in messages.messages)
+
+
+def test_ring_slot_styled_from_lyrx_without_update_renderer(monkeypatch, tmp_path):
+    """Verify a district ring swap adds its slot from the .lyrx and never rebuilds the renderer."""
+
+    from toolbox.permit_office_arcgis import geometry, symbology_config
+
+    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path)))
+    visible = FakeLayer(FieldsListRenderer())
+    visible.name = "Permit Office Predrawn 0"
+    visible.visible = True
+    visible.definitionQuery = "1=1"
+    visible.dataSource = "/saves/game.gdb/PermitDistricts"
+    active_map = FakeLyrxMap([visible])
+    monkeypatch.setattr(geometry, "arcpy", _fake_arcpy_with_layer_files(active_map))
+    monkeypatch.setattr(geometry, "_query_flip_supported", lambda: False)
+
+    geometry._apply_district_ring_redraw({"districts": "/saves/game.gdb/PermitDistricts"}, FakeMessages(), {"PermitDistricts"})
+
+    slot = next(layer for layer in active_map.layers if layer.name == "Permit Office Predrawn 1")
+    assert active_map.added_paths == []
+    assert [path.rsplit("/", 1)[-1] for path in active_map.added_layer_files] == ["districts.lyrx"]
+    assert slot.visible is True
+    assert slot.definitionQuery == "1=1"
+    assert slot.connectionProperties["dataset"] == "PermitDistricts"
+    assert all(layer.symbology.updated_renderer is None for layer in active_map.layers)
+
+
+def test_missing_lyrx_falls_back_to_code_styling(monkeypatch, tmp_path):
+    """Verify a layer whose .lyrx is not shipped yet is still added and styled in code."""
+
+    from toolbox.permit_office_arcgis import geometry, symbology_config
+
+    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path, names=("districts",))))
+    active_map = FakeLyrxMap()
+    monkeypatch.setattr(geometry, "arcpy", _fake_arcpy_with_layer_files(active_map))
+
+    geometry.add_outputs_to_map({"districts": "/saves/game.gdb/PermitDistricts", "points": "/saves/game.gdb/PermitPoints"}, FakeMessages(), layer_names={"PermitPoints", "PermitDistricts"})
+
+    by_name = {layer.name: layer for layer in active_map.layers}
+    assert active_map.added_paths == ["/saves/game.gdb/PermitPoints", "/saves/game.gdb/PermitDistricts", "/saves/game.gdb/PermitDistricts"]
+    assert by_name["PermitDistricts"].symbology.updated_renderer is None
+    assert by_name["PermitPoints"].symbology.updated_renderer == "UniqueValueRenderer"
+    assert by_name["District Prosperity"].symbology.updated_renderer == "UniqueValueRenderer"
+
+
+def test_layer_file_path_maps_keys_to_shipped_file_names(monkeypatch, tmp_path):
+    from toolbox.permit_office_arcgis import symbology_config
+
+    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path, names=("prosperity",))))
+
+    assert symbology_config.layer_file_path("district_prosperity") == str(tmp_path / "prosperity.lyrx")
+    assert symbology_config.layer_file_path("districts") is None
+    assert symbology_config.layer_file_path("unknown") is None
+
+
+def test_lyrx_layer_that_cannot_be_repointed_falls_back_to_code_styling(monkeypatch, tmp_path):
+    """Verify a .lyrx layer left on the export's data is replaced, not kept."""
+
+    from toolbox.permit_office_arcgis import geometry, symbology_config
+
+    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path, names=("points",))))
+    active_map = FakeLyrxMap()
+    monkeypatch.setattr(geometry, "arcpy", _fake_arcpy_with_layer_files(active_map))
+    monkeypatch.setattr(FakeLyrxLayer, "updateConnectionProperties", lambda self, current, new: None)
+    messages = FakeMessages()
+
+    geometry.add_outputs_to_map({"points": "/saves/game.gdb/PermitPoints"}, messages, layer_names={"PermitPoints"})
+
+    assert [layer.name for layer in active_map.layers] == ["PermitPoints"]
+    points = active_map.layers[0]
+    assert points.dataSource == "/saves/game.gdb/PermitPoints"
+    assert points.symbology.updated_renderer == "UniqueValueRenderer"
+    assert any("could not point points.lyrx" in text for text in messages.warnings)

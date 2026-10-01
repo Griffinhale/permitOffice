@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import random
@@ -15,7 +16,14 @@ from .layer_ring import DisplayLayerRing, DistrictLayerRing
 from .rules_loader import rules
 from .schema import DISTRICTS, LINES, POINTS, SUPPORT_FIELDS, ZONES
 from .store import decode_json, encode_json, read_districts, write_docket_item
-from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYMBOLS_BY_FIELD, apply_default_symbol_style, apply_symbol_style
+from .symbology_config import (
+    LAYER_TRANSPARENCY,
+    RENDER_FIELD_BY_LAYER_KEY,
+    SYMBOLS_BY_FIELD,
+    apply_default_symbol_style,
+    apply_symbol_style,
+    layer_file_path,
+)
 
 # District overlay layers reuse the PermitDistricts feature class with different
 # render fields so land-use type, prosperity, and buyout identity each get their
@@ -916,26 +924,79 @@ def add_outputs_to_map(paths, messages, layer_names=None):
         existing = {lyr.name: lyr for lyr in active_map.listLayers()}
         for name, key in [p for p in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones")) if layer_names is None or p[0] in layer_names]:
             if name not in existing:
-                lyr = active_map.addDataFromPath(paths[key])
+                lyr = _add_styled_layer(active_map, paths[key], key, messages)
                 lyr.name = name
                 existing[name] = lyr
                 _log(messages, "MAP", f"added {name}")
-            _tune_layer_visibility(existing[name], key)
-            _configure_labels(existing[name], key)
-            apply_simple_symbology(existing[name], key, messages)
+            _style_in_code(existing[name], key, messages)
         # Add the prosperity and identity overlays from the same districts source.
         if layer_names is None or DISTRICTS in layer_names:
             for name, key in ((DISTRICT_PROSPERITY, "district_prosperity"), (DISTRICT_IDENTITY, "district_identity")):
                 if name not in existing:
-                    lyr = active_map.addDataFromPath(paths["districts"])
+                    lyr = _add_styled_layer(active_map, paths["districts"], key, messages)
                     lyr.name = name
                     existing[name] = lyr
                     _log(messages, "MAP", f"added {name}")
-                _tune_layer_visibility(existing[name], key)
-                apply_simple_symbology(existing[name], key, messages)
+                _style_in_code(existing[name], key, messages)
         _order_output_layers(active_map, existing)
     except Exception as exc:
         _warn(messages, "MAP", f"add outputs failed: {exc}")
+
+
+def _add_styled_layer(active_map, data_path, layer_key, messages):
+    """Add a layer for data_path, styled from its shipped .lyrx when present.
+
+    Without a .lyrx the layer is added bare and _style_in_code styles it. If
+    the .lyrx layer cannot be pointed at this save, it is dropped and the layer
+    is added from the path and styled in code here.
+    """
+
+    layer_file = layer_file_path(layer_key)
+    if layer_file is None:
+        return active_map.addDataFromPath(data_path)
+    layer = active_map.addLayer(arcpy.mp.LayerFile(layer_file))[0]
+    if _point_layer_at(layer, data_path):
+        _log(messages, "SYM", f"styled {layer_key} from {os.path.basename(layer_file)}")
+        return layer
+    _warn(messages, "SYM", f"could not point {os.path.basename(layer_file)} at {data_path}; styling in code")
+    active_map.removeLayer(layer)
+    layer = active_map.addDataFromPath(data_path)
+    _apply_code_style(layer, layer_key, messages)
+    return layer
+
+
+def _point_layer_at(layer, data_path):
+    """Repoint a layer loaded from a .lyrx at this save's feature class.
+
+    Returns True when the layer now reads data_path. Pro can skip an update
+    that does not validate without raising, so the source is checked after.
+    """
+
+    workspace, dataset = os.path.split(data_path)
+    try:
+        current = layer.connectionProperties
+        new = copy.deepcopy(current)
+        new["dataset"] = dataset
+        new["workspace_factory"] = "File Geodatabase"
+        new.setdefault("connection_info", {})["database"] = workspace
+        layer.updateConnectionProperties(current, new)
+    except Exception:
+        return False
+    return _same_source(layer, data_path)
+
+
+def _style_in_code(layer, key, messages):
+    """Style a layer in code; a no-op for keys styled by a shipped .lyrx."""
+
+    if layer_file_path(key) is not None:
+        return
+    _apply_code_style(layer, key, messages)
+
+
+def _apply_code_style(layer, key, messages):
+    _tune_layer_visibility(layer, key)
+    _configure_labels(layer, key)
+    apply_simple_symbology(layer, key, messages)
 
 
 def remove_outputs_from_map(messages, layer_names=None):
@@ -1023,9 +1084,7 @@ def _prepare_district_display_layer(layer, messages, definition_query=None, skip
     style_hash = _district_display_style_hash(definition_query)
     if skip_if_style_matches and getattr(layer, "_permit_office_style_hash", "") == style_hash:
         return True
-    _tune_layer_visibility(layer, "districts")
-    _configure_labels(layer, "districts")
-    apply_simple_symbology(layer, "districts", messages)
+    _style_in_code(layer, "districts", messages)
     try:
         layer._permit_office_style_hash = style_hash
     except Exception:
@@ -1035,9 +1094,7 @@ def _prepare_district_display_layer(layer, messages, definition_query=None, skip
 
 def _prepare_feature_display_layer(layer, messages, layer_key, definition_query=None):
     _set_definition_query(layer, definition_query)
-    _tune_layer_visibility(layer, layer_key)
-    _configure_labels(layer, layer_key)
-    apply_simple_symbology(layer, layer_key, messages)
+    _style_in_code(layer, layer_key, messages)
 
 
 def _is_predrawn_district_layer_name(name):
@@ -1108,7 +1165,13 @@ def _rehydrate_feature_display_ring(paths, messages, layer_name):
         _prepare_feature_display_layer(layer, messages, layer_key, "1=1")
 
     try:
-        ring = DisplayLayerRing(active_map, prefix=prefix, arcpy_module=arcpy, style_copier=_copy_style)
+        ring = DisplayLayerRing(
+            active_map,
+            prefix=prefix,
+            arcpy_module=arcpy,
+            style_copier=_copy_style,
+            layer_adder=lambda path: _add_styled_layer(active_map, path, layer_key, messages),
+        )
         ring.prepare_and_swap(paths[path_key])
         _place_ring_slots_above_base(active_map)
         _hide_base_feature_layer(active_map, layer_name)
@@ -1263,7 +1326,13 @@ def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None)
             _log_redraw(messages, "district-flip", "ok", started, f"target={getattr(flipped, 'name', '')!r} {phases.summary()}")
             return
 
-    ring = DistrictLayerRing(active_map, arcpy_module=arcpy, style_copier=_copy_style, phase_marker=phases.mark)
+    ring = DistrictLayerRing(
+        active_map,
+        arcpy_module=arcpy,
+        style_copier=_copy_style,
+        phase_marker=phases.mark,
+        layer_adder=lambda path: _add_styled_layer(active_map, path, "districts", messages),
+    )
     phases.mark("ring_discovery")
     prepared = ring.prepare_and_swap(paths["districts"])
     phases.mark("prepare_visibility_swap")
