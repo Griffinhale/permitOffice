@@ -495,8 +495,12 @@ def read_districts(paths):
 
 
 @perf_traced("write_district_updates")
-def write_district_updates(paths, districts, report, affected_ids=None):
-    """Persist profiles and return whether built-in district display fields changed."""
+def write_district_updates(paths, districts, report, affected_ids=None, daily_pressure=None):
+    """Persist profiles and return whether built-in district display fields changed.
+
+    Pass ``daily_pressure`` once a day tick has written overlays this week, so
+    display_state keeps the overlay instead of reverting to the base state.
+    """
 
     affected = set(affected_ids or districts)
     # Every district row is refreshed from normalized state, while last_report is
@@ -514,6 +518,8 @@ def write_district_updates(paths, districts, report, affected_ids=None):
             profile = districts[cid]
             rules.normalize_profile(profile)
             encoded = _encode_district(profile, DISTRICT_UPDATE_CODEC, limits)
+            if daily_pressure is not None:
+                encoded["display_state"] = _daily_overlay_state(profile, max(0, min(4, int(daily_pressure.get(cid, 0) or 0))))
             display_changed |= any(values.get(field) != encoded.get(field) for field in display_fields)
             values.update(encoded)
             if cid in affected:

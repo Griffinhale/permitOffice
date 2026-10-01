@@ -1172,7 +1172,12 @@ class DashboardController:
         filed_report = _filed_report_text(result, districts)
         self._grade_dirty = True
         with perf_block("writes"):
-            district_display_changed = write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
+            # After a day tick, district rows carry daily overlays; keep them so a
+            # points-only decision does not repaint every pressured district.
+            overlay_pressure = dict(state.daily_pressure or {}) if int(getattr(state, "week_day", 0) or 0) > 0 else None
+            district_display_changed = write_district_updates(
+                self.paths, districts, result.report, result.affected_cell_ids, daily_pressure=overlay_pressure
+            )
             write_state(self.paths, state)
             write_projects(self.paths, projects)
             write_docket_item(self.paths, item)

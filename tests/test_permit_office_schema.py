@@ -649,6 +649,34 @@ def test_district_write_distinguishes_display_changes_from_report_changes(monkey
     assert store.write_district_updates(paths, board, "Another report") is False
 
 
+def test_district_write_keeps_daily_overlays_after_a_day_tick(monkeypatch):
+    """Verify a decision write keeps daily overlays instead of flipping districts."""
+
+    store, table = _district_store(monkeypatch)
+    rules = store.rules
+    paths = {"districts": "districts"}
+    store.create_district_board(paths, 2026, None)
+    board = store.read_districts(paths)
+    # D0001 has two causes: the overlay ranks hazard first, the profile ranks grievance first.
+    board["D0001"].hazards = {hazard: 2 for hazard in rules.HAZARD_TYPES}
+    board["D0001"].dissatisfaction = {group: rules.DISSATISFACTION_AGGRIEVED_THRESHOLD for group in rules.CITIZEN_GROUPS}
+    assert store.write_district_updates(paths, board, "Setup") is True
+    board = store.read_districts(paths)
+    pressure = {"D0000": 2}
+    store.write_daily_pressure_overlays(paths, board, pressure)
+    overlays = {row["cell_id"]: row["display_state"] for row in table.rows}
+    assert overlays["D0000"] == "daily_pressure"
+    assert overlays["D0001"] == "hazard"
+
+    board = store.read_districts(paths)
+    assert store.write_district_updates(paths, board, "Points-only decision", ["D0002"], daily_pressure=pressure) is False
+    assert {row["cell_id"]: row["display_state"] for row in table.rows} == overlays
+
+    # Without the overlay pressure the write reverts both districts to base state.
+    assert store.write_district_updates(paths, board, "Base write") is True
+    assert {row["cell_id"]: row["display_state"] for row in table.rows}["D0000"] != "daily_pressure"
+
+
 def test_district_read_applies_defaults_to_blank_rows(monkeypatch):
     """Verify blank district columns read back with the documented defaults."""
 

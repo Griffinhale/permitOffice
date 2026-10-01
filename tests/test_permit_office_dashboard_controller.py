@@ -2367,6 +2367,23 @@ def test_finish_decision_skips_unchanged_district_display(monkeypatch):
     assert calls == [dict(layer_names={dashboard.POINTS}, dirty_scope=None, remove_scope_override={dashboard.POINTS})]
 
 
+def test_finish_decision_passes_daily_pressure_only_after_a_day_tick(monkeypatch):
+    controller = dashboard.DashboardController({}, 'district_layer', 2026, object())
+    controller.status_var = dashboard._StatusProxy(controller)
+    item = rules.DocketItem('case', 'street_vendor_compact', 'Case', 'POINT', 1)
+    result = rules.DecisionResult(True, 'approve', item.item_id, 'Applied', affected_cell_ids=['D0000'])
+    seen = []
+    monkeypatch.setattr(dashboard, 'write_district_updates', lambda *a, **k: seen.append(k.get('daily_pressure')) or False)
+    for name in ('write_state', 'write_projects', 'write_docket_item', 'action_log', 'command_finish', 'rebuild_output_layers'):
+        monkeypatch.setattr(dashboard, name, lambda *a, **k: None)
+    monkeypatch.setattr(controller, '_record_receipt', lambda *a: None)
+    monkeypatch.setattr(controller, '_advance_triage_selection', lambda *a: None)
+    controller._finish_decision('cmd', item, rules.CityState(week_day=0), {}, {}, result)
+    controller._finish_decision('cmd', item, rules.CityState(week_day=3, daily_pressure={'D0004': 2}), {}, {}, result)
+    controller._finish_decision('cmd', item, rules.CityState(week_day=1), {}, {}, result)
+    assert seen == [None, {'D0004': 2}, {}]
+
+
 def test_clear_base_selections_skips_empty_wrong_source_and_ring(monkeypatch):
     calls = []
     def layer(name, source, selected):

@@ -139,6 +139,9 @@ lands and this check passes live.
       decision that changes a district's type, display state, prosperity, or
       identity: it logs `district-flip`. Every changed feature and district
       shows its new color, and nothing unchanged looks stale.
+- [ ] (after AR16) After a day tick, with some districts showing daily
+      pressure, make a points-only decision. It logs no `district-flip`, and the
+      daily-pressure districts keep their color until the next day tick.
 - [ ] (after AR6) Swap the district ring a few times. Every slot keeps its full
       style from the shipped `.lyrx` files: base type, prosperity, and identity
       look right, with no default single-symbol layer.
