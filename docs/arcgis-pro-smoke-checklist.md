@@ -142,6 +142,9 @@ lands and this check passes live.
 - [ ] (after AR16) After a day tick, with some districts showing daily
       pressure, make a points-only decision. It logs no `district-flip`, and the
       daily-pressure districts keep their color until the next day tick.
+- [ ] (after AR16) Show and hide the selected case's exhibit, then use Update
+      from Map. Each logs `feature-query` and no `RefreshLayer`; the map never
+      flashes white.
 - [ ] (after AR6) Swap the district ring a few times. Every slot keeps its full
       style from the shipped `.lyrx` files: base type, prosperity, and identity
       look right, with no default single-symbol layer.

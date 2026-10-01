@@ -991,13 +991,26 @@ class DashboardController:
             else:
                 target_ids = ensure_case_proposal(self.paths, item, self.seed, self.messages)
                 action = "Showed"
-            refresh_all(self.paths, self.messages)
+            self._redraw_exhibit_layer(item)
             suffix = f" for {', '.join(target_ids)}" if target_ids else ""
             self.status_var.set(f"{action} {item.title}{suffix}.")
             self.reload()
         except Exception as exc:
             self.status_var.set(f"Exhibit toggle failed: {exc}")
             _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
+
+    def _redraw_exhibit_layer(self, item):
+        """Redraw only the feature layer holding this case's exhibit.
+
+        RefreshLayer repaints the whole view (AR15), so known geometry types use
+        the feature-query redraw that points-only decisions use.
+        """
+
+        layer = _GEOM_TYPE_TO_LAYER.get(getattr(item, "geometry_type", None))
+        if layer is None:
+            refresh_all(self.paths, self.messages)
+            return
+        rebuild_output_layers(self.paths, self.messages, layer_names={layer}, remove_scope_override={layer})
 
     def update_from_map(self):
         """Replace the selected case's proposed exhibit from current map selection."""
@@ -1008,7 +1021,7 @@ class DashboardController:
         try:
             selected = selected_cell_ids(self.district_layer)
             target_ids = insert_or_replace_proposal(self.paths, item, selected, self.messages)
-            refresh_all(self.paths, self.messages)
+            self._redraw_exhibit_layer(item)
             self.status_var.set(f"Updated {item.title} from map selection: {', '.join(target_ids)}.")
             self.reload()
         except Exception as exc:

@@ -49,7 +49,9 @@ def test_update_from_map_replaces_selected_case_targets(monkeypatch):
 
     monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
     monkeypatch.setattr(dashboard, "selected_cell_ids", lambda layer: ["D0000", "D0001"])
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages: None)
+    redraws = []
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages: redraws.append("refresh_all"))
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda paths, messages, **kwargs: redraws.append(kwargs))
 
     def insert(paths, docket_item, target_ids, messages):
         """Fake proposal replacement that records target ids on the item."""
@@ -63,6 +65,32 @@ def test_update_from_map_replaces_selected_case_targets(monkeypatch):
 
     assert item.target_cell_ids == ["D0000", "D0001"]
     assert controller.status_text == "Updated Connector Corridor from map selection: D0000, D0001."
+    assert redraws == [dict(layer_names={dashboard.LINES}, remove_scope_override={dashboard.LINES})]
+
+
+def test_toggle_exhibit_redraws_only_the_exhibit_layer(monkeypatch):
+    """Verify show/hide avoids RefreshLayer, which repaints the whole map."""
+
+    item = rules.DocketItem("CASE-show", "street_vendor_compact", "Vendor", "POINT", 1, target_cell_ids=["D0000"])
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.selected_item_id = item.item_id
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda **kwargs: None
+    visible = [True]
+    redraws = []
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
+    monkeypatch.setattr(dashboard, "case_proposal_visible", lambda paths, docket_item: visible[0])
+    monkeypatch.setattr(dashboard, "hide_case_proposal", lambda paths, item_id: visible.__setitem__(0, False) or True)
+    monkeypatch.setattr(dashboard, "ensure_case_proposal", lambda paths, docket_item, seed, messages: visible.__setitem__(0, True) or ["D0000"])
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages: redraws.append("refresh_all"))
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda paths, messages, **kwargs: redraws.append(kwargs))
+
+    controller.toggle_exhibit()
+    controller.toggle_exhibit()
+
+    assert redraws == [dict(layer_names={dashboard.POINTS}, remove_scope_override={dashboard.POINTS})] * 2
+    assert controller.status_text == "Showed Vendor for D0000."
 
 
 def test_approval_restores_missing_proposal_before_spillover(monkeypatch):
