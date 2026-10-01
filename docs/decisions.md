@@ -60,12 +60,14 @@ remains a diagnostic experiment. Retired probes and why are in
 `docs/failed-experiments.md`.
 **September 30 follow-up (Pro 3.7):** a live probe found that on Pro 3.7,
 `RefreshLayer` alone does show new attribute values, and so does flipping the
-layer's `definitionQuery` between `1=1` and `2=2`. The flip had no flicker in the
-probe. On Pro 3.7+ (`QUERY_FLIP_MIN_PRO` in `geometry.py`), a district redraw now
+layer's `definitionQuery` between `1=1` and `2=2`. A later recorded probe showed
+the flip briefly drops the city shapes (labels stay, no white flash). On Pro 3.7+ (`QUERY_FLIP_MIN_PRO` in `geometry.py`), a district redraw now
 flips the visible ring slot's query instead of re-adding a layer. In live play
 the district step took 0.33-0.52 s, down from 1.1-2.3 s. Older Pro and any slot
-that reads another save still use the ring. The whole map flickers on each
-redraw in both the old and new builds, so the flip did not cause it.
+that reads another save still use the ring. The whole-map white flash seen on
+each redraw in both builds came from the points `RefreshLayer`, which repaints
+every visible layer. Feature-only decisions now toggle that layer's query
+instead.
 *(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
 reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
 later. Supersedes the earlier district-family remove+add default with a measured
