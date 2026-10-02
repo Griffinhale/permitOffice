@@ -2006,6 +2006,40 @@ def test_session_menu_anchors_to_hamburger_button():
     assert y0 == 48
 
 
+def test_session_menu_rows_and_buttons_tint_on_hover():
+    """Verify the hovered menu row and help-card button draw the selection tint, others stay plain."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    view._hover_key = "session:Scorecard"
+    canvas = _FakeCanvas()
+
+    view._draw_session_menu(canvas, 1300)
+    view._draw_session_button(canvas, 0, 0, 150, 36, "Scorecard", Palette.WATCH, lambda: None)
+    view._draw_session_button(canvas, 0, 40, 150, 76, "Help", Palette.MUTED, lambda: None)
+
+    tinted = [args for kind, args, kwargs in canvas.created if kind == "rect" and kwargs.get("fill") == Palette.SELECT]
+    assert len(tinted) == 2
+    assert tinted[1] == (0, 0, 150, 36)
+
+
+def test_wrapped_panel_text_fits_its_measured_width():
+    """Verify inbox titles wrap by measured width: no line wider than the row, a cut ends in '...'."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    view._px_measurer = _stub_measurer
+    measure = _stub_measurer(8, "bold")
+
+    lines = view._fit_lines_px("Contractor Renovation Waiver for the Old Market Row Arcade Extension", 8, "bold", 120, 2)
+
+    assert len(lines) == 2
+    assert all(measure(line) <= 120 for line in lines)
+    assert lines[-1].endswith("...")
+
+
 def test_full_draw_has_no_global_case_action_bar_targets():
     """Verify case actions are not registered in the old global toolbar zone."""
 

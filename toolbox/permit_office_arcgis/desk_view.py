@@ -629,7 +629,7 @@ class PermitDeskView:
         c.create_rectangle(x0, y0, x0 + 4, y1, fill=state_color, outline="")
         state = "ACTIVE" if selected else row.status.upper()
         c.create_text(x0 + 12, y0 + 8, text=state, anchor="nw", fill=state_color, font=self._font(Type.SMALL, "bold"))
-        title_lines = _fit_lines(row.title, max(16, (x1 - x0 - 22) // 7), 2)
+        title_lines = self._fit_lines_px(row.title, Type.SMALL, "bold", x1 - x0 - 22, 2)
         c.create_text(x0 + 12, y0 + 23, text="\n".join(title_lines), anchor="nw", fill=Palette.INK, font=self._font(Type.SMALL, "bold"), width=x1 - x0 - 22)
         self._add_target("docket", row.item_id, (x0, y0, x1, y1), lambda item_id=row.item_id: self.on_select_item(item_id))
 
@@ -965,6 +965,14 @@ class PermitDeskView:
             lines.append(line)
         return lines
 
+    def _fit_lines_px(self, text, size, weight, max_px, max_lines):
+        """Wrap text by measured width to at most ``max_lines`` lines; a cut ends in an ellipsis."""
+
+        lines = self._wrap_px(text, size, weight, max_px)
+        if len(lines) <= max_lines:
+            return lines
+        return lines[: max_lines - 1] + [self._fit_px(" ".join(lines[max_lines - 1 :]), size, weight, max_px)]
+
     def _draw_active_card(self, c, box):
         """Draw the selected application as a modern decision brief."""
 
@@ -1070,7 +1078,8 @@ class PermitDeskView:
         desc_y1 = min(note_top_limit - 12, desc_y0 + desc_h)
         if desc_y1 > desc_y0:
             c.create_rectangle(tx0, desc_y0, tx1, desc_y1, fill=Palette.CONTENT, outline=Palette.BORDER, tags=("description-block",))
-            preview_lines = _fit_lines(case.preview, max(44, (tx1 - tx0 - 22) // 8), max(1, (desc_y1 - desc_y0 - 14) // 16))
+            preview_rows = max(1, (desc_y1 - desc_y0 - 14) // self._line_h(Type.BODY))
+            preview_lines = self._fit_lines_px(case.preview, Type.BODY, "normal", tx1 - tx0 - 24, preview_rows)
             c.create_text(tx0 + 12, desc_y0 + 8, text="\n".join(preview_lines), anchor="nw", fill=Palette.MUTED, font=self._font(Type.BODY), width=tx1 - tx0 - 24)
         yy = desc_y1 + 10
         inspected = bool(case.inspection) and not case.inspection.lower().startswith("no inspection")
@@ -1080,7 +1089,7 @@ class PermitDeskView:
         if note_h >= 24:
             c.create_rectangle(tx0, yy, tx1, yy + note_h, fill=Palette.WARN_TINT if not inspected else Palette.SELECT, outline="")
             c.create_rectangle(tx0, yy, tx0 + 4, yy + note_h, fill=note_color, outline="")
-            note_lines = _fit_lines(note, max(30, (tx1 - tx0 - 24) // 7), 1 if note_h < 34 else 2)
+            note_lines = self._fit_lines_px(note, Type.BODY, "bold", tx1 - tx0 - 24, 1 if note_h < 34 else 2)
             c.create_text(tx0 + 12, yy + 8, text="\n".join(note_lines), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
 
     def _draw_case_evidence_row(self, c, box):
@@ -1251,7 +1260,7 @@ class PermitDeskView:
             if not enabled and disabled_reason:
                 c.create_text(x0 + 12, y1 - 17, text=self._fit_px(disabled_reason, Type.SMALL, "normal", label_w), anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL))
         elif y1 - y0 >= 68:
-            detail_lines = _fit_lines(detail, max(16, (x1 - x0 - 24) // 7), 3)
+            detail_lines = self._fit_lines_px(detail, Type.SMALL, "normal", impact_w_text, 3)
             _draw_impact_marker(c, impact_x0 + 14, y0 + 26, _impact_tone(detail))
             c.create_text(impact_label_x, y0 + 18, text="\n".join(detail_lines), anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL), width=impact_w_text)
             if not enabled and disabled_reason:
@@ -1292,7 +1301,7 @@ class PermitDeskView:
         if health:
             tone = _tone_color(health.tone)
             c.create_text(inner_x0, y, text="OFFICE STANDING", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
-            c.create_text(inner_x0, y + 18, text=_clip(health.value, 20), anchor="nw", fill=tone, font=self._font(Type.DISPLAY, "bold"))
+            c.create_text(inner_x0, y + 18, text=self._fit_px(health.value, Type.DISPLAY, "bold", inner_x1 - inner_x0), anchor="nw", fill=tone, font=self._font(Type.DISPLAY, "bold"))
             bar_y0 = y + 58
             pct = max(0, min(100, int(health.meter or 0)))
             c.create_rectangle(inner_x0, bar_y0, inner_x1, bar_y0 + 10, fill=Palette.METER_TRACK, outline="")
@@ -1333,7 +1342,8 @@ class PermitDeskView:
             tone = _tone_color(row.tone)
             c.create_rectangle(cx0, cy0, cx1, cy0 + cell_h, fill=Palette.SUBTLE, outline=Palette.BORDER)
             c.create_text(cx0 + 8, cy0 + 7, text=row.label.upper(), anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
-            c.create_text(cx1 - 8, cy0 + 7, text=_clip(row.value, 8), anchor="ne", fill=tone, font=self._font(Type.BODY, "bold"))
+            value_w = cx1 - cx0 - 16 - (self._text_w(row.label.upper(), Type.SMALL, "bold") or 0) - Space.S
+            c.create_text(cx1 - 8, cy0 + 7, text=self._fit_px(row.value, Type.BODY, "bold", value_w), anchor="ne", fill=tone, font=self._font(Type.BODY, "bold"))
             self._draw_sparkline(c, cx0 + 8, cy0 + 34, cx1 - 14, cy0 + 54, row.points, tone)
             c.create_text(cx1 - 8, cy0 + 54, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(Type.SMALL, "bold"))
         return y + (cell_h * 2) + gap
@@ -1386,7 +1396,7 @@ class PermitDeskView:
         for idx, (label, value) in enumerate(metrics):
             mx = x0 + idx * mw
             c.create_text(mx, y0, text=label, anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
-            c.create_text(mx, y0 + 13, text=_clip(value, 9), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
+            c.create_text(mx, y0 + 13, text=self._fit_px(value, Type.BODY, "bold", mw - Space.S), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
 
     def _draw_district_attribute_table(self, c, box):
         """Draw the live district attribute table: names, fitted rows, wheel scroll."""
@@ -1513,7 +1523,8 @@ class PermitDeskView:
         for idx, (label, color, callback) in enumerate(entries):
             ry0 = y0 + idx * row_h
             ry1 = ry0 + row_h
-            c.create_rectangle(x0, ry0, x1, ry1, fill=Palette.CONTENT, outline=Palette.BORDER)
+            hover = self._hover_key == f"session:{label}"
+            c.create_rectangle(x0, ry0, x1, ry1, fill=Palette.SELECT if hover else Palette.CONTENT, outline=Palette.BORDER)
             c.create_rectangle(x0, ry0, x0 + 5, ry1, fill=color, outline="")
             c.create_text(x0 + 14, (ry0 + ry1) // 2, text=label.upper(), anchor="w", fill=color, font=self._font(Type.SMALL, "bold"))
             self._add_target("session", label, (x0, ry0, x1, ry1), self._close_menu_callback(callback))
@@ -1530,7 +1541,8 @@ class PermitDeskView:
     def _draw_session_button(self, c, x0, y0, x1, y1, label, color, callback):
         """Draw a compact dashboard-level command button."""
 
-        c.create_rectangle(x0, y0, x1, y1, fill=Palette.CONTENT, outline=color, width=1)
+        hover = self._hover_key == f"session:{label}"
+        c.create_rectangle(x0, y0, x1, y1, fill=Palette.SELECT if hover else Palette.CONTENT, outline=color, width=1)
         c.create_text((x0 + x1) // 2, (y0 + y1) // 2, text=label.upper(), anchor="center", fill=color, font=self._font(Type.SMALL, "bold"))
         self._add_target("session", label, (x0, y0, x1, y1), callback)
 
@@ -1783,15 +1795,6 @@ def _friendly_legend_row(row):
     }
     detail = details.get((row.group, row.label), row.detail)
     return replace(row, detail=detail)
-
-
-def _fit_lines(value, line_width, max_lines):
-    """Wrap text to a bounded number of lines for fixed-size canvas panels."""
-
-    lines = wrap(" ".join(str(value or "").split()), width=line_width)
-    if len(lines) <= max_lines:
-        return lines
-    return lines[: max_lines - 1] + [_clip(f"{lines[max_lines - 1]} ...", line_width)]
 
 
 def _stamp_control(lane, color, callback, fallback):
