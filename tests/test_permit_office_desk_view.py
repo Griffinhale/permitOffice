@@ -733,10 +733,10 @@ def test_hybrid_application_workspace_draws_folder_rail_with_map_key_below_inbox
     view._draw_application_tab_content(canvas, (0, 0, 900, 620))
 
     texts = _text_values(canvas)
-    assert "INBOX" in texts
-    assert "DECISION BRIEF" in texts
-    assert "MAP KEY" in texts
-    assert "CHEAT SHEET" in texts
+    assert "Inbox" in texts
+    assert "Decision brief" in texts
+    assert "Map key" in texts
+    assert "Cheat sheet" in texts
     assert "FEATURES" in texts
     assert "DISTRICT FILLS" in texts
     assert "OVERLAYS" in texts
@@ -881,7 +881,7 @@ def test_full_dashboard_left_folder_rail_runs_single_map_cheat_sheet():
     assert map_key[0] < table[0]
     assert map_key[3] >= table[3] - 20
     texts = _text_values(canvas)
-    assert "CHEAT SHEET" in texts
+    assert "Cheat sheet" in texts
     assert "MAP STATE" not in texts
 
 
@@ -923,8 +923,8 @@ def test_filed_reports_workspace_uses_history_list_and_detail_panel():
     view._draw_application_tab_content(canvas, (0, 0, 900, 620))
 
     texts = _text_values(canvas)
-    assert "HISTORY" in texts
-    assert "REPORT DETAIL" in texts
+    assert "History" in texts
+    assert "Report detail" in texts
     assert "Week Closed" in texts
     assert "Week one report." in texts
     report_targets = [(ident, bbox) for kind, ident, bbox, _callback in view._click_targets if kind == "report"]
@@ -1534,6 +1534,52 @@ def test_district_groups_draw_no_placeholder_glyphs():
     assert not any(kind == "sparkline" and args[1] >= group_area[1] - 12 for kind, args, _kw in canvas.created)
 
 
+def test_every_panel_draws_a_pane_header():
+    """Verify each desk panel draws the same Pro-style pane header (title left, context right)."""
+
+    item, districts = _vendor_case()
+    tabs = (ReportTab("week-1", "Week Closed", "week", "week", True, "Advanced week. Economy: net +1."),)
+    expected = {
+        "applications": {"Inbox", "Map key", "Decision brief", "District attributes", "City pulse"},
+        "reports": {"History", "Map key", "Report detail", "District attributes", "City pulse"},
+    }
+    for desk_tab, titles in expected.items():
+        model = build_desk_model(rules.CityState(), districts, [item], item.item_id, report_tabs=tabs, selected_desk_tab=desk_tab)
+        view, _callbacks = _view_for_drawing(model)
+        canvas = _FakeCanvas()
+        view.canvas = canvas
+
+        view._draw(1280, 1000)
+
+        headers = [(args, kwargs) for kind, args, kwargs in canvas.created if kind == "pane-header"]
+        assert {kwargs["title"] for _args, kwargs in headers} == titles, desk_tab
+        assert len({args[3] - args[1] for args, _kwargs in headers}) == 1, desk_tab
+        title_fonts = {kwargs["font"] for kind, _args, kwargs in canvas.created if kind == "text" and kwargs.get("text") in titles}
+        assert len(title_fonts) == 1, (desk_tab, title_fonts)
+
+
+def test_history_rail_height_follows_its_rows():
+    """Verify the History list is sized to its rows and the map key takes the rest of the rail."""
+
+    item, districts = _vendor_case()
+    rail = (0, 0, 252, 860)
+    key_tops = {}
+    for count in (1, 4):
+        tabs = tuple(ReportTab(f"r{n}", f"Report {n}", "report", "approved", n == count, "Approved.") for n in range(1, count + 1))
+        model = build_desk_model(rules.CityState(), districts, [item], item.item_id, report_tabs=tabs, selected_report_id=f"r{count}", selected_desk_tab="reports")
+        view, _callbacks = _view_for_drawing(model)
+        canvas = _FakeCanvas()
+
+        view._draw_folder_rail(canvas, rail, list(model.docket_rows), item.item_id)
+
+        history = next(args for kind, args, _kw in canvas.created if kind == "history-rail")
+        rows = [bbox for kind, _ident, bbox, _cb in view._click_targets if kind == "report"]
+        assert len(rows) == count
+        assert history[3] - max(bbox[3] for bbox in rows) <= 16, count
+        key_tops[count] = next(args for kind, args, _kw in canvas.created if kind == "map-key")[1]
+    assert key_tops[1] < key_tops[4]
+
+
 def test_hybrid_layout_gives_unified_map_key_legible_block():
     """Verify the folder rail gives the unified map key a legible block."""
 
@@ -1551,7 +1597,7 @@ def test_hybrid_layout_gives_unified_map_key_legible_block():
     assert y0 > 240
     assert 300 <= y1 - y0 <= 420
     texts = _text_values(canvas)
-    assert "CHEAT SHEET" in texts
+    assert "Cheat sheet" in texts
     assert "DISTRICT FILLS" in texts
     assert "OVERLAYS" in texts
 
@@ -1649,38 +1695,6 @@ def test_application_work_stack_has_vertical_breathing_room():
     map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
     assert active[1] >= 34
     assert map_key[1] - active[3] >= 44
-
-
-def test_decision_lane_bounds_local_text_inside_narrow_card():
-    """Verify narrow hybrid lanes do not push Local text outside the card."""
-
-    item, districts = _vendor_case()
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-    lane = model.action_lanes[0]
-    view, _callbacks = _view_for_drawing(model)
-    canvas = _FakeCanvas()
-    lane_x1 = 520
-
-    view._draw_decision_lane(canvas, 240, 120, lane_x1, 200, lane)
-
-    local_texts = [
-        (args, kwargs)
-        for kind, args, kwargs in canvas.created
-        if kind == "text" and kwargs.get("text") == "Local"
-    ]
-    assert local_texts
-    local_x = local_texts[0][0][0]
-    assert 240 < local_x < lane_x1
-    bounded_texts = [
-        (args, kwargs)
-        for kind, args, kwargs in canvas.created
-        if kind == "text" and kwargs.get("width") is not None
-    ]
-    assert bounded_texts
-    for args, kwargs in bounded_texts:
-        width = kwargs["width"]
-        assert width > 0
-        assert args[0] + width <= lane_x1 - 12
 
 
 def test_inbox_rail_pins_selected_case_when_beyond_visible_cap():
@@ -1842,9 +1856,9 @@ def test_application_workspace_lists_active_and_queued_cases_in_left_inbox():
 
     target_ids = [ident for kind, ident, _bbox, _callback in view._click_targets if kind == "docket"]
     assert target_ids == ["T01-vendor", "T02", "T03", "T04"]
-    assert "INBOX" in _text_values(canvas)
+    assert "Inbox" in _text_values(canvas)
     assert "ACTIVE" in _text_values(canvas)
-    assert "DECISION BRIEF" in _text_values(canvas)
+    assert "Decision brief" in _text_values(canvas)
     assert not any(text.startswith("+") and "queued" in text for text in _text_values(canvas))
 
 
@@ -2027,7 +2041,7 @@ def test_selected_application_draws_decision_brief_lanes():
     view._draw_active_card(canvas, (0, 0, 760, 620))
 
     texts = _text_values(canvas)
-    assert "DECISION BRIEF" in texts
+    assert "Decision brief" in texts
     assert "Issue Permit" in texts
     assert "Add Conditions" in texts
     assert "Deny" in texts
@@ -2294,7 +2308,7 @@ def test_office_standing_rail_keeps_threat_tracks_in_wire_ticker_not_pulse():
     view._draw_ledger_rail(canvas, (0, 0, 260, 620))
 
     texts = _text_values(canvas)
-    assert "CITY PULSE" in texts
+    assert "City pulse" in texts
     assert "OFFICE STANDING" in texts
     assert "THREATS" not in texts
     assert not any("Service Failure" in str(text) for text in texts)
@@ -2392,7 +2406,7 @@ def test_city_pulse_labels_right_rail_as_office_context():
     view._draw_ledger_rail(canvas, (0, 0, 300, 700))
 
     texts = _text_values(canvas)
-    assert "OFFICE CONTEXT" in texts
+    assert "Office context" in texts
 
 
 def test_filed_reports_keep_attribute_table_under_report_and_pulse():
@@ -2423,7 +2437,7 @@ def test_filed_reports_keep_attribute_table_under_report_and_pulse():
 
 
 def test_filed_reports_attribute_table_aligns_with_map_key_top():
-    """Verify Filed Reports keeps the bottom table aligned to the left cheat sheet."""
+    """Verify Filed Reports keeps the bottom table beside the left cheat sheet, never above its top."""
 
     item, districts = _vendor_case()
     tabs = (ReportTab("week-1", "Week Closed", "week", "week", False, "Week one report."),)
@@ -2446,7 +2460,9 @@ def test_filed_reports_attribute_table_aligns_with_map_key_top():
     map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
     pulse = next(args for kind, args, _kwargs in canvas.created if kind == "city-pulse")
 
-    assert abs(table[1] - map_key[1]) <= 4
+    # A short History list gives the map key the rest of the rail, so the key may
+    # start above the table top, never below it.
+    assert map_key[1] <= table[1] + 4
     assert table[0] > map_key[2]
     assert table[0] < pulse[0] < table[2]
     assert table[3] >= 880
