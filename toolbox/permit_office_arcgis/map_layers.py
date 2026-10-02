@@ -482,6 +482,18 @@ def _flip_visible_district_slot(active_map, district_path, messages):
     return None
 
 
+def _flip_visible_base_district_layer(active_map, district_path, messages):
+    """Requery a visible PermitDistricts layer in place; return it, or None."""
+
+    for layer in active_map.listLayers():
+        if getattr(layer, "name", "") != DISTRICTS:
+            continue
+        if not bool(getattr(layer, "visible", False)) or not _same_source(layer, district_path):
+            return None
+        return layer if _toggle_feature_query(layer, messages, DISTRICTS) else None
+    return None
+
+
 def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None):
     started = time.perf_counter()
     phases = _PhaseTimer()
@@ -492,9 +504,14 @@ def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None)
 
     if _query_flip_supported():
         flipped = _flip_visible_district_slot(active_map, paths["districts"], messages)
+        if flipped is None:
+            # No ring slot yet (a fresh game): requery the base layer in place.
+            # Seeding a slot calls RefreshLayer, which flashes the whole map.
+            flipped = _flip_visible_base_district_layer(active_map, paths["districts"], messages)
         phases.mark("query_flip")
         if flipped is not None:
-            _hide_non_ring_district_family(active_map, keep_overlays=True)
+            if getattr(flipped, "name", "") != DISTRICTS:
+                _hide_non_ring_district_family(active_map, keep_overlays=True)
             _flip_district_overlays(active_map, paths["districts"], messages)
             _place_ring_slots_above_base(active_map)
             phases.mark("hide_base_districts")

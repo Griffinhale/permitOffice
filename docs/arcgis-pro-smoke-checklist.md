@@ -137,6 +137,10 @@ lands and this check passes live.
       above the district fill, and District Prosperity and District Identity stay
       on with updated colors. In Contents, `Permit Office Predrawn N` sits just
       above `PermitDistricts`, below Zones.
+- [ ] (after AR14, Pro 3.7+) On a brand-new game, make the first
+      district-changing decision. The log shows `path=district-flip
+      target='PermitDistricts'` with no `seed_visible_slot` or `RefreshLayer`;
+      the map does not flash white, and both overlays stay on with new colors.
 - [ ] (after AR16, Pro 3.7+) Make three decisions that change only points. Each
       logs `[REDRAW] feature-query target=...` and no `district-flip`; the map
       background never flashes white and the city stays drawn. Then make one

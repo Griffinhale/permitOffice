@@ -1190,3 +1190,44 @@ def test_support_metadata_goes_through_encode_json(monkeypatch):
 
     assert ({"note": "x" * 5000}, {"limit": 2048}) in calls
     assert all(not (isinstance(value, str) and value.startswith('{"note"')) for value in attrs)
+
+
+def test_district_redraw_flips_base_districts_in_place_when_no_ring_slot(monkeypatch, styled_adds):
+    """Verify a fresh game's first district redraw on Pro 3.7+ seeds no ring.
+
+    AR14/AR18 live run: with no ring slot yet, the ring seed called RefreshLayer
+    (whole-map white flash) and hid the prosperity/identity overlays.
+    """
+
+    calls = []
+    base = SimpleNamespace(name=geometry.DISTRICTS, visible=True, definitionQuery="", dataSource="districts")
+    overlays = [
+        SimpleNamespace(name=name, visible=True, definitionQuery="", dataSource="districts")
+        for name in (geometry.DISTRICT_PROSPERITY, geometry.DISTRICT_IDENTITY)
+    ]
+    layers = [base, *overlays]
+
+    def add_data(source):
+        calls.append(("add", source))
+        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", dataSource=source)
+        layers.append(layer)
+        return layer
+
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=layers.remove, addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+        GetInstallInfo=lambda: {"Version": "3.7"},
+    )
+    _patch_flip(monkeypatch, fake)
+    messages = CapturingMessages()
+
+    assert geometry.apply_ring_redraw(_paths(), messages, layer_names={geometry.DISTRICTS}) is True
+
+    assert calls == []
+    assert styled_adds == []
+    assert base.visible is True
+    assert base.definitionQuery == "(1=1) AND 271828=271828"
+    assert [(layer.visible, layer.definitionQuery) for layer in overlays] == [(True, "1=1"), (True, "1=1")]
+    assert any("path=district-flip" in text and "target='PermitDistricts'" in text for text in messages.messages)
+    geometry._PRO_VERSION_CACHE.clear()
