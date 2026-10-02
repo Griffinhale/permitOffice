@@ -239,3 +239,19 @@ fallback above it. On 3.7+ the first step is a query flip on the visible slot
 (see the ADR-4 follow-up). From October 1, a feature layer redrawn as part of a
 district redraw is requeried in place when it has no slot yet, instead of
 seeding a slot.
+
+### ADR-17 - The desk matches the ArcGIS Pro light theme
+**Decision:** the Tk desk uses Pro's light theme. `Palette` in `desk_view.py`
+holds named tokens sampled from a Pro 3.7 screenshot: frame `#eff0f2`, panes
+`#f7f9f8`/`#f9f9f9`, content `#ffffff`, dividers `#e3e4e6`, accent `#005daa`.
+Tone colors (good, watch, bad) pass 4.5:1 contrast on every surface. Text uses
+Segoe UI at four sizes (`Type`: 8, 9, 11, 14) and spacing comes from one scale
+(`Space`: 4/8/12/16/24). Panes are flat with 1 px borders and no drop shadows.
+The header is a light title row.
+**Why:** the desk sits beside Pro. The old dark-green theme looked like a
+different program, and its header values (green on dark green) were unreadable.
+**Rules:** no hex colors outside `Palette`. Legend swatches come from
+`symbology_config`, so the key always matches the map. Text width is measured
+with the Tk font, never estimated from character counts. Tests check header
+contrast, stray hex colors, and the number of font sizes.
+**Rejected:** ttk or another toolkit (the canvas stays); a dark theme.

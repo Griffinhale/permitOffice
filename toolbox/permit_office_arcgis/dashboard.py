@@ -48,7 +48,7 @@ from .store import (
     write_state,
 )
 from . import desk_model
-from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, ReportTab, build_desk_model, receipt_metrics
+from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, ReportTab, Type, build_desk_model, desk_font, receipt_metrics
 from .map_redraw import rebuild_output_layers
 from .redraw_plan import (
     DIRTY_DESK_ONLY,
@@ -895,23 +895,23 @@ class DashboardController:
             return
 
         pal = Palette
-        frame = tk.Frame(self.root, bg=pal.PAPER, highlightbackground=pal.INK, highlightthickness=2)
+        frame = tk.Frame(self.root, bg=pal.CONTENT, highlightbackground=pal.BORDER, highlightthickness=1)
         self._newgame_overlay = frame
-        tk.Label(frame, text="START NEW GAME", bg=pal.PAPER, fg=pal.BLUE, font=("Segoe UI", 13, "bold")).pack(padx=26, pady=(18, 6))
+        tk.Label(frame, text="START NEW GAME", bg=pal.CONTENT, fg=pal.INK, font=desk_font(Type.TITLE, "bold")).pack(padx=24, pady=(16, 8), anchor="w")
         message = (
             "Replace the current Permit Office game rows and map layers?"
             if has_saved_game(self.paths)
             else "Create Permit Office layers and start a new game."
         )
-        tk.Label(frame, text=message, bg=pal.PAPER, fg=pal.INK, font=("Segoe UI", 9), wraplength=320, justify="left").pack(padx=26, pady=(0, 12))
-        row = tk.Frame(frame, bg=pal.PAPER)
-        row.pack(padx=26)
-        tk.Label(row, text="Random seed", bg=pal.PAPER, fg=pal.MUTED, font=("Segoe UI", 9, "bold")).pack(side="left")
+        tk.Label(frame, text=message, bg=pal.CONTENT, fg=pal.INK, font=desk_font(Type.BODY), wraplength=320, justify="left").pack(padx=24, pady=(0, 12), anchor="w")
+        row = tk.Frame(frame, bg=pal.CONTENT)
+        row.pack(padx=24, anchor="w")
+        tk.Label(row, text="Random seed", bg=pal.CONTENT, fg=pal.MUTED, font=desk_font(Type.BODY, "bold")).pack(side="left")
         seed_var = tk.StringVar(value=str(self.seed))
-        entry = tk.Entry(row, textvariable=seed_var, width=12, relief="solid", bd=1, font=("Segoe UI", 10))
-        entry.pack(side="left", padx=(10, 0))
-        buttons = tk.Frame(frame, bg=pal.PAPER)
-        buttons.pack(padx=26, pady=(14, 18))
+        entry = tk.Entry(row, textvariable=seed_var, width=12, relief="solid", bd=1, font=desk_font(Type.BODY), highlightcolor=pal.ACCENT)
+        entry.pack(side="left", padx=(8, 0))
+        buttons = tk.Frame(frame, bg=pal.CONTENT)
+        buttons.pack(padx=24, pady=(16, 16), anchor="e")
 
         def _start(_event=None):
             try:
@@ -924,8 +924,8 @@ class DashboardController:
         def _cancel(_event=None):
             self._close_newgame_overlay()
 
-        tk.Button(buttons, text="START", command=_start, bg=pal.GREEN, fg=pal.PAPER, activebackground=pal.BLUE, activeforeground=pal.PAPER, relief="flat", padx=20, pady=7, font=("Segoe UI", 9, "bold")).pack(side="left", padx=6)
-        tk.Button(buttons, text="CANCEL", command=_cancel, bg=pal.MUTED, fg=pal.PAPER, activebackground=pal.INK, activeforeground=pal.PAPER, relief="flat", padx=20, pady=7, font=("Segoe UI", 9, "bold")).pack(side="left", padx=6)
+        tk.Button(buttons, text="Start", command=_start, bg=pal.ACCENT, fg=pal.CONTENT, activebackground=pal.INK, activeforeground=pal.CONTENT, relief="flat", padx=16, pady=4, font=desk_font(Type.BODY, "bold")).pack(side="left", padx=(0, 8))
+        tk.Button(buttons, text="Cancel", command=_cancel, bg=pal.CONTENT, fg=pal.INK, activebackground=pal.SUBTLE, activeforeground=pal.INK, relief="solid", bd=1, padx=16, pady=4, font=desk_font(Type.BODY)).pack(side="left")
         frame.place(relx=0.5, rely=0.5, anchor="center")
         frame.lift()
         entry.focus_set()

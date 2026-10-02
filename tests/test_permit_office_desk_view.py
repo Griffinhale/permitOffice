@@ -1262,6 +1262,85 @@ def test_map_key_rows_do_not_overlap_at_compact_and_full_heights():
         assert rows[-1][1] <= height, height
 
 
+def _relative_luminance(hex_color):
+    """Return the WCAG relative luminance of a #rrggbb color."""
+
+    channels = []
+    for index in (1, 3, 5):
+        value = int(hex_color[index : index + 2], 16) / 255
+        channels.append(value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4)
+    red, green, blue = channels
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+
+def _contrast(fg, bg):
+    """Return the WCAG contrast ratio between two #rrggbb colors."""
+
+    light, dark = sorted((_relative_luminance(fg), _relative_luminance(bg)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
+def test_header_values_meet_contrast_on_the_banner():
+    """Verify every header label and value passes 4.5:1 against the banner, for every tone."""
+
+    from dataclasses import replace
+
+    from toolbox.permit_office_arcgis.desk_model import LedgerRow
+
+    item, districts = _vendor_case()
+    base = build_desk_model(rules.CityState(), districts, [item], item.item_id, deadline_text="MON INTAKE 1:00", deadline_running=True)
+    for tone in ("good", "bad", "watch", "neutral"):
+        rows = tuple(LedgerRow(row.label, row.value, tone) if row.label in ("Week", "AP", "Money") else row for row in base.ledger_rows)
+        model = replace(base, ledger_rows=rows)
+        view, _callbacks = _view_for_drawing(model)
+        canvas = _FakeCanvas()
+
+        view._draw_top_banner(canvas, 1280, 64)
+
+        banner = next(kwargs["fill"] for kind, args, kwargs in canvas.created if kind == "rect" and args[:2] == (0, 0))
+        texts = [kwargs for kind, _args, kwargs in canvas.created if kind == "text"]
+        assert len(texts) >= 7, tone
+        for kwargs in texts:
+            assert _contrast(kwargs["fill"], banner) >= 4.5, (tone, kwargs["text"], kwargs["fill"], banner)
+
+
+def test_no_hex_color_literals_outside_palette():
+    """Verify desk colors are named Palette tokens, not stray hex literals."""
+
+    import re
+    from pathlib import Path
+
+    from toolbox.permit_office_arcgis import desk_view
+
+    source = Path(desk_view.__file__).read_text()
+    palette_start = source.index("class Palette")
+    palette_end = source.index("\nclass ", palette_start + 1)
+    outside = source[:palette_start] + source[palette_end:]
+    assert re.findall(r"#[0-9a-fA-F]{6}\b", outside) == []
+
+
+def test_desk_uses_at_most_four_font_sizes():
+    """Verify the full desk draws from one small type scale."""
+
+    item, districts = _vendor_case()
+    tabs = (ReportTab("week-1", "Week Closed", "week", "week", False, "Week one report."),)
+    models = (
+        build_desk_model(rules.CityState(), districts, [item], item.item_id, deadline_text="MON INTAKE 1:00", deadline_running=True, show_start_help=True),
+        build_desk_model(rules.CityState(), districts, [item], item.item_id, report_tabs=tabs, selected_desk_tab="reports"),
+        build_desk_model(rules.CityState(), districts, [], ""),
+    )
+    sizes = set()
+    for model in models:
+        view, _callbacks = _view_for_drawing(model)
+        view._font = PermitDeskView._font.__get__(view)
+        canvas = _FakeCanvas()
+        view.canvas = canvas
+        view._menu_open = True
+        view._draw(1280, 1000)
+        sizes |= {kwargs["font"][1] for kind, _args, kwargs in canvas.created if kind == "text"}
+    assert len(sizes) <= 4, sorted(sizes)
+
+
 def test_hybrid_layout_gives_unified_map_key_legible_block():
     """Verify the folder rail gives the unified map key a legible block."""
 
@@ -1717,7 +1796,7 @@ def test_session_menu_anchors_to_hamburger_button():
     menu_rects = [
         args
         for kind, args, kwargs in canvas.created
-        if kind == "rect" and kwargs.get("fill") == Palette.PAPER and len(args) == 4 and args[3] - args[1] > 100
+        if kind == "rect" and kwargs.get("fill") == Palette.CONTENT and len(args) == 4 and args[3] - args[1] > 100
     ]
     assert menu_rects
     x0, y0, _x1, _y1 = menu_rects[-1]
