@@ -1507,10 +1507,12 @@ def _district_table_rows(districts, selected, state=None) -> tuple[DistrictTable
     rows: list[DistrictTableRow] = []
     for profile in sorted(profiles, key=lambda p: getattr(p, "cell_id", "")):
         cell_id = getattr(profile, "cell_id", "") or ""
+        display_state = getattr(profile, "display_state", "") or "stable"
+        identity_state = getattr(profile, "identity_state", "") or "stable"
         changed = (
             int(pressure.get(cell_id, 0) or 0) > 0
-            or (getattr(profile, "display_state", "") or "stable") != "stable"
-            or (getattr(profile, "identity_state", "") or "stable") != "stable"
+            or display_state != "stable"
+            or identity_state != "stable"
             or (getattr(profile, "incident_state", "") or "none") != "none"
         )
         rows.append(
@@ -1519,8 +1521,8 @@ def _district_table_rows(districts, selected, state=None) -> tuple[DistrictTable
                 getattr(profile, "name", "") or cell_id,
                 _display(getattr(profile, "district_type", "") or "district"),
                 _display(getattr(profile, "prosperity_band", "") or "stable"),
-                _display(getattr(profile, "display_state", "") or "stable"),
-                _display(getattr(profile, "identity_state", "") or "stable"),
+                _display(display_state),
+                _display(identity_state),
                 cell_id in selected_targets,
                 changed,
             )
@@ -1695,15 +1697,15 @@ def report_sections(report, district_names=None):
         heading = next((name for leads, name in _SENTENCE_HEADINGS if sentence.startswith(leads)), None)
         if heading is None and summary:
             heading = next((name for words, name in _SENTENCE_KEYWORDS if any(word in sentence for word in words)), None)
-        if heading == "Audit":
-            if ": " not in sentence:  # audit flavor prose, not the scored line
-                heading = "Details"
-            else:
-                lead, _sep, rest = sentence.partition(": ")
-                add("Audit", lead)
-                for clause in rest.rstrip(".").split("; "):
-                    add("Audit", clause)
-                continue
+        if heading == "Audit" and ": " in sentence:
+            # The scored line: its lead, then each "; " clause, on its own line.
+            lead, _sep, rest = sentence.partition(": ")
+            add("Audit", lead)
+            for clause in rest.rstrip(".").split("; "):
+                add("Audit", clause)
+            continue
+        if heading == "Audit":  # audit flavor prose, not the scored line
+            heading = "Details"
         if heading is None and not summary:
             summary = sentence
             continue
