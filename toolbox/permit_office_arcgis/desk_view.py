@@ -252,6 +252,7 @@ class PermitDeskView:
             self._redraw_current()
             return
         self._draw_status_strip(self.canvas, box)
+        self.canvas.tag_lower("status-strip", "status-strip-top")
 
     def selected_item_id(self) -> str:
         """Return the currently rendered selected item id."""
@@ -374,6 +375,8 @@ class PermitDeskView:
         status_y0 = banner_h + gap
         self._status_strip_box = (margin, status_y0, width - margin, status_y0 + status_h)
         self._draw_status_strip(c, self._status_strip_box)
+        # Z-order mark: a ticker redraw goes back under it, below the panes, menu, and help card.
+        c.create_line(0, 0, 0, 0, state="hidden", tags=("status-strip-top",))
 
         body_y0 = status_y0 + status_h + gap
         body_y1 = height - margin

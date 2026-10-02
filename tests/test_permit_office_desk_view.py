@@ -1216,6 +1216,24 @@ def test_ticker_text_stays_inside_the_status_strip():
         assert _covered(before_label, *label_span), offset
 
 
+def test_ticker_redraw_stays_under_the_open_menu():
+    """Verify a marquee tick redraws the status strip below the open menu, not over it."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+    view._menu_open = True
+    view._draw(1180, 860)
+    menu_item = next(entry for entry in canvas.created if entry[0] == "text" and entry[2].get("text") == "NEW GAME")
+
+    view.update_status_marquee(240)
+
+    strip = [index for index, entry in enumerate(canvas.created) if "status-strip" in _tags(entry)]
+    assert strip and max(strip) < canvas.created.index(menu_item)
+
+
 def test_status_text_is_fitted_to_the_strip_by_measured_width():
     """Verify a long one-off status message never runs past the strip's right edge."""
 
@@ -1746,15 +1764,34 @@ class _FakeCanvas:
 
         return self._record("oval", args, kwargs)
 
-    def delete(self, *_args):
-        """Record canvas clearing for full-draw tests."""
+    def delete(self, tag="all"):
+        """Remove every item, or only the items carrying ``tag``."""
 
-        self.created.clear()
+        if tag == "all":
+            self.created.clear()
+        else:
+            self.created = [entry for entry in self.created if tag not in _tags(entry)]
+
+    def tag_lower(self, tag, below):
+        """Move the items carrying ``tag`` to just under the first item carrying ``below``, if any."""
+
+        moved = [entry for entry in self.created if tag in _tags(entry)]
+        rest = [entry for entry in self.created if tag not in _tags(entry)]
+        at = next((index for index, entry in enumerate(rest) if below in _tags(entry)), None)
+        if at is not None:
+            self.created = rest[:at] + moved + rest[at:]
 
     def bbox(self, _item):
         """Report no measurable box, exercising the conservative fallback."""
 
         return None
+
+
+def _tags(entry):
+    """Return the canvas tags recorded with one fake-canvas item."""
+
+    tags = entry[2].get("tags") or ()
+    return (tags,) if isinstance(tags, str) else tuple(tags)
 
 
 def test_stacker_blocks_never_overlap_or_exceed_bottom():
