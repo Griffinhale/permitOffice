@@ -7,7 +7,8 @@ these dataclasses and builders to render one frame.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import re
 from typing import Callable
 
 from .rules_loader import rules
@@ -164,6 +165,10 @@ class ReportTab:
     report: str = ""
     affected: tuple[str, ...] = ()
     metrics: tuple[tuple[str, str], ...] = ()
+    # Presentation split of `report` (see report_sections); `report` stays the
+    # joined text for anything that reads it. Held in controller memory only.
+    sections: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    summary: str = ""
 
 
 @dataclass(frozen=True)
@@ -304,16 +309,7 @@ def build_desk_model(
     selected_report_id = _resolve_selected_report_id(report_tabs, selected_report_id)
     if report_tabs and selected_report_id:
         report_tabs = tuple(
-            ReportTab(
-                tab.report_id,
-                tab.title,
-                tab.kind,
-                tab.status,
-                tab.report_id == selected_report_id,
-                tab.report,
-                tab.affected,
-                tab.metrics,
-            )
+            replace(tab, selected=tab.report_id == selected_report_id)
             for tab in report_tabs
         )
     exhibit_visible = bool(proposal_visible_by_item.get(selected_id))
@@ -375,6 +371,7 @@ def _legacy_report_tabs(receipt):
 
     if not receipt:
         return ()
+    summary, sections = report_sections(receipt.report)
     return (
         ReportTab(
             "latest",
@@ -385,6 +382,8 @@ def _legacy_report_tabs(receipt):
             receipt.report,
             receipt.affected,
             receipt.metrics,
+            sections,
+            summary,
         ),
     )
 
@@ -1605,3 +1604,98 @@ def _display(value):
 
     text = str(value or "none").replace("_", " ")
     return " ".join(word[:1].upper() + word[1:] for word in text.split())
+
+
+# Report section headings, in display order.
+REPORT_SECTION_ORDER = (
+    "City effects",
+    "Local changes",
+    "Spillover",
+    "Economy",
+    "Side effects",
+    "Docket",
+    "Standing",
+    "Details",
+    "Audit",
+)
+# Labeled sentences: label prefix -> heading. Their bodies split on "; ".
+_LABELED_SENTENCES = (
+    ("Certain effects:", None),
+    ("Exposure/side effects:", "Side effects"),
+    ("Local changes:", "Local changes"),
+    ("District tags:", "Local changes"),
+    ("Economy:", "Economy"),
+)
+# Clauses inside "Certain effects:" start a new heading by their lead words;
+# a clause with no known lead continues the previous heading.
+_CLAUSE_HEADINGS = (
+    (("affected ", "immediate city delta", "city delta", "project exposure"), "City effects"),
+    (("primary pressure", "local deltas"), "Local changes"),
+    (("spillover",), "Spillover"),
+    (("recurring budget",), "Economy"),
+)
+# Whole sentences classified by lead words (week, scorecard, and audit reports).
+_SENTENCE_HEADINGS = (
+    (("Population file:", "Project "), "Side effects"),
+    (("Carried ", "Stakeholder heat", "Local grievance files"), "Docket"),
+    (("Population drift", "New civic incident", "Displacement pressure"), "City effects"),
+    (("Office Standing", "Standing ", "Lead threat:"), "Standing"),
+    (("Audit ",), "Audit"),
+)
+# Sentences with no known lead, classified by a word anywhere in them.
+_SENTENCE_KEYWORDS = ((("buyout",), "Local changes"),)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+_DISTRICT_ID = re.compile(r"\bD\d{4}\b")
+
+
+def report_sections(report, district_names=None):
+    """Split a filed report into (summary, ((heading, lines), ...)) for display.
+
+    Pure presentation: every clause of the joined text lands in exactly one
+    section, in its original words, except that raw district ids become names
+    when ``district_names`` maps them. The first unlabeled sentence is the
+    summary.
+    """
+
+    names = dict(district_names or {})
+    text = " ".join(str(report or "").split())
+    if not text:
+        return "", ()
+    buckets: dict[str, list[str]] = {}
+
+    def add(heading, line):
+        line = line.strip().rstrip(";").strip()
+        if line:
+            line = _DISTRICT_ID.sub(lambda match: names.get(match.group(0), match.group(0)), line)
+            buckets.setdefault(heading, []).append(line[0].upper() + line[1:])
+
+    summary = ""
+    for sentence in _SENTENCE_SPLIT.split(text):
+        label = next((entry for entry in _LABELED_SENTENCES if sentence.startswith(entry[0])), None)
+        if label is not None:
+            prefix, heading = label
+            body = sentence[len(prefix):].strip().rstrip(".")
+            current = heading or "City effects"
+            for clause in body.split("; "):
+                if heading is None:
+                    current = next((name for leads, name in _CLAUSE_HEADINGS if clause.startswith(leads)), current)
+                add(current, clause)
+            continue
+        heading = next((name for leads, name in _SENTENCE_HEADINGS if sentence.startswith(leads)), None)
+        if heading is None and summary:
+            heading = next((name for words, name in _SENTENCE_KEYWORDS if any(word in sentence for word in words)), None)
+        if heading == "Audit":
+            if ": " not in sentence:  # audit flavor prose, not the scored line
+                heading = "Details"
+            else:
+                lead, _sep, rest = sentence.partition(": ")
+                add("Audit", lead)
+                for clause in rest.rstrip(".").split("; "):
+                    add("Audit", clause)
+                continue
+        if heading is None and not summary:
+            summary = sentence
+            continue
+        add(heading or "Details", sentence)
+    ordered = tuple((heading, tuple(buckets[heading])) for heading in REPORT_SECTION_ORDER if heading in buckets)
+    return summary, ordered

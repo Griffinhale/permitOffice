@@ -15,6 +15,7 @@ from .desk_model import (
     ReceiptModel,
     ReportTab,
     build_desk_model,
+    report_sections,
     _hazard_summary,
     _maintenance_summary,
     _service_gap_summary,
@@ -202,6 +203,9 @@ class PermitDeskView:
         self.canvas.bind("<Button-1>", self._on_click)
         self.canvas.bind("<Motion>", self._on_motion)
         self.canvas.bind("<Leave>", self._on_leave)
+        self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
+        self.canvas.bind("<Button-4>", self._on_mouse_wheel)
+        self.canvas.bind("<Button-5>", self._on_mouse_wheel)
 
     def render(self, model: DeskViewModel):
         """Store and draw the latest view model."""
@@ -305,6 +309,25 @@ class PermitDeskView:
             self._hover_key = hover
             self.canvas.configure(cursor="hand2" if hover else "")
             self._redraw_current()
+
+    def _on_mouse_wheel(self, event):
+        """Scroll the filed report body when the wheel turns over it."""
+
+        box = getattr(self, "_report_scroll_box", None)
+        if not box or not _inside(event.x, event.y, box):
+            return None
+        if getattr(event, "num", 0) in (4, 5):
+            steps = -1 if event.num == 4 else 1
+        else:
+            steps = -1 if getattr(event, "delta", 0) > 0 else 1
+        self._scroll_report_by(steps * 3 * self._line_h(Type.BODY))
+        self._redraw_current()
+        return "break"
+
+    def _scroll_report_by(self, dy):
+        """Move the report body scroll offset; the next draw clamps it to the content."""
+
+        self._report_scroll = max(0, int(getattr(self, "_report_scroll", 0)) + int(dy))
 
     def _on_leave(self, _event):
         """Clear hover state when the pointer leaves the canvas."""
@@ -873,7 +896,12 @@ class PermitDeskView:
             self._draw_receipt_metrics(c, bx0, y1 - 28, bx1, selected_report.metrics)
 
     def _draw_report_detail_card(self, c, box):
-        """Draw the selected filed report using the same center-detail structure."""
+        """Draw the selected filed report: title, summary, headed sections, metrics.
+
+        Sections wrap by measured width. When they are taller than the body,
+        the body scrolls with the mouse wheel; rows are drawn whole or not at
+        all, so nothing is cut off or overlaps the metric strip.
+        """
 
         x0, y0, x1, y1 = box
         if hasattr(c, "_record"):
@@ -881,24 +909,104 @@ class PermitDeskView:
         tabs = list(self.model.report_tabs or ())
         selected_report = next((tab for tab in tabs if tab.report_id == self.model.selected_report_id), tabs[-1] if tabs else None)
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.CONTENT, outline=Palette.BORDER)
-        c.create_rectangle(x0, y0, x1, y0 + 78, fill=Palette.CONTENT, outline="")
-        c.create_line(x0, y0 + 78, x1, y0 + 78, fill=Palette.BORDER)
-        pad = 22
+        c.create_line(x0, y0 + 78, x1, y0 + 78, fill=Palette.DIVIDER)
+        pad = Space.XL
         bx0 = x0 + pad
         bx1 = x1 - pad
+        self._report_scroll_box = None
         c.create_text(bx0, y0 + 18, text="REPORT DETAIL", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
         if selected_report is None:
-            c.create_text(bx0, y0 + 44, text="No filed report yet", anchor="nw", fill=Palette.INK, font=self._font(Type.DISPLAY, "bold"))
-            c.create_text(bx0, y0 + 88, text="Decisions, inspections, scorecards, and week close reports will appear here.", anchor="nw", fill=Palette.MUTED, font=self._font(Type.BODY), width=bx1 - bx0)
+            c.create_text(bx0, y0 + 40, text="No filed report yet", anchor="nw", fill=Palette.INK, font=self._font(Type.DISPLAY, "bold"))
+            c.create_text(bx0, y0 + 94, text="Decisions, inspections, scorecards, and week close reports will appear here.", anchor="nw", fill=Palette.MUTED, font=self._font(Type.BODY), width=bx1 - bx0)
             return
-        c.create_text(bx0, y0 + 40, text=self._fit_px(selected_report.title, Type.DISPLAY, "bold", bx1 - bx0 - 110), anchor="nw", fill=Palette.INK, font=self._font(Type.DISPLAY, "bold"))
-        self._draw_status_badge(c, bx1 - 104, y0 + 34, bx1, y0 + 60, selected_report.status.upper(), _status_color(selected_report.status))
-        yy = y0 + 94
-        max_lines = max(1, (y1 - yy - 72) // 18)
-        body = "\n".join(_fit_lines(selected_report.report, max(36, (bx1 - bx0) // 7), max_lines))
-        _text_bottom(c, bx0, yy, body, self._font(Type.BODY), Palette.INK, width=bx1 - bx0)
+        c.create_text(bx0, y0 + 40, text=self._fit_px(selected_report.title, Type.DISPLAY, "bold", bx1 - bx0 - 116), anchor="nw", fill=Palette.INK, font=self._font(Type.DISPLAY, "bold"))
+        self._draw_status_badge(c, bx1 - 104, y0 + 36, bx1, y0 + 62, selected_report.status.upper(), _status_color(selected_report.status))
+
+        metrics_y = y1 - 34
+        body_top = y0 + 78 + Space.L
+        body_bottom = (metrics_y - Space.M) if selected_report.metrics else (y1 - Space.M)
+        if getattr(self, "_report_scroll_id", None) != selected_report.report_id:
+            self._report_scroll_id = selected_report.report_id
+            self._report_scroll = 0
+        scrollbar_w = Space.S
+        rows = self._report_rows(selected_report, bx1 - bx0 - scrollbar_w - Space.S)
+        tops = []
+        content_h = 0
+        for _text, _size, _weight, _fill, _indent, height in rows:
+            tops.append(content_h)
+            content_h += height
+        view_h = max(1, body_bottom - body_top)
+        max_scroll = max(0, content_h - view_h)
+        # Snap to a row top so the first visible row is whole.
+        wanted = min(max(0, int(getattr(self, "_report_scroll", 0))), max_scroll)
+        offset = max((top for top in tops if top <= wanted), default=0)
+        if max_scroll and offset < wanted:
+            offset = min((top for top in tops if top >= wanted), default=offset)
+        self._report_scroll = offset
+        self._report_scroll_box = (x0, body_top, x1, body_bottom)
+        visible = [
+            body_top <= body_top + top - offset and body_top + top - offset + self._line_h(size, weight) <= body_bottom
+            for top, (_text, size, weight, _fill, _indent, _height) in zip(tops, rows)
+        ]
+        for index, (top, (text, size, weight, fill, indent, _height)) in enumerate(zip(tops, rows)):
+            # A heading shows only with its first line (bullet + text rows follow it).
+            is_heading = fill == Palette.ACCENT
+            if not visible[index] or (is_heading and not all(visible[index + 1 : index + 3])):
+                continue
+            if text:
+                c.create_text(bx0 + indent, body_top + top - offset, text=text, anchor="nw", fill=fill, font=self._font(size, weight))
+        if max_scroll:
+            track_x0 = bx1 - scrollbar_w + 2
+            c.create_rectangle(track_x0, body_top, bx1, body_bottom, fill=Palette.SUBTLE, outline="", tags=("report-scrollbar",))
+            thumb_h = max(Space.XL, int(view_h * view_h / content_h))
+            thumb_y0 = body_top + int((view_h - thumb_h) * offset / max_scroll)
+            c.create_rectangle(track_x0, thumb_y0, bx1, thumb_y0 + thumb_h, fill=Palette.BORDER, outline="", tags=("report-scrollbar",))
         if selected_report.metrics:
-            self._draw_receipt_metrics(c, bx0, y1 - 34, bx1, selected_report.metrics)
+            self._draw_receipt_metrics(c, bx0, metrics_y, bx1, selected_report.metrics)
+
+    def _report_rows(self, report, width):
+        """Return the report body as rows of (text, size, weight, fill, indent, height)."""
+
+        summary, sections = report.summary, report.sections
+        if not sections and not summary:
+            summary, sections = report_sections(report.report)
+        rows = []
+        body_h = self._line_h(Type.BODY)
+        if summary:
+            for line in self._wrap_px(summary, Type.BODY, "bold", width):
+                rows.append((line, Type.BODY, "bold", Palette.INK, 0, self._line_h(Type.BODY, "bold")))
+            rows.append(("", Type.BODY, "normal", Palette.INK, 0, Space.S))
+        bullet = "\u2022"
+        indent = Space.L
+        for heading, lines in sections:
+            rows.append((heading, Type.SMALL, "bold", Palette.ACCENT, 0, self._line_h(Type.SMALL, "bold") + 2))
+            for line in lines:
+                for index, part in enumerate(self._wrap_px(line, Type.BODY, "normal", width - indent)):
+                    if index == 0:
+                        rows.append((bullet, Type.BODY, "normal", Palette.MUTED, 2, 0))
+                    rows.append((part, Type.BODY, "normal", Palette.INK, indent, body_h))
+            rows.append(("", Type.BODY, "normal", Palette.INK, 0, Space.S))
+        return rows
+
+    def _wrap_px(self, text, size, weight, max_px):
+        """Greedy word wrap by measured pixel width; never truncates."""
+
+        words = " ".join(str(text or "").split()).split(" ")
+        measure = self._px_measurer(size, weight)
+        if measure is None:  # headless, no Tk fonts: wrap by a conservative character count
+            return wrap(" ".join(words), width=max(12, int(max_px // max(1, size))))
+        lines = []
+        line = ""
+        for word in words:
+            candidate = f"{line} {word}" if line else word
+            if measure(candidate) <= max_px or not line:
+                line = candidate
+            else:
+                lines.append(line)
+                line = word
+        if line:
+            lines.append(line)
+        return lines
 
     def _draw_active_card(self, c, box):
         """Draw the selected application as a modern decision brief."""

@@ -853,6 +853,30 @@ def test_recording_normal_decision_report_stays_on_applications():
     assert controller.selected_desk_tab == "applications"
 
 
+def test_filed_report_tab_carries_sections():
+    """Verify a filed decision report tab carries headed sections with district names."""
+
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.reload = lambda **kwargs: None
+    districts = {"D0000": _profile("D0000")}
+    districts["D0000"].name = "Market Row"
+    report = (
+        "Approved Street Vendor. Certain effects: affected 1 district(s): Market Row; immediate city delta activity +1; "
+        "primary pressure stable x1; local deltas Market Row activity +2; spillover none; recurring budget neutral. "
+        "Exposure/side effects: failure did not trigger. Local changes: D0000 act +2."
+    )
+
+    controller._record_receipt("Street Vendor", report, ["D0000"], rules.CityState(turn=2), districts=districts)
+    controller.select_report(controller.report_tabs[-1].report_id)
+
+    tab = controller.report_tabs[-1]
+    assert tab.summary == "Approved Street Vendor."
+    headings = [heading for heading, _lines in tab.sections]
+    assert headings == ["City effects", "Local changes", "Spillover", "Economy", "Side effects"]
+    local = dict(tab.sections)["Local changes"]
+    assert any("Market Row act +2" in line for line in local)
+
+
 def test_finish_decision_selects_next_open_application_and_updates_map_context(monkeypatch):
     """Verify successful decisions advance triage to the next open app."""
 

@@ -1341,6 +1341,103 @@ def test_desk_uses_at_most_four_font_sizes():
     assert len(sizes) <= 4, sorted(sizes)
 
 
+APPROVED_REPORT = (
+    "Approved Street Vendor Compact. Certain effects: affected 5 district(s): Civic Green, Cinder Yard, Old Row, +2 more; "
+    "immediate city delta activity +3, friction +1, trust +2, services +1; primary pressure service gap x3, stable x2; "
+    "local deltas Civic Green activity +7, friction +1, trust +5, services +2; Cinder Yard activity +2, trust +1, services +1; "
+    "Old Row activity +2, friction +1, trust +1; spillover Cinder Yard, Old Row, Glass Market, Glass Row gets activity +2, "
+    "friction +1, trust +1; recurring budget helps the budget later: revenue $8/week, upkeep $2/week, net $+6. "
+    "Exposure/side effects: unlicensed spillover did not trigger; estimated failure chance was 12%. "
+    "Population file: families, and homeowners are the main affected groups. Local changes: Civic Green act +7, dissat +3, "
+    "fric +1, serv +2; Cinder Yard act +2, dissat +3, serv +1, trust +1; Old Row act +2, fric +1, trust +1; +2 district(s)."
+)
+WEEK_REPORT = (
+    "Advanced week. Carried 0 item(s), expired 3 item(s). Stakeholder heat added to 3 unresolved case(s). "
+    "Economy: start $60, permit spend $12, revenue $24, upkeep $0, net +12, end $72. Population drift +104. "
+    "Civic Market entered contested buyout from North Row; natural bid cleared local leverage after weak activity and pressure. "
+    "Office Standing 57 Authorized. Lead threat: Public Anger (Cinder Yard complaints; commuters grievance 4). "
+    "District tags: Cinder Yard: Service Desert, Anger Cluster; D0003: Contested Edge."
+)
+
+
+def test_report_sections_split_a_decision_report_into_headed_sections():
+    """Verify a filed decision report splits into a summary and the five headed sections."""
+
+    from toolbox.permit_office_arcgis.desk_model import report_sections
+
+    summary, sections = report_sections(APPROVED_REPORT)
+
+    assert summary == "Approved Street Vendor Compact."
+    headings = [heading for heading, _lines in sections]
+    assert headings == ["City effects", "Local changes", "Spillover", "Economy", "Side effects"]
+    joined = " ".join(line for _heading, lines in sections for line in lines)
+    for fragment in ("activity +3", "Old Row activity +2", "Glass Row", "net $+6", "12%", "homeowners", "+2 district(s)"):
+        assert fragment in joined
+
+
+def test_report_sections_use_district_names_not_ids():
+    """Verify raw district ids in a week report become district names."""
+
+    from toolbox.permit_office_arcgis.desk_model import report_sections
+
+    summary, sections = report_sections(WEEK_REPORT, {"D0003": "Glass Market"})
+
+    lines = [line for _heading, section_lines in sections for line in section_lines]
+    assert summary == "Advanced week."
+    assert any("Glass Market: Contested Edge" in line for line in lines)
+    assert not any("D0003" in line for line in lines)
+    assert "Economy" in [heading for heading, _lines in sections]
+
+
+def _report_detail_view(report, box_h):
+    """Return (view, canvas, box) for drawing one filed report into a box of the given height."""
+
+    from toolbox.permit_office_arcgis.desk_model import report_sections
+
+    item, districts = _vendor_case()
+    summary, sections = report_sections(report)
+    tab = ReportTab("r1", "Street Vendor Compact", "report", "approved", True, report, (), (("WEEK", "1/12"),), sections=sections, summary=summary)
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id, report_tabs=(tab,), selected_report_id="r1", selected_desk_tab="reports")
+    view, _callbacks = _view_for_drawing(model)
+    view._px_measurer = _stub_measurer
+    return view, _FakeCanvas(), (0, 0, 640, box_h)
+
+
+def test_long_report_draws_every_section_with_no_ellipsis():
+    """Verify a long report draws its summary and every section heading, never cut with '...'."""
+
+    view, canvas, box = _report_detail_view(APPROVED_REPORT, 1100)
+
+    view._draw_report_detail_card(canvas, box)
+
+    texts = [text for text in _text_values(canvas) if text]
+    assert not any("..." in text for text in texts), [text for text in texts if "..." in text]
+    for heading in ("City effects", "Local changes", "Spillover", "Economy", "Side effects"):
+        assert heading in texts
+    assert "Approved Street Vendor Compact." in texts
+
+
+def test_report_detail_scrolls_instead_of_truncating():
+    """Verify a report taller than its card scrolls: nothing draws past the body, and scrolling reveals the end."""
+
+    view, canvas, box = _report_detail_view(APPROVED_REPORT, 330)
+
+    view._draw_report_detail_card(canvas, box)
+    body_top, body_bottom = view._report_scroll_box[1], view._report_scroll_box[3]
+    first = _text_values(canvas)
+    assert "Side effects" not in first
+    assert not any("..." in str(text) for text in first)
+    for kind, args, kwargs in canvas.created:
+        if kind == "text" and body_top <= args[1] < body_bottom + 40 and kwargs.get("anchor") == "nw" and kwargs.get("text") not in ("WEEK", "1/12"):
+            assert args[1] + view._line_h(kwargs["font"][1], kwargs["font"][2]) <= body_bottom, kwargs["text"]
+
+    view._scroll_report_by(10_000)
+    canvas = _FakeCanvas()
+    view._draw_report_detail_card(canvas, box)
+
+    assert "Side effects" in _text_values(canvas)
+
+
 def test_hybrid_layout_gives_unified_map_key_legible_block():
     """Verify the folder rail gives the unified map key a legible block."""
 

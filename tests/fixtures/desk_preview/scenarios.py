@@ -47,6 +47,13 @@ def _first_approvable(items):
     return items[0]
 
 
+def _sections(report, districts):
+    """Return (sections, summary) built the way the controller builds them."""
+
+    summary, sections = dashboard._report_tab_sections(report, districts)
+    return sections, summary
+
+
 def applications_mid_week():
     """Applications tab mid-week with an inspected, selected case."""
 
@@ -75,9 +82,9 @@ def filed_reports_long():
     neighbours = [cid for cid in sorted(districts) if cid not in item.target_cell_ids][:4]
     result = rules.resolve_decision(state, item, districts, "approve", item.target_cell_ids, neighbours, seed=SEED)
     decision_text = dashboard._filed_report_text(result, districts)
-    decision_tab = ReportTab("report-1", item.title, "report", dashboard._report_status(decision_text), False, decision_text, tuple(result.affected_cell_ids), receipt_metrics(state))
+    decision_tab = ReportTab("report-1", item.title, "report", dashboard._report_status(decision_text), False, decision_text, tuple(result.affected_cell_ids), receipt_metrics(state), *_sections(decision_text, districts))
     week = rules.advance_turn_result(state, items, districts)
-    week_tab = ReportTab("week-1", "Week Closed", "week", "week", False, week.report, (), receipt_metrics(state))
+    week_tab = ReportTab("week-1", "Week Closed", "week", "week", False, week.report, (), receipt_metrics(state), *_sections(week.report, districts))
     next_items = rules.generate_docket(state.turn, seed=SEED, state=state, districts=districts)
     tabs = (week_tab, decision_tab)
     return build_desk_model(
@@ -103,7 +110,7 @@ def final_audit():
     state.status = "complete"
     grade, card = rules.scorecard(state, districts, (), items)
     report = dashboard._final_audit_report(grade, card)
-    tab = ReportTab("scorecard-1", f"Final Audit: {grade}", "scorecard", "scorecard", True, report, (), receipt_metrics(state))
+    tab = ReportTab("scorecard-1", f"Final Audit: {grade}", "scorecard", "scorecard", True, report, (), receipt_metrics(state), *_sections(report, districts))
     return build_desk_model(
         state,
         districts,

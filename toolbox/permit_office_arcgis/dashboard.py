@@ -8,6 +8,7 @@ import traceback
 import threading
 from concurrent import futures as concurrent_futures
 from copy import deepcopy
+from dataclasses import replace
 
 import arcpy
 
@@ -48,6 +49,7 @@ from .store import (
     write_state,
 )
 from . import desk_model
+from .desk_model import report_sections
 from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, ReportTab, Type, build_desk_model, desk_font, receipt_metrics
 from .map_redraw import rebuild_output_layers
 from .redraw_plan import (
@@ -572,7 +574,7 @@ class DashboardController:
         self._ticker_index = 0
         self.view.render(model)
 
-    def _record_receipt(self, title, report, affected, state):
+    def _record_receipt(self, title, report, affected, state, districts=None):
         """Store the latest filed report for the inline receipt panel (no popup)."""
 
         receipt = ReceiptModel(
@@ -583,6 +585,7 @@ class DashboardController:
         )
         self.last_receipt = receipt
         report_id = self._next_report_id("report", state)
+        summary, sections = _report_tab_sections(report, districts)
         tab = ReportTab(
             report_id=report_id,
             title=title,
@@ -592,6 +595,8 @@ class DashboardController:
             report=report,
             affected=receipt.affected,
             metrics=receipt.metrics,
+            sections=sections,
+            summary=summary,
         )
         self.report_tabs = [self._unselect_report(tab) for tab in self.report_tabs] + [tab]
         self.selected_report_id = report_id
@@ -617,7 +622,8 @@ class DashboardController:
                 existing_id = tab.report_id
                 break
         report_id = existing_id or self._next_report_id("scorecard", state)
-        scorecard_tab = ReportTab(report_id, title, "scorecard", "scorecard", True, report, (), receipt.metrics)
+        summary, sections = _report_tab_sections(report)
+        scorecard_tab = ReportTab(report_id, title, "scorecard", "scorecard", True, report, (), receipt.metrics, sections, summary)
         tabs = [self._unselect_report(tab) for tab in self.report_tabs if tab.report_id != report_id]
         self.report_tabs = tabs + [scorecard_tab]
         self.selected_report_id = report_id
@@ -631,7 +637,7 @@ class DashboardController:
         return f"{kind}-w{week}-{self._report_counter}"
 
     def _unselect_report(self, tab):
-        return ReportTab(tab.report_id, tab.title, tab.kind, tab.status, False, tab.report, tab.affected, tab.metrics)
+        return replace(tab, selected=False)
 
     def _sync_report_week(self, state):
         week = int(getattr(state, "turn", 0) or 0)
@@ -657,7 +663,7 @@ class DashboardController:
         self.selected_report_id = report_id
         self.selected_desk_tab = "reports"
         self.report_tabs = [
-            ReportTab(tab.report_id, tab.title, tab.kind, tab.status, tab.report_id == report_id, tab.report, tab.affected, tab.metrics)
+            replace(tab, selected=tab.report_id == report_id)
             for tab in self.report_tabs
         ]
         for tab in self.report_tabs:
@@ -1086,7 +1092,7 @@ class DashboardController:
                     action_log(self.paths, state, result)
                     command_finish(self.paths, command_id, result.command_status, result.report)
                 self.status_var.set(result.report)
-                self._record_receipt(item.title, result.report, result.affected_cell_ids, state)
+                self._record_receipt(item.title, result.report, result.affected_cell_ids, state, districts)
                 # Only `state` is fully persisted by inspect (districts and active
                 # features are read but not written), so only it is safe to reuse.
                 reload_kwargs = {"state": state}
@@ -1250,7 +1256,7 @@ class DashboardController:
             rebuild_output_layers(self.paths, self.messages, layer_names=layer_names, dirty_scope=DIRTY_DISTRICTS)
         self.district_layer = DISTRICTS
         self.status_var.set(filed_report)
-        self._record_receipt(item.title, filed_report, result.affected_cell_ids, state)
+        self._record_receipt(item.title, filed_report, result.affected_cell_ids, state, districts)
         self._advance_triage_selection(item.item_id)
 
     def _advance_triage_selection(self, resolved_item_id):
@@ -1331,7 +1337,7 @@ class DashboardController:
                     self.status_var.set(f"{prefix}{final_report}")
                     self._deadline_running = False
                 else:
-                    self._record_week_report("Week Closed", report, state)
+                    self._record_week_report("Week Closed", report, state, districts)
                     self.status_var.set(f"{prefix}{report}")
                 self._deadline_week = 0
                 self._deadline_started = 0.0
@@ -1347,13 +1353,14 @@ class DashboardController:
                 with perf_block("reload"):
                     self.reload(**reload_kwargs)
 
-    def _record_week_report(self, title, report, state):
+    def _record_week_report(self, title, report, state, districts=None):
         """Store the week-close report as the first report in the new week."""
 
         receipt = ReceiptModel(title=title, report=report, affected=(), metrics=receipt_metrics(state))
         self.last_receipt = receipt
         report_id = self._next_report_id("week", state)
-        tab = ReportTab(report_id, title, "week", "week", True, report, (), receipt.metrics)
+        summary, sections = _report_tab_sections(report, districts)
+        tab = ReportTab(report_id, title, "week", "week", True, report, (), receipt.metrics, sections, summary)
         self.report_tabs = [tab]
         self.selected_report_id = report_id
         self.selected_desk_tab = "reports"
@@ -1370,6 +1377,13 @@ def _pressure_status_text(target_day, pressure):
     day_label = WORK_WEEK_DAYS[day_index][0].split()[0].title()
     noun = "district" if active_count == 1 else "districts"
     return f"{day_label}: {active_count} {noun} pressure rising."
+
+
+def _report_tab_sections(report, districts=None):
+    """Return (summary, sections) for a report tab, naming districts instead of ids."""
+
+    names = {cid: getattr(profile, "name", "") or cid for cid, profile in (districts or {}).items()}
+    return report_sections(report, names)
 
 
 def _filed_report_text(result, districts=None):
