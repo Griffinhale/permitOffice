@@ -225,6 +225,7 @@ class DistrictTableRow:
     pressure: str
     community: str
     selected: bool = False
+    changed: bool = False
 
 
 @dataclass(frozen=True)
@@ -317,7 +318,7 @@ def build_desk_model(
     map_legend_rows = _map_legend_rows(districts, active_items, selected_id)
     case_map_symbols = _case_map_symbols(selected, active_features)
     district_group_rows = _district_group_rows(districts)
-    district_table_rows = _district_table_rows(districts, selected)
+    district_table_rows = _district_table_rows(districts, selected, state)
     return DeskViewModel(
         docket_rows,
         selected_id,
@@ -1479,7 +1480,7 @@ def _district_group_rows(districts) -> tuple[DistrictGroupRow, ...]:
         else:
             state, tone = "Stable", "good"
         symbol = DISTRICT_TYPE_SYMBOLS.get(district_type)
-        trend = "down" if tone == "bad" else "flat" if tone == "good" else "unknown"
+        # No week-over-week district history is kept, so groups carry no trend.
         rows.append(
             DistrictGroupRow(
                 _display(district_type),
@@ -1488,21 +1489,30 @@ def _district_group_rows(districts) -> tuple[DistrictGroupRow, ...]:
                 tone,
                 score,
                 _symbol_hex(symbol),
-                trend,
-                _spark_points(score, trend),
             )
         )
     return tuple(sorted(rows, key=lambda row: (row.meter, row.label)))
 
 
-def _district_table_rows(districts, selected) -> tuple[DistrictTableRow, ...]:
-    """Build the bottom live-attribute table rows from district profiles."""
+def _district_table_rows(districts, selected, state=None) -> tuple[DistrictTableRow, ...]:
+    """Build the live-attribute table rows: case targets, then changed districts, then the rest.
+
+    "Changed this week" uses what the model holds: this week's daily pressure,
+    or a display, identity, or incident state other than the resting one.
+    """
 
     profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
     selected_targets = set(getattr(selected, "target_cell_ids", ()) or ())
+    pressure = dict(getattr(state, "daily_pressure", None) or {})
     rows: list[DistrictTableRow] = []
     for profile in sorted(profiles, key=lambda p: getattr(p, "cell_id", "")):
         cell_id = getattr(profile, "cell_id", "") or ""
+        changed = (
+            int(pressure.get(cell_id, 0) or 0) > 0
+            or (getattr(profile, "display_state", "") or "stable") != "stable"
+            or (getattr(profile, "identity_state", "") or "stable") != "stable"
+            or (getattr(profile, "incident_state", "") or "none") != "none"
+        )
         rows.append(
             DistrictTableRow(
                 cell_id,
@@ -1512,9 +1522,10 @@ def _district_table_rows(districts, selected) -> tuple[DistrictTableRow, ...]:
                 _display(getattr(profile, "display_state", "") or "stable"),
                 _display(getattr(profile, "identity_state", "") or "stable"),
                 cell_id in selected_targets,
+                changed,
             )
         )
-    return tuple(rows[:8])
+    return tuple(sorted(rows, key=lambda row: (not row.selected, not row.changed)))
 
 
 def _permit_state_label(status) -> str:

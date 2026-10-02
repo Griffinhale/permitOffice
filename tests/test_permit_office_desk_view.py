@@ -1438,6 +1438,102 @@ def test_report_detail_scrolls_instead_of_truncating():
     assert "Side effects" in _text_values(canvas)
 
 
+def _full_city_model(target_ids=("D0203",), state=None):
+    """Return a desk model for a generated 25-district city with one targeted case."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
+    item = rules.DocketItem("T01", "street_vendor_compact", "Street Vendor Compact", "POINT", 1, target_cell_ids=list(target_ids))
+    return build_desk_model(state or rules.CityState(), districts, [item], item.item_id), districts
+
+
+def _table_row_rects(canvas, box):
+    """Return the table body row rectangles (wide rows starting at the inner edge, minus the header) in draw order."""
+
+    x0, _y0, x1, _y1 = box
+    return [args for kind, args, _kw in canvas.created if kind == "rect" and args[0] == x0 + 12 and args[2] - args[0] > (x1 - x0) // 2 and args[3] - args[1] < 40][1:]
+
+
+def test_district_table_draws_names_and_fills_its_box():
+    """Verify the table names districts (no raw ids), shows every row that fits, and stops its grid at the last row."""
+
+    import re
+
+    model, districts = _full_city_model()
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    box = (0, 0, 900, 420)
+
+    view._draw_district_attribute_table(canvas, box)
+
+    texts = [text for text in _text_values(canvas) if text]
+    assert not any(re.fullmatch(r"D\d{4}", text) for text in texts)
+    assert districts["D0203"].name in texts
+    rows = _table_row_rects(canvas, box)
+    row_h = rows[0][3] - rows[0][1]
+    assert len(model.district_table_rows) == len(districts)
+    assert len(rows) > 8
+    assert box[3] - 10 - rows[-1][3] < row_h
+    grid_bottoms = {args[3] for kind, args, _kw in canvas.created if kind == "line" and args[0] == args[2]}
+    assert grid_bottoms == {rows[-1][3]}
+
+
+def test_district_table_orders_targets_then_changed_districts():
+    """Verify targets come first, then districts that changed this week, then the rest."""
+
+    state = rules.CityState()
+    state.daily_pressure = {"D0401": 2}
+    districts_seed = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
+    for profile in districts_seed.values():
+        profile.display_state = "stable"
+        profile.identity_state = "stable"
+        profile.incident_state = "none"
+    districts_seed["D0302"].display_state = "service_gap"
+    item = rules.DocketItem("T01", "street_vendor_compact", "Street Vendor Compact", "POINT", 1, target_cell_ids=["D0203"])
+
+    model = build_desk_model(state, districts_seed, [item], item.item_id)
+
+    order = [row.district for row in model.district_table_rows]
+    assert order[0] == "D0203"
+    assert set(order[1:3]) == {"D0302", "D0401"}
+    assert order[3:] == sorted(order[3:])
+
+
+def test_district_table_scrolls_when_rows_overflow():
+    """Verify the table scrolls to rows that do not fit instead of hiding them."""
+
+    model, districts = _full_city_model()
+    view, _callbacks = _view_for_drawing(model)
+    box = (0, 0, 900, 260)
+    last_name = model.district_table_rows[-1].name
+
+    canvas = _FakeCanvas()
+    view._draw_district_attribute_table(canvas, box)
+    assert last_name not in _text_values(canvas)
+
+    view._scroll_table_by(len(districts))
+    canvas = _FakeCanvas()
+    view._draw_district_attribute_table(canvas, box)
+    assert last_name in _text_values(canvas)
+
+
+def test_district_groups_draw_no_placeholder_glyphs():
+    """Verify District Groups draws each state word and no '?' or made-up trend line."""
+
+    model, _districts = _full_city_model()
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_ledger_rail(canvas, (0, 0, 300, 900))
+
+    texts = _text_values(canvas)
+    assert "?" not in texts
+    for row in model.district_group_rows:
+        assert row.points == ()
+        assert row.state in texts
+    group_area = next(args for kind, args, _kw in canvas.created if kind == "group-swatch")
+    assert not any(kind == "sparkline" and args[1] >= group_area[1] - 12 for kind, args, _kw in canvas.created)
+
+
 def test_hybrid_layout_gives_unified_map_key_legible_block():
     """Verify the folder rail gives the unified map key a legible block."""
 

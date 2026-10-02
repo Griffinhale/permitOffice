@@ -311,16 +311,20 @@ class PermitDeskView:
             self._redraw_current()
 
     def _on_mouse_wheel(self, event):
-        """Scroll the filed report body when the wheel turns over it."""
+        """Scroll the filed report body or the district table under the pointer."""
 
-        box = getattr(self, "_report_scroll_box", None)
-        if not box or not _inside(event.x, event.y, box):
-            return None
         if getattr(event, "num", 0) in (4, 5):
             steps = -1 if event.num == 4 else 1
         else:
             steps = -1 if getattr(event, "delta", 0) > 0 else 1
-        self._scroll_report_by(steps * 3 * self._line_h(Type.BODY))
+        report_box = getattr(self, "_report_scroll_box", None)
+        table_box = getattr(self, "_table_scroll_box", None)
+        if report_box and _inside(event.x, event.y, report_box):
+            self._scroll_report_by(steps * 3 * self._line_h(Type.BODY))
+        elif table_box and _inside(event.x, event.y, table_box):
+            self._scroll_table_by(steps * 3)
+        else:
+            return None
         self._redraw_current()
         return "break"
 
@@ -1462,8 +1466,9 @@ class PermitDeskView:
             y += 18
             group_rows = tuple(self.model.district_group_rows)
             available = max(0, y1 - 14 - y)
-            row_gap = 8 if len(group_rows) <= 4 else 6
-            row_h = 56 if len(group_rows) <= 4 else max(30, min(56, (available - row_gap * max(0, len(group_rows) - 1)) // max(1, len(group_rows))))
+            row_gap = 6
+            content_h = 5 + self._line_h(Type.SMALL, "bold") + self._line_h(Type.SMALL) + 6
+            row_h = max(30, min(content_h, (available - row_gap * max(0, len(group_rows) - 1)) // max(1, len(group_rows))))
             for row in group_rows:
                 if y + row_h > y1 - 14:
                     break
@@ -1519,20 +1524,25 @@ class PermitDeskView:
         return y + (cell_h * 2) + gap
 
     def _draw_group_row(self, c, x0, x1, y, row, row_h=46):
-        """Draw one district group health row."""
+        """Draw one district group: swatch, name, state word, detail, and a trend only when known."""
 
         tone = _tone_color(row.tone)
         c.create_rectangle(x0, y, x1, y + row_h, fill=Palette.SUBTLE, outline=Palette.BORDER)
         if hasattr(c, "_record"):
             c._record("group-swatch", (x0 + 8, y + 10, x0 + 18, y + 20), {})
         c.create_rectangle(x0 + 8, y + 10, x0 + 18, y + 20, fill=row.swatch or Palette.BORDER, outline=Palette.BORDER)
-        c.create_text(x0 + 26, y + 5, text=self._fit_px(row.label, Type.SMALL, "bold", (x1 - x0) // 2), anchor="nw", fill=Palette.INK, font=self._font(Type.SMALL, "bold"))
-        spark_y0 = y + 12
-        spark_y1 = max(spark_y0 + 8, min(y + row_h - 8, y + 38))
-        self._draw_sparkline(c, x1 - 96, spark_y0, x1 - 22, spark_y1, row.points, tone)
-        c.create_text(x1 - 8, y + 5, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(Type.SMALL, "bold"))
-        detail_y = y + (20 if row_h < 40 else 22)
-        c.create_text(x0 + 26, detail_y, text=self._fit_px(row.detail, Type.SMALL, "normal", x1 - x0 - 120), anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL))
+        state_w = self._text_w(row.state, Type.SMALL, "bold") or 56
+        label_w = x1 - x0 - 26 - state_w - Space.M
+        c.create_text(x0 + 26, y + 5, text=self._fit_px(row.label, Type.SMALL, "bold", label_w), anchor="nw", fill=Palette.INK, font=self._font(Type.SMALL, "bold"))
+        c.create_text(x1 - 8, y + 5, text=row.state, anchor="ne", fill=tone, font=self._font(Type.SMALL, "bold"))
+        detail_y = y + 5 + self._line_h(Type.SMALL, "bold")
+        detail_w = x1 - x0 - 34
+        known_trend = (row.trend or "").lower() in ("up", "down", "flat")
+        if len(tuple(row.points or ())) >= 2 and known_trend:
+            self._draw_sparkline(c, x1 - 96, detail_y + 2, x1 - 22, min(y + row_h - 6, detail_y + 14), row.points, tone)
+            detail_w -= 100
+        if detail_y + self._line_h(Type.SMALL) <= y + row_h:
+            c.create_text(x0 + 26, detail_y, text=self._fit_px(row.detail, Type.SMALL, "normal", detail_w), anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL))
         return y + row_h
 
     def _draw_sparkline(self, c, x0, y0, x1, y1, points, color):
@@ -1541,8 +1551,7 @@ class PermitDeskView:
         if hasattr(c, "_record"):
             c._record("sparkline", (x0, y0, x1, y1), {})
         pts = tuple(points or ())
-        if len(pts) < 2:
-            c.create_text(x1, y0, text="?", anchor="ne", fill=color, font=self._font(Type.SMALL, "bold"))
+        if len(pts) < 2:  # no history: draw nothing rather than a placeholder
             return
         width = max(1, x1 - x0)
         height = max(1, y1 - y0)
@@ -1580,62 +1589,81 @@ class PermitDeskView:
             c.create_text(mx, y0 + 13, text=_clip(value, 9), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
 
     def _draw_district_attribute_table(self, c, box):
-        """Draw the bottom live district attribute table from the wireframe."""
+        """Draw the live district attribute table: names, fitted rows, wheel scroll."""
 
         x0, y0, x1, y1 = box
         if hasattr(c, "_record"):
             c._record("district-table", (x0, y0, x1, y1), {})
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.CONTENT, outline=Palette.BORDER)
-        pad = 12
+        pad = Space.M
         inner_x0 = x0 + pad
         inner_x1 = x1 - pad
         c.create_text(inner_x0, y0 + 10, text="DISTRICT ATTRIBUTES", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
         c.create_text(inner_x1, y0 + 10, text="LIVE MAP STATE", anchor="ne", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
         header_y = y0 + 34
-        row_y = header_y + 22
+        header_h = 20
+        row_y = header_y + header_h + 2
         cols = (
-            ("District", 0.00, 0.16),
-            ("Type", 0.16, 0.30),
-            ("Prosperity", 0.30, 0.47),
-            ("Pressure", 0.47, 0.66),
+            ("District", 0.00, 0.20),
+            ("Type", 0.20, 0.33),
+            ("Prosperity", 0.33, 0.48),
+            ("Pressure", 0.48, 0.66),
             ("Community", 0.66, 0.84),
             ("Target", 0.84, 1.00),
         )
-        width = max(1, inner_x1 - inner_x0)
-        c.create_rectangle(inner_x0, header_y, inner_x1, header_y + 20, fill=Palette.SUBTLE, outline=Palette.BORDER)
+        rows = list(self.model.district_table_rows)
+        row_h = self._line_h(Type.SMALL) + Space.S + 2
+        bottom = y1 - 10
+        visible_count = max(1, (bottom - row_y) // row_h) if rows else 0
+        max_scroll = max(0, len(rows) - visible_count)
+        first = min(max(0, int(getattr(self, "_table_scroll", 0))), max_scroll)
+        self._table_scroll = first
+        self._table_scroll_box = (x0, row_y, x1, bottom)
+        scrollbar_w = Space.S if max_scroll else 0
+        table_x1 = inner_x1 - scrollbar_w
+        width = max(1, table_x1 - inner_x0)
+        shown = rows[first : first + visible_count]
+        last_y = row_y + len(shown) * row_h
+        c.create_rectangle(inner_x0, header_y, table_x1, header_y + header_h, fill=Palette.SUBTLE, outline=Palette.BORDER)
         for label, start, end in cols:
-            cx = inner_x0 + int(width * start) + 8
-            c.create_text(cx, header_y + 5, text=label.upper(), anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
+            cx = inner_x0 + int(width * start) + Space.S
+            c.create_text(cx, header_y + 4, text=label.upper(), anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
             if end < 1.0:
                 line_x = inner_x0 + int(width * end)
-                c.create_line(line_x, header_y, line_x, y1 - 10, fill=Palette.BORDER)
-
-        rows = list(self.model.district_table_rows)
-        available_h = max(0, y1 - row_y - 10)
-        row_h = 22 if available_h < 120 else 24
-        visible_count = max(1, min(len(rows), available_h // row_h)) if rows else 0
-        for index, row in enumerate(rows[:visible_count]):
+                c.create_line(line_x, header_y, line_x, last_y, fill=Palette.BORDER)
+        for index, row in enumerate(shown):
             ry0 = row_y + index * row_h
-            ry1 = min(y1 - 10, ry0 + row_h)
-            fill = Palette.SELECT if row.selected else Palette.CONTENT if index % 2 == 0 else Palette.SUBTLE
-            c.create_rectangle(inner_x0, ry0, inner_x1, ry1, fill=fill, outline=Palette.BORDER)
+            ry1 = ry0 + row_h
+            fill = Palette.SELECT if row.selected else Palette.CONTENT if (first + index) % 2 == 0 else Palette.SUBTLE
+            c.create_rectangle(inner_x0, ry0, table_x1, ry1, fill=fill, outline=Palette.BORDER)
             if row.selected:
                 c.create_rectangle(inner_x0, ry0, inner_x0 + 4, ry1, fill=Palette.ACCENT, outline="")
             values = (
-                row.district,
+                row.name,
                 row.district_type,
                 row.prosperity,
                 row.pressure,
                 row.community,
-                "TARGET" if row.selected else "",
+                "Target" if row.selected else "",
             )
+            text_y = ry0 + (row_h - self._line_h(Type.SMALL)) // 2
             for value, (_label, start, end) in zip(values, cols):
-                cx = inner_x0 + int(width * start) + 8
+                cx = inner_x0 + int(width * start) + Space.S
                 max_w = max(28, int(width * (end - start)) - 14)
-                font = self._font(Type.SMALL, "bold") if row.selected and start == 0.0 else self._font(Type.SMALL)
-                c.create_text(cx, ry0 + 5, text=self._fit_px(value, Type.SMALL, "bold" if row.selected and start == 0.0 else "normal", max_w), anchor="nw", fill=Palette.INK, font=font)
-        if rows and visible_count < len(rows):
-            c.create_text(inner_x1, y1 - 18, text=f"+{len(rows) - visible_count} more", anchor="ne", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
+                weight = "bold" if row.selected and start == 0.0 else "normal"
+                c.create_text(cx, text_y, text=self._fit_px(value, Type.SMALL, weight, max_w), anchor="nw", fill=Palette.INK, font=self._font(Type.SMALL, weight))
+        if max_scroll:
+            track_x0 = inner_x1 - scrollbar_w + 2
+            track_h = max(1, bottom - row_y)
+            c.create_rectangle(track_x0, row_y, inner_x1, bottom, fill=Palette.SUBTLE, outline="", tags=("table-scrollbar",))
+            thumb_h = max(Space.XL, track_h * visible_count // len(rows))
+            thumb_y0 = row_y + (track_h - thumb_h) * first // max_scroll
+            c.create_rectangle(track_x0, thumb_y0, inner_x1, thumb_y0 + thumb_h, fill=Palette.BORDER, outline="", tags=("table-scrollbar",))
+
+    def _scroll_table_by(self, rows):
+        """Move the district table scroll by whole rows; the next draw clamps it."""
+
+        self._table_scroll = max(0, int(getattr(self, "_table_scroll", 0)) + int(rows))
 
     def _draw_menu_button(self, c, x0, y0, x1, y1):
         """Draw the compact utility menu trigger."""
