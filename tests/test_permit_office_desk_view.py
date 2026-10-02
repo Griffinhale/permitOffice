@@ -14,6 +14,7 @@ from toolbox.permit_office_arcgis.desk_view import (
     _maintenance_summary,
     _service_gap_summary,
     build_desk_model,
+    report_sections,
 )
 
 
@@ -1187,8 +1188,8 @@ def _marquee_mask_report(view, canvas, strip):
     return text_span, masks(text_index, len(created)), label_span, masks(text_index, label_index)
 
 
-def test_ticker_text_stays_inside_the_status_strip():
-    """Verify marquee text outside the strip, or under STATUS, is masked at every offset."""
+def _status_strip_view():
+    """Return (view, canvas, strip box) for drawing only the status strip with stub font metrics."""
 
     item, districts = _vendor_case()
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
@@ -1198,6 +1199,13 @@ def test_ticker_text_stays_inside_the_status_strip():
     view.canvas = canvas
     strip = (20, 78, 620, 106)
     view._status_strip_box = strip
+    return view, canvas, strip
+
+
+def test_ticker_text_stays_inside_the_status_strip():
+    """Verify marquee text outside the strip, or under STATUS, is masked at every offset."""
+
+    view, canvas, strip = _status_strip_view()
 
     for offset in (0, 150, 420, 900, 2400):
         canvas.created.clear()
@@ -1211,14 +1219,7 @@ def test_ticker_text_stays_inside_the_status_strip():
 def test_status_text_is_fitted_to_the_strip_by_measured_width():
     """Verify a long one-off status message never runs past the strip's right edge."""
 
-    item, districts = _vendor_case()
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-    view, _callbacks = _view_for_drawing(model)
-    view._px_measurer = _stub_measurer
-    canvas = _FakeCanvas()
-    view.canvas = canvas
-    strip = (20, 78, 620, 106)
-    view._status_strip_box = strip
+    view, canvas, strip = _status_strip_view()
 
     view.update_status_strip("Decision filed. " * 30)
 
@@ -1363,8 +1364,6 @@ WEEK_REPORT = (
 def test_report_sections_split_a_decision_report_into_headed_sections():
     """Verify a filed decision report splits into a summary and the five headed sections."""
 
-    from toolbox.permit_office_arcgis.desk_model import report_sections
-
     summary, sections = report_sections(APPROVED_REPORT)
 
     assert summary == "Approved Street Vendor Compact."
@@ -1378,8 +1377,6 @@ def test_report_sections_split_a_decision_report_into_headed_sections():
 def test_report_sections_use_district_names_not_ids():
     """Verify raw district ids in a week report become district names."""
 
-    from toolbox.permit_office_arcgis.desk_model import report_sections
-
     summary, sections = report_sections(WEEK_REPORT, {"D0003": "Glass Market"})
 
     lines = [line for _heading, section_lines in sections for line in section_lines]
@@ -1391,8 +1388,6 @@ def test_report_sections_use_district_names_not_ids():
 
 def _report_detail_view(report, box_h):
     """Return (view, canvas, box) for drawing one filed report into a box of the given height."""
-
-    from toolbox.permit_office_arcgis.desk_model import report_sections
 
     item, districts = _vendor_case()
     summary, sections = report_sections(report)
