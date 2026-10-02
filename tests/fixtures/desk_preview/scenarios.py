@@ -47,11 +47,13 @@ def _first_approvable(items):
     return items[0]
 
 
-def _sections(report, districts):
-    """Return (sections, summary) built the way the controller builds them."""
+def _report_tab(report_id, title, kind, status, report, state, districts, *, selected=False, affected=()):
+    """Return a ReportTab with sections split the way the controller splits them."""
 
     summary, sections = dashboard._report_tab_sections(report, districts)
-    return sections, summary
+    return ReportTab(
+        report_id, title, kind, status, selected, report, affected, receipt_metrics(state), sections=sections, summary=summary
+    )
 
 
 def applications_mid_week():
@@ -82,9 +84,11 @@ def filed_reports_long():
     neighbours = [cid for cid in sorted(districts) if cid not in item.target_cell_ids][:4]
     result = rules.resolve_decision(state, item, districts, "approve", item.target_cell_ids, neighbours, seed=SEED)
     decision_text = dashboard._filed_report_text(result, districts)
-    decision_tab = ReportTab("report-1", item.title, "report", dashboard._report_status(decision_text), False, decision_text, tuple(result.affected_cell_ids), receipt_metrics(state), *_sections(decision_text, districts))
+    status = dashboard._report_status(decision_text)
+    affected = tuple(result.affected_cell_ids)
+    decision_tab = _report_tab("report-1", item.title, "report", status, decision_text, state, districts, affected=affected)
     week = rules.advance_turn_result(state, items, districts)
-    week_tab = ReportTab("week-1", "Week Closed", "week", "week", False, week.report, (), receipt_metrics(state), *_sections(week.report, districts))
+    week_tab = _report_tab("week-1", "Week Closed", "week", "week", week.report, state, districts)
     next_items = rules.generate_docket(state.turn, seed=SEED, state=state, districts=districts)
     tabs = (week_tab, decision_tab)
     return build_desk_model(
@@ -110,7 +114,7 @@ def final_audit():
     state.status = "complete"
     grade, card = rules.scorecard(state, districts, (), items)
     report = dashboard._final_audit_report(grade, card)
-    tab = ReportTab("scorecard-1", f"Final Audit: {grade}", "scorecard", "scorecard", True, report, (), receipt_metrics(state), *_sections(report, districts))
+    tab = _report_tab("scorecard-1", f"Final Audit: {grade}", "scorecard", "scorecard", report, state, districts, selected=True)
     return build_desk_model(
         state,
         districts,
