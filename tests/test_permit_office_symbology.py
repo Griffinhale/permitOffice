@@ -272,11 +272,38 @@ class FakeLyrxLayer(FakeLayer):
         }
         self.dataSource = r"C:\owner\export.gdb\ExportedDistricts"
         self.connection_updates = []
+        self.definitions_set = 0
+        self.cim = None
 
     def updateConnectionProperties(self, current, new) -> None:
         self.connection_updates.append((current, new))
         self.connectionProperties = new
         self.dataSource = new["connection_info"]["database"] + "/" + new["dataset"]
+
+    def getDefinition(self, version):
+        """Return a CIM-shaped double whose data connection mirrors the .lyrx export."""
+
+        assert version == "V3"
+        connection = SimpleNamespace(
+            workspaceConnectionString=r"DATABASE=..\..\docs\dags\spikes\fresh.gdb",
+            workspaceFactory="FileGDB",
+            dataset=self.connectionProperties["dataset"],
+        )
+        return SimpleNamespace(featureTable=SimpleNamespace(dataConnection=connection))
+
+    def setDefinition(self, cim) -> None:
+        """Apply the CIM data connection the way Pro resolves it."""
+
+        self.definitions_set += 1
+        self.cim = cim
+        connection = cim.featureTable.dataConnection
+        workspace = connection.workspaceConnectionString.split("DATABASE=", 1)[1]
+        self.connectionProperties = {
+            "dataset": connection.dataset,
+            "workspace_factory": "File Geodatabase",
+            "connection_info": {"database": workspace},
+        }
+        self.dataSource = workspace + "/" + connection.dataset
 
 
 class FakeLyrxMap(FakeMap):
@@ -408,14 +435,15 @@ def test_lyrx_layer_that_cannot_be_repointed_is_removed_and_reported(monkeypatch
     monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path, names=("points",))))
     active_map = FakeLyrxMap()
     _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
-    monkeypatch.setattr(FakeLyrxLayer, "updateConnectionProperties", lambda self, current, new: None)
+    # Pro can accept a definition edit without changing the source; the check after must catch it.
+    monkeypatch.setattr(FakeLyrxLayer, "setDefinition", lambda self, cim: None)
     messages = FakeMessages()
 
     geometry.add_outputs_to_map({"points": "/saves/game.gdb/PermitPoints"}, messages, layer_names={"PermitPoints"})
 
     assert active_map.layers == []
     assert active_map.added_paths == []
-    assert any("could not point points.lyrx" in text for text in messages.warnings)
+    assert any("could not point points.lyrx at /saves/game.gdb/PermitPoints: layer still reads" in text for text in messages.warnings)
 
 
 @pytest.mark.parametrize("layer_key", sorted(map_layers.LAYER_FILE_NAMES))
@@ -440,3 +468,62 @@ def test_shipped_lyrx_has_a_class_for_every_value_the_game_writes(layer_key):
     assert renderer["fields"] == [field_name]
     assert set(symbology_config.SYMBOLS_BY_FIELD[field_name]) <= values
     assert not definition["featureTable"].get("definitionExpression")
+
+
+def test_lyrx_layer_is_repointed_through_its_cim_definition(monkeypatch, tmp_path):
+    """Verify the repoint survives updateConnectionProperties raising.
+
+    Pro 3.7 raised a bare AttributeError from updateConnectionProperties on 22
+    of 24 standalone adds (docs/dags/spikes/AR20-lyrx-repoint/probe-run2.txt),
+    while editing the CIM data connection pointed every layer at the save.
+    """
+
+    from toolbox.permit_office_arcgis import geometry, symbology_config
+
+    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path, names=("zones",))))
+    active_map = FakeLyrxMap()
+    _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
+
+    def raise_attribute_error(self, current, new):
+        raise AttributeError
+
+    monkeypatch.setattr(FakeLyrxLayer, "updateConnectionProperties", raise_attribute_error)
+    messages = FakeMessages()
+
+    geometry.add_outputs_to_map({"zones": "/saves/game.gdb/PermitZones"}, messages, layer_names={"PermitZones"})
+
+    zones = next(layer for layer in active_map.layers if layer.name == "PermitZones")
+    assert zones.definitions_set == 1
+    assert zones.cim.featureTable.dataConnection.workspaceConnectionString == "DATABASE=/saves/game.gdb"
+    assert zones.cim.featureTable.dataConnection.dataset == "PermitZones"
+    assert zones.dataSource == "/saves/game.gdb/PermitZones"
+    assert messages.warnings == []
+    assert any("styled zones from zones.lyrx" in text for text in messages.messages)
+
+
+def test_one_unpointable_lyrx_layer_does_not_stop_the_other_outputs(monkeypatch, tmp_path):
+    """Verify a layer that cannot be repointed is reported and the rest still load."""
+
+    from toolbox.permit_office_arcgis import geometry, symbology_config
+
+    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path)))
+    active_map = FakeLyrxMap()
+    _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
+
+    real_set_definition = FakeLyrxLayer.setDefinition
+
+    def set_definition_unless_points(self, cim):
+        if cim.featureTable.dataConnection.dataset == "PermitPoints":
+            raise AttributeError
+        real_set_definition(self, cim)
+
+    monkeypatch.setattr(FakeLyrxLayer, "setDefinition", set_definition_unless_points)
+    paths = {key: f"/saves/game.gdb/Permit{key.title()}" for key in ("districts", "points", "lines", "zones")}
+    messages = FakeMessages()
+
+    geometry.add_outputs_to_map(paths, messages)
+
+    assert {layer.name for layer in active_map.layers} == {"PermitDistricts", "PermitLines", "PermitZones", "District Prosperity", "District Identity"}
+    assert len(messages.warnings) == 1
+    assert "could not point points.lyrx at /saves/game.gdb/PermitPoints" in messages.warnings[0]
+    assert "AttributeError" in messages.warnings[0]

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import os
 import time
 
@@ -116,20 +115,23 @@ def add_outputs_to_map(paths, messages, layer_names=None):
         if active_map is None:
             return
         existing = {lyr.name: lyr for lyr in active_map.listLayers()}
-        for name, key in [p for p in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones")) if layer_names is None or p[0] in layer_names]:
-            if name not in existing:
-                lyr = _add_styled_layer(active_map, paths[key], key, messages)
-                lyr.name = name
-                existing[name] = lyr
-                _log(messages, "MAP", f"added {name}")
-        # Add the prosperity and identity overlays from the same districts source.
+        # (layer name, .lyrx key, paths key); the overlays read the districts source.
+        wanted = [(DISTRICTS, "districts", "districts"), (POINTS, "points", "points"), (LINES, "lines", "lines"), (ZONES, "zones", "zones")]
+        wanted = [w for w in wanted if layer_names is None or w[0] in layer_names]
         if layer_names is None or DISTRICTS in layer_names:
-            for name, key in ((DISTRICT_PROSPERITY, "district_prosperity"), (DISTRICT_IDENTITY, "district_identity")):
-                if name not in existing:
-                    lyr = _add_styled_layer(active_map, paths["districts"], key, messages)
-                    lyr.name = name
-                    existing[name] = lyr
-                    _log(messages, "MAP", f"added {name}")
+            wanted += [(DISTRICT_PROSPERITY, "district_prosperity", "districts"), (DISTRICT_IDENTITY, "district_identity", "districts")]
+        for name, key, path_key in wanted:
+            if name in existing:
+                continue
+            # One layer that will not load must not keep the others off the map.
+            try:
+                lyr = _add_styled_layer(active_map, paths[path_key], key, messages)
+            except Exception as exc:
+                _warn(messages, "MAP", f"add {name} failed: {exc}")
+                continue
+            lyr.name = name
+            existing[name] = lyr
+            _log(messages, "MAP", f"added {name}")
         _order_output_layers(active_map, existing)
     except Exception as exc:
         _warn(messages, "MAP", f"add outputs failed: {exc}")
@@ -146,31 +148,41 @@ def _add_styled_layer(active_map, data_path, layer_key, messages):
     if layer_file is None:
         raise RuntimeError(f"missing toolbox/layers/{LAYER_FILE_NAMES.get(layer_key, layer_key + '.lyrx')}")
     layer = active_map.addLayer(arcpy.mp.LayerFile(layer_file))[0]
-    if _point_layer_at(layer, data_path):
+    problem = _point_layer_at(layer, data_path)
+    if problem is None:
         _log(messages, "SYM", f"styled {layer_key} from {os.path.basename(layer_file)}")
         return layer
     active_map.removeLayer(layer)
-    raise RuntimeError(f"could not point {os.path.basename(layer_file)} at {data_path}")
+    raise RuntimeError(f"could not point {os.path.basename(layer_file)} at {data_path}: {problem}")
 
 
 def _point_layer_at(layer, data_path):
     """Repoint a layer loaded from a .lyrx at this save's feature class.
 
-    Returns True when the layer now reads data_path. Pro can skip an update
-    that does not validate without raising, so the source is checked after.
+    Edits the layer's CIM data connection rather than calling
+    updateConnectionProperties, which on Pro 3.7 raised a bare AttributeError
+    on most adds (AR20 probe, 22 of 24) while the CIM edit pointed every layer.
+    Returns None when the layer now reads data_path, else the reason it does
+    not; the source is checked after because Pro can skip a bad edit quietly.
     """
 
     workspace, dataset = os.path.split(data_path)
     try:
-        current = layer.connectionProperties
-        new = copy.deepcopy(current)
-        new["dataset"] = dataset
-        new["workspace_factory"] = "File Geodatabase"
-        new.setdefault("connection_info", {})["database"] = workspace
-        layer.updateConnectionProperties(current, new)
-    except Exception:
-        return False
-    return _same_source(layer, data_path)
+        cim = layer.getDefinition("V3")
+        connection = cim.featureTable.dataConnection
+        connection.workspaceConnectionString = f"DATABASE={workspace}"
+        connection.workspaceFactory = "FileGDB"
+        connection.dataset = dataset
+        layer.setDefinition(cim)
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}".rstrip(": ")
+    if _same_source(layer, data_path):
+        return None
+    try:
+        source = layer.dataSource
+    except Exception as exc:
+        source = f"dataSource raised {type(exc).__name__}"
+    return f"layer still reads {source}"
 
 
 def remove_outputs_from_map(messages, layer_names=None):
