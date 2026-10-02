@@ -39,7 +39,7 @@ MASK_REACH = 100_000
 MAP_KEY_SYMBOL_H = 18
 # Every panel opens with the same pane header (see _draw_pane_header).
 PANE_HEADER_H = 32
-# History rows: height and gap.
+# History rows are a fixed height so the rail can be sized to its row count.
 HISTORY_ROW_H = 46
 HISTORY_ROW_GAP = 7
 MAP_CHEAT_GROUPS = ("MapCheat",)
@@ -352,11 +352,11 @@ class PermitDeskView:
         self._draw(width, height)
 
     def _draw(self, width, height):
-        """Lay out fixed banner/status/rolodex/action/receipt bands around a flexible body.
+        """Lay out the banner, status strip, tab workspace, and city pulse rail.
 
-        Bands are budgeted from the top and the bottom so the flexible body row
-        in the middle (case card + city-health rail) gets exactly the leftover
-        space. Every band clips its own content, so regions never overlap.
+        The banner and status strip have fixed heights; the workspace and the
+        pulse rail share the rest. With applications open, the district table
+        spans under both, so the rail stops above it.
         """
 
         c = self.canvas
@@ -401,7 +401,7 @@ class PermitDeskView:
             self._draw_start_help_overlay(c, width, height)
 
     def _draw_background(self, c, width, height):
-        """Paint the desk surface (banner draws its own dark band on top)."""
+        """Paint the desk surface behind every pane (the banner paints its own row on top)."""
 
         c.create_rectangle(0, 0, width, height, fill=Palette.FRAME, outline="")
 
@@ -501,7 +501,7 @@ class PermitDeskView:
         self._add_target("desk-tab", label, (x0, y0, x1, y1), callback)
 
     def _draw_application_tab_content(self, c, box):
-        """Draw the hybrid folder layout: left folder rail, center detail."""
+        """Draw the folder rail, the selected tab's detail card, and the district table."""
 
         x0, y0, x1, y1 = box
         active_id = self.model.selected_item_id
@@ -521,11 +521,9 @@ class PermitDeskView:
 
         self._draw_folder_rail(c, rail_box, rows, active_id)
         external_table = getattr(self, "_external_attribute_table", None)
-        key_y0 = _folder_key_top(rail_box)
         work_y0 = detail_box[1] + 26
         if external_table:
-            _top_y1, _table_y0, table_y1, table_x1 = external_table
-            table_y0 = _table_y0
+            _top_y1, table_y0, table_y1, table_x1 = external_table
             work_box = (detail_box[0], work_y0, detail_box[2], min(detail_box[3], table_y0 - 14))
             table_box = (detail_box[0], table_y0, table_x1, table_y1)
         else:
@@ -533,7 +531,7 @@ class PermitDeskView:
             work_h = min(max(390, int(panel_h * 0.52)), 520)
             table_min_h = min(190, max(138, int(panel_h * 0.18)))
             work_h = min(work_h, max(300, panel_h - table_min_h - gap))
-            table_y0 = key_y0
+            table_y0 = _folder_key_top(rail_box)
             work_box = (detail_box[0], work_y0, detail_box[2], min(detail_box[1] + work_h, table_y0 - 44))
             table_box = (detail_box[0], table_y0, detail_box[2], panel_y1)
         if self.model.selected_desk_tab == "reports":
@@ -574,8 +572,7 @@ class PermitDeskView:
         """Draw a Pro-style pane header (title left, context right, divider) and return the content top."""
 
         y1 = y0 + PANE_HEADER_H
-        if hasattr(c, "_record"):
-            c._record("pane-header", (x0, y0, x1, y1), {"title": title})
+        _record_box(c, "pane-header", (x0, y0, x1, y1), {"title": title})
         mid = y0 + PANE_HEADER_H // 2
         title_w = self._text_w(title, Type.TITLE) or 0
         c.create_text(x0 + Space.M, mid, text=title, anchor="w", fill=Palette.INK, font=self._font(Type.TITLE))
@@ -641,8 +638,7 @@ class PermitDeskView:
 
         x0, y0, x1, y1 = box
         tabs = list(self.model.report_tabs or ())
-        if hasattr(c, "_record"):
-            c._record("history-rail", (x0, y0, x1, y1), {})
+        _record_box(c, "history-rail", (x0, y0, x1, y1))
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.CONTENT, outline=Palette.BORDER)
         top = self._draw_pane_header(c, x0, y0, x1, "History", f"{len(tabs)} filed")
         if not tabs:
@@ -663,12 +659,11 @@ class PermitDeskView:
             y += row_h + HISTORY_ROW_GAP
 
     def _draw_map_key_rail(self, c, box, groups=None, title="Map key"):
-        """Draw the right map key/legend rail."""
+        """Draw a map key pane: the cheat sheet, the case layers, or legend rows for ``groups``."""
 
         x0, y0, x1, y1 = box
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.PANE, outline=Palette.BORDER)
-        if hasattr(c, "_record"):
-            c._record("map-key", (x0, y0, x1, y1), {})
+        _record_box(c, "map-key", (x0, y0, x1, y1))
         cheat_rows = set(groups or ()) == set(MAP_CHEAT_GROUPS)
         case_rows = set(groups or ()) == {"Selection"} and bool(self.model.case_map_symbols)
         context = "Cheat sheet" if cheat_rows else "Case layers" if case_rows else ""
@@ -793,18 +788,15 @@ class PermitDeskView:
         shape = getattr(row, "shape", "")
         swatch = getattr(row, "swatch", Palette.BORDER) or Palette.BORDER
         if shape == "line":
-            if hasattr(c, "_record"):
-                c._record("symbol-line", (x0, y0 + 9, x0 + 18, y0 + 9), {})
+            _record_box(c, "symbol-line", (x0, y0 + 9, x0 + 18, y0 + 9))
             c.create_line(x0, y0 + 9, x0 + 18, y0 + 9, fill=swatch, width=4, capstyle="round")
             return
         if shape == "point":
-            if hasattr(c, "_record"):
-                c._record("symbol-point", (x0 + 2, y0 + 3, x0 + 14, y0 + 15), {})
+            _record_box(c, "symbol-point", (x0 + 2, y0 + 3, x0 + 14, y0 + 15))
             c.create_oval(x0 + 2, y0 + 3, x0 + 14, y0 + 15, fill=swatch, outline=Palette.BORDER)
             return
         if shape == "zone":
-            if hasattr(c, "_record"):
-                c._record("symbol-zone", (x0 + 1, y0 + 2, x0 + 17, y0 + 16), {})
+            _record_box(c, "symbol-zone", (x0 + 1, y0 + 2, x0 + 17, y0 + 16))
             c.create_rectangle(x0 + 1, y0 + 2, x0 + 17, y0 + 16, fill=swatch, outline=Palette.BORDER)
             return
         self._draw_legend_symbol(c, x0, y0, row)
@@ -870,8 +862,7 @@ class PermitDeskView:
         """
 
         x0, y0, x1, y1 = box
-        if hasattr(c, "_record"):
-            c._record("report-detail", (x0, y0, x1, y1), {})
+        _record_box(c, "report-detail", (x0, y0, x1, y1))
         tabs = list(self.model.report_tabs or ())
         selected_report = next((tab for tab in tabs if tab.report_id == self.model.selected_report_id), tabs[-1] if tabs else None)
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.CONTENT, outline=Palette.BORDER)
@@ -979,8 +970,7 @@ class PermitDeskView:
 
         x0, y0, x1, y1 = box
         case = self.model.case
-        if hasattr(c, "_record"):
-            c._record("active-card", (x0, y0, x1, y1), {})
+        _record_box(c, "active-card", (x0, y0, x1, y1))
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.CONTENT, outline=Palette.BORDER, width=1)
         top = self._draw_pane_header(c, x0, y0, x1, "Decision brief")
         header_h = top - y0 + 54
@@ -1039,19 +1029,17 @@ class PermitDeskView:
         evidence_y0 = info_box[3] + gap
         evidence_box = (body_x0, evidence_y0, body_x1, min(content_y1, evidence_y0 + evidence_h))
         action_y0 = evidence_box[3] + gap
-        if hasattr(c, "_record"):
-            c._record("decision-info", (info_box[0], info_box[1], evidence_box[2], min(content_y1, action_y0 + 8)), {})
+        _record_box(c, "decision-info", (info_box[0], info_box[1], evidence_box[2], min(content_y1, action_y0 + 8)))
         self._draw_application_info_panel(c, info_box)
         self._draw_case_evidence_row(c, evidence_box)
         self._draw_case_controls(c, body_x0, action_y0, body_x1, min(content_y1, action_y0 + action_h))
 
     def _draw_application_info_panel(self, c, box):
-        """Draw the wireframe application information panel."""
+        """Draw the applicant strip, description, inspection note, and budget line."""
 
         x0, y0, x1, y1 = box
         case = self.model.case
-        if hasattr(c, "_record"):
-            c._record("app-info", (x0, y0, x1, y1), {})
+        _record_box(c, "app-info", (x0, y0, x1, y1))
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.SUBTLE, outline=Palette.BORDER)
         pad = 14
         tx0 = x0 + pad
@@ -1100,8 +1088,7 @@ class PermitDeskView:
 
         x0, y0, x1, y1 = box
         case = self.model.case
-        if hasattr(c, "_record"):
-            c._record("evidence-row", (x0, y0, x1, y1), {})
+        _record_box(c, "evidence-row", (x0, y0, x1, y1))
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.SUBTLE, outline=Palette.BORDER)
         pad = 10
         gap = 22
@@ -1122,8 +1109,7 @@ class PermitDeskView:
     def _draw_district_grid_widget(self, c, x0, y0, x1, y1, cells):
         """Draw the selected-case district mini-grid."""
 
-        if hasattr(c, "_record"):
-            c._record("district-grid", (x0, y0, x1, y1), {})
+        _record_box(c, "district-grid", (x0, y0, x1, y1))
         cells = tuple(cells or ())
         if not cells:
             c.create_text(x0, y0 + 4, text="No map targets", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
@@ -1159,8 +1145,7 @@ class PermitDeskView:
             yy = y0 + index * (row_h + gap)
             if yy >= y1:
                 break
-            if hasattr(c, "_record"):
-                c._record(record_kind, (x0, yy, x1, min(y1, yy + row_h)), {})
+            _record_box(c, record_kind, (x0, yy, x1, min(y1, yy + row_h)))
             tone = _tone_color(card.tone)
             c.create_rectangle(x0, yy, x1, min(y1, yy + row_h), fill=Palette.CONTENT, outline=Palette.BORDER)
             c.create_rectangle(x0, yy, x0 + 4, min(y1, yy + row_h), fill=tone, outline="")
@@ -1185,8 +1170,7 @@ class PermitDeskView:
     def _draw_case_controls(self, c, x0, y0, x1, y1):
         """Draw selected-case map, inspect, and stamp controls inside the card."""
 
-        if hasattr(c, "_record"):
-            c._record("action-grid", (x0, y0 - 8, x1, y1), {})
+        _record_box(c, "action-grid", (x0, y0 - 8, x1, y1))
         c.create_rectangle(x0, y0 - 8, x1, y1, fill=Palette.SUBTLE, outline=Palette.BORDER)
         x0 += 10
         x1 -= 10
@@ -1198,13 +1182,23 @@ class PermitDeskView:
         approve = lanes.get("approve")
         mitigate = lanes.get("approve_mitigated")
         deny = lanes.get("deny")
+        # Each control: (label, cost, detail, color, callback, primary, enabled, hotkey, tooltip, disabled_reason).
         controls = (
             (exhibit_label, "0 AP", "map layer visibility", Palette.ACCENT, self.callbacks.toggle_exhibit, False, True, "V", "Toggle proposed feature visibility.", ""),
             ("Retarget Map", "0 AP", "use selected map features", Palette.TEAL, self.callbacks.update_from_map, False, True, "T", "Use selected map features as targets.", ""),
             ("Inspect File", "1 AP", "reveal filed risk", Palette.WATCH, self.callbacks.inspect, False, True, "I", "Spend AP to reveal risk and outcomes.", ""),
-            (approve.label if approve else "Issue Permit", approve.cost if approve else "1 AP", (approve.city_effect, approve.local_effect) if approve else ("City: file permit", "Local: update target"), Palette.GOOD, self.callbacks.approve, True, approve.enabled if approve else True, approve.hotkey if approve else "A", approve.tooltip if approve else "Issue the permit and file the selected map change.", approve.disabled_reason if approve else ""),
-            (mitigate.label if mitigate else "Add Conditions", mitigate.cost if mitigate else "1 AP", (mitigate.city_effect, mitigate.local_effect) if mitigate else ("City: add terms", "Local: reduce risk"), Palette.MITIGATE, self.callbacks.approve_mitigated, True, mitigate.enabled if mitigate else True, mitigate.hotkey if mitigate else "M", mitigate.tooltip if mitigate else "Issue the permit with mitigation conditions.", mitigate.disabled_reason if mitigate else ""),
-            (deny.label if deny else "Deny", deny.cost if deny else "0 AP", (deny.city_effect, deny.local_effect) if deny else ("City: reject filing", "Local: unresolved pressure"), Palette.BAD, self.callbacks.deny, True, deny.enabled if deny else True, deny.hotkey if deny else "D", deny.tooltip if deny else "Deny the filing.", deny.disabled_reason if deny else ""),
+            _stamp_control(
+                approve, Palette.GOOD, self.callbacks.approve,
+                ("Issue Permit", "1 AP", ("City: file permit", "Local: update target"), "A", "Issue the permit and file the selected map change."),
+            ),
+            _stamp_control(
+                mitigate, Palette.MITIGATE, self.callbacks.approve_mitigated,
+                ("Add Conditions", "1 AP", ("City: add terms", "Local: reduce risk"), "M", "Issue the permit with mitigation conditions."),
+            ),
+            _stamp_control(
+                deny, Palette.BAD, self.callbacks.deny,
+                ("Deny", "0 AP", ("City: reject filing", "Local: unresolved pressure"), "D", "Deny the filing."),
+            ),
         )
         gap = 8
         row_gap = 8
@@ -1214,26 +1208,10 @@ class PermitDeskView:
         grid_w = card_w * 3 + gap * 2
         grid_x0 = x0 + max(0, (inner_w - grid_w) // 2)
         card_h = max(64, min(96, (y1 - y0 - row_gap) // 2))
-        for index, (label, cost, detail, color, callback, primary, enabled, hotkey, tooltip, disabled_reason) in enumerate(controls):
+        for index, control in enumerate(controls):
             cx = grid_x0 + (index % 3) * (card_w + gap)
             cy = y0 + (index // 3) * (card_h + row_gap)
-            self._draw_case_action_card(
-                c,
-                cx,
-                cy,
-                min(x1, cx + card_w),
-                min(y1, cy + card_h),
-                label,
-                cost,
-                detail,
-                color,
-                callback,
-                primary,
-                enabled,
-                hotkey,
-                tooltip,
-                disabled_reason,
-            )
+            self._draw_case_action_card(c, cx, cy, min(x1, cx + card_w), min(y1, cy + card_h), *control)
 
     def _draw_case_action_card(self, c, x0, y0, x1, y1, label, cost, detail, color, callback, primary=False, enabled=True, hotkey="", tooltip="", disabled_reason=""):
         """Draw one larger in-card action with its visible AP/cost line."""
@@ -1299,8 +1277,7 @@ class PermitDeskView:
         """Draw the slim city pulse rail for triage context."""
 
         x0, y0, x1, y1 = box
-        if hasattr(c, "_record"):
-            c._record("city-pulse", (x0, y0, x1, y1), {})
+        _record_box(c, "city-pulse", (x0, y0, x1, y1))
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.PANE, outline=Palette.BORDER, width=1)
         top = self._draw_pane_header(c, x0, y0, x1, "City pulse", "Office context")
 
@@ -1366,8 +1343,7 @@ class PermitDeskView:
 
         tone = _tone_color(row.tone)
         c.create_rectangle(x0, y, x1, y + row_h, fill=Palette.SUBTLE, outline=Palette.BORDER)
-        if hasattr(c, "_record"):
-            c._record("group-swatch", (x0 + 8, y + 10, x0 + 18, y + 20), {})
+        _record_box(c, "group-swatch", (x0 + 8, y + 10, x0 + 18, y + 20))
         c.create_rectangle(x0 + 8, y + 10, x0 + 18, y + 20, fill=row.swatch or Palette.BORDER, outline=Palette.BORDER)
         state_w = self._text_w(row.state, Type.SMALL, "bold") or 56
         label_w = x1 - x0 - 26 - state_w - Space.M
@@ -1386,8 +1362,7 @@ class PermitDeskView:
     def _draw_sparkline(self, c, x0, y0, x1, y1, points, color):
         """Draw a compact static sparkline from 0-100 point values."""
 
-        if hasattr(c, "_record"):
-            c._record("sparkline", (x0, y0, x1, y1), {})
+        _record_box(c, "sparkline", (x0, y0, x1, y1))
         pts = tuple(points or ())
         if len(pts) < 2:  # no history: draw nothing rather than a placeholder
             return
@@ -1417,8 +1392,7 @@ class PermitDeskView:
         """Draw the live district attribute table: names, fitted rows, wheel scroll."""
 
         x0, y0, x1, y1 = box
-        if hasattr(c, "_record"):
-            c._record("district-table", (x0, y0, x1, y1), {})
+        _record_box(c, "district-table", (x0, y0, x1, y1))
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.CONTENT, outline=Palette.BORDER)
         pad = Space.M
         inner_x0 = x0 + pad
@@ -1539,8 +1513,7 @@ class PermitDeskView:
         for idx, (label, color, callback) in enumerate(entries):
             ry0 = y0 + idx * row_h
             ry1 = ry0 + row_h
-            hover = self._hover_key == f"session:{label}"
-            c.create_rectangle(x0, ry0, x1, ry1, fill=Palette.CONTENT if hover else Palette.CONTENT, outline=Palette.BORDER)
+            c.create_rectangle(x0, ry0, x1, ry1, fill=Palette.CONTENT, outline=Palette.BORDER)
             c.create_rectangle(x0, ry0, x0 + 5, ry1, fill=color, outline="")
             c.create_text(x0 + 14, (ry0 + ry1) // 2, text=label.upper(), anchor="w", fill=color, font=self._font(Type.SMALL, "bold"))
             self._add_target("session", label, (x0, ry0, x1, ry1), self._close_menu_callback(callback))
@@ -1557,9 +1530,7 @@ class PermitDeskView:
     def _draw_session_button(self, c, x0, y0, x1, y1, label, color, callback):
         """Draw a compact dashboard-level command button."""
 
-        hover = self._hover_key == f"session:{label}"
-        fill = Palette.CONTENT if hover else Palette.CONTENT
-        c.create_rectangle(x0, y0, x1, y1, fill=fill, outline=color, width=1)
+        c.create_rectangle(x0, y0, x1, y1, fill=Palette.CONTENT, outline=color, width=1)
         c.create_text((x0 + x1) // 2, (y0 + y1) // 2, text=label.upper(), anchor="center", fill=color, font=self._font(Type.SMALL, "bold"))
         self._add_target("session", label, (x0, y0, x1, y1), callback)
 
@@ -1700,6 +1671,13 @@ class PermitDeskView:
         return int(round(abs(size) * 96 / 72 * 1.33)) + 1
 
 
+def _record_box(c, kind, box, kwargs=None):
+    """Log a drawn region on the recording test canvas; real Tk canvases have no ``_record``."""
+
+    if hasattr(c, "_record"):
+        c._record(kind, box, kwargs or {})
+
+
 def _inside(x, y, bbox):
     """Return whether a point is inside a canvas bounding box."""
 
@@ -1816,20 +1794,31 @@ def _fit_lines(value, line_width, max_lines):
     return lines[: max_lines - 1] + [_clip(f"{lines[max_lines - 1]} ...", line_width)]
 
 
+def _stamp_control(lane, color, callback, fallback):
+    """Return a stamp control from its action lane, or from ``fallback`` when the model has no lane.
+
+    ``fallback`` is (label, cost, (city, local), hotkey, tooltip).
+    """
+
+    if lane is None:
+        label, cost, effects, hotkey, tooltip = fallback
+        return (label, cost, effects, color, callback, True, True, hotkey, tooltip, "")
+    effects = (lane.city_effect, lane.local_effect)
+    return (lane.label, lane.cost, effects, color, callback, True, lane.enabled, lane.hotkey, lane.tooltip, lane.disabled_reason)
+
+
 def _status_color(status):
     """Map docket or feature status to a palette color."""
 
     value = (status or "").lower()
-    if value in ("open", "carried"):
+    if value in ("open", "carried", "week", "filed"):
         return Palette.ACCENT
-    if value in ("inspected", "settled", "maintained"):
+    if value in ("inspected", "settled", "maintained", "scorecard"):
         return Palette.WATCH
     if value in ("active", "approved", "responded", "enforced"):
         return Palette.GOOD
     if value in ("denied", "deferred", "failed"):
         return Palette.BAD
-    if value in ("week", "filed", "scorecard"):
-        return Palette.ACCENT if value != "scorecard" else Palette.WATCH
     return Palette.MUTED
 
 
@@ -1889,13 +1878,7 @@ def _trend_marker(trend):
     """Return a compact trend glyph for evidence cards."""
 
     value = (trend or "").lower()
-    if value == "up":
-        return "up"
-    if value == "down":
-        return "down"
-    if value == "flat":
-        return "flat"
-    return "?"
+    return value if value in ("up", "down", "flat") else "?"
 
 
 def _trend_color(trend, tone="neutral"):
