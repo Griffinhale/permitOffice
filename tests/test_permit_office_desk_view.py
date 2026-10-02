@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from toolbox import arcpy_permit_office_rules as rules
 from toolbox.permit_office_arcgis.desk_view import (
+    DECISION_BRIEF_MIN_H,
     HEADLINE_METRICS,
+    STACKED_CARD_W,
     Palette,
     PermitDeskView,
     ReceiptModel,
@@ -794,7 +796,7 @@ def test_wireframe_workspace_keeps_table_attached_to_decision_module():
     regions = {kind: args for kind, args, _kwargs in canvas.created if kind in {"active-card", "action-grid", "district-table"}}
     assert {"active-card", "action-grid", "district-table"} <= set(regions)
     assert regions["active-card"][3] - regions["action-grid"][3] <= 44
-    assert 40 <= regions["district-table"][1] - regions["active-card"][3] <= 140
+    assert 12 <= regions["district-table"][1] - regions["active-card"][3] <= 140
 
 
 def test_full_dashboard_table_spans_under_decision_and_city_pulse():
@@ -1678,8 +1680,8 @@ def test_application_workspace_uses_full_available_height_for_detail_and_rails()
     assert case_action_boxes
 
 
-def test_attribute_table_top_aligns_with_map_key_top():
-    """Verify the attribute table rises to the map-key top line."""
+def test_attribute_table_aligns_with_map_key_until_the_brief_needs_room():
+    """Verify the table top meets the map key on tall windows and drops below it on short ones."""
 
     item, districts = _vendor_case()
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
@@ -1687,11 +1689,59 @@ def test_attribute_table_top_aligns_with_map_key_top():
     canvas = _FakeCanvas()
     view.canvas = canvas
 
-    view._draw(1120, 900)
+    tops = {}
+    for height in (1300, 860):
+        view._draw(1180, height)
+        regions = {kind: args for kind, args, _kwargs in canvas.created if kind in {"map-key", "district-table", "active-card"}}
+        tops[height] = regions["district-table"][1] - regions["map-key"][1]
+        assert regions["active-card"][3] - regions["active-card"][1] >= DECISION_BRIEF_MIN_H, height
 
-    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
-    district_table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
-    assert abs(district_table[1] - map_key[1]) <= 4
+    assert abs(tops[1300]) <= 4
+    assert tops[860] > 4
+
+
+def test_minimum_window_brief_keeps_description_note_and_stacked_cards_inside():
+    """Verify the brief at 1180x860 drops the evidence row, not the description, note, or card text."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(ap=0, money=60), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+
+    view._draw(1180, 860)
+
+    kinds = {kind for kind, _args, _kwargs in canvas.created}
+    texts = [str(text) for text in _text_values(canvas)]
+    cards = [args for kind, args, _kwargs in canvas.created if kind == "stamp-card"]
+    assert "evidence-row" not in kinds
+    assert any(kwargs.get("tags") == ("description-block",) for _kind, _args, kwargs in canvas.created)
+    assert any(text.startswith("Uninspected") for text in texts)
+    assert any(text.startswith("Needs") for text in texts)
+    assert len(cards) == 6
+    assert all(x1 - x0 < STACKED_CARD_W for x0, _y0, x1, _y1 in cards)
+    for kind, args, kwargs in canvas.created:
+        card = next((box for box in cards if box[0] <= args[0] <= box[2] and box[1] <= args[1] <= box[3]), None) if kind == "text" else None
+        if card is not None:
+            _family, size, weight = kwargs["font"]
+            assert args[1] + view._line_h(size, weight) <= card[3], kwargs.get("text")
+
+
+def test_filed_reports_table_keeps_its_height_at_the_minimum_window():
+    """Verify only the Applications brief pushes the district table down."""
+
+    item, districts = _vendor_case()
+    tabs = (ReportTab("week-1", "Week Closed", "week", "week", True, "Week one report."),)
+    tops = {}
+    for tab in ("applications", "reports"):
+        model = build_desk_model(rules.CityState(), districts, [item], item.item_id, report_tabs=tabs, selected_report_id="week-1", selected_desk_tab=tab)
+        view, _callbacks = _view_for_drawing(model)
+        canvas = _FakeCanvas()
+        view.canvas = canvas
+        view._draw(1180, 860)
+        tops[tab] = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")[1]
+
+    assert tops["reports"] < tops["applications"]
 
 
 def test_application_work_stack_has_vertical_breathing_room():
@@ -1705,9 +1755,9 @@ def test_application_work_stack_has_vertical_breathing_room():
     view._draw_application_tab_content(canvas, (0, 0, 1120, 900))
 
     active = next(args for kind, args, _kwargs in canvas.created if kind == "active-card")
-    map_key = next(args for kind, args, _kwargs in canvas.created if kind == "map-key")
+    table = next(args for kind, args, _kwargs in canvas.created if kind == "district-table")
     assert active[1] >= 34
-    assert map_key[1] - active[3] >= 44
+    assert table[1] - active[3] >= 12
 
 
 def test_inbox_rail_pins_selected_case_when_beyond_visible_cap():

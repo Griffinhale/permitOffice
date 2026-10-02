@@ -42,6 +42,13 @@ PANE_HEADER_H = 32
 # History rows are a fixed height so the rail can be sized to its row count.
 HISTORY_ROW_H = 46
 HISTORY_ROW_GAP = 7
+# The decision brief never gets less than this: header and title row (86), card
+# padding (32), info panel (186), stamp grid (190), and one gap. The district
+# table below gives up height for it, down to TABLE_MIN_H (it scrolls).
+DECISION_BRIEF_MIN_H = 508
+TABLE_MIN_H = 140
+# Stamp cards narrower than this stack label, cost, and impacts in one column.
+STACKED_CARD_W = 230
 MAP_CHEAT_GROUPS = ("MapCheat",)
 LEGEND_GROUP_FIELDS = {
     "PermitDistricts": "district_type",
@@ -389,7 +396,8 @@ class PermitDeskView:
 
         external_table = bool(self.model.docket_rows) and self.model.selected_desk_tab in ("applications", "reports")
         if external_table:
-            table_y0 = _workspace_table_top((workspace_x0, body_y0, workspace_x1, body_y1))
+            brief = self.model.selected_desk_tab == "applications"
+            table_y0 = _workspace_table_top((workspace_x0, body_y0, workspace_x1, body_y1), brief)
             top_y1 = table_y0 - gap
             self._external_attribute_table = (top_y1, table_y0, body_y1, health_x1)
             self._draw_main_workspace(c, (workspace_x0, body_y0, workspace_x1, body_y1))
@@ -534,8 +542,12 @@ class PermitDeskView:
             work_h = min(max(390, int(panel_h * 0.52)), 520)
             table_min_h = min(190, max(138, int(panel_h * 0.18)))
             work_h = min(work_h, max(300, panel_h - table_min_h - gap))
-            table_y0 = _folder_key_top(rail_box)
-            work_box = (detail_box[0], work_y0, detail_box[2], min(detail_box[1] + work_h, table_y0 - 44))
+            brief = self.model.selected_desk_tab != "reports"
+            table_y0 = _table_top(rail_box, brief)
+            work_y1 = min(detail_box[1] + work_h, table_y0 - 44)
+            if brief:
+                work_y1 = max(work_y1, min(work_y0 + DECISION_BRIEF_MIN_H, table_y0 - 14))
+            work_box = (detail_box[0], work_y0, detail_box[2], work_y1)
             table_box = (detail_box[0], table_y0, detail_box[2], panel_y1)
         if self.model.selected_desk_tab == "reports":
             self._draw_report_detail_card(c, work_box)
@@ -1001,17 +1013,10 @@ class PermitDeskView:
         available = max(260, content_y1 - content_y0)
         gap = 14 if available < 430 else 26
         if available < 430:
-            min_action_h = 166
-            evidence_h = max(56, min(88, int(available * 0.20)))
-            info_h = max(56, min(96, available - (2 * gap) - min_action_h - evidence_h))
-            overflow = (info_h + evidence_h + min_action_h + (2 * gap)) - available
-            if overflow > 0:
-                take = min(overflow, max(0, evidence_h - 52))
-                evidence_h -= take
-                overflow -= take
-            if overflow > 0:
-                info_h = max(52, info_h - overflow)
-            action_h = max(min_action_h, available - (2 * gap) - info_h - evidence_h)
+            # Short brief: no evidence row (the map and district table show the same facts).
+            evidence_h = 0
+            action_h = 190
+            info_h = available - gap - action_h
         else:
             action_h = min(max(178, int(available * 0.30)), 214)
             evidence_h = min(max(116, int(available * 0.21)), 150)
@@ -1037,12 +1042,13 @@ class PermitDeskView:
             if overflow > 0:
                 action_h = max(166, action_h - overflow)
         info_box = (body_x0, content_y0, body_x1, min(content_y1, content_y0 + info_h))
-        evidence_y0 = info_box[3] + gap
-        evidence_box = (body_x0, evidence_y0, body_x1, min(content_y1, evidence_y0 + evidence_h))
-        action_y0 = evidence_box[3] + gap
-        _record_box(c, "decision-info", (info_box[0], info_box[1], evidence_box[2], min(content_y1, action_y0 + 8)))
+        action_y0 = info_box[3] + gap
+        _record_box(c, "decision-info", (info_box[0], info_box[1], body_x1, min(content_y1, action_y0 + 8)))
         self._draw_application_info_panel(c, info_box)
-        self._draw_case_evidence_row(c, evidence_box)
+        if evidence_h:
+            evidence_box = (body_x0, action_y0, body_x1, min(content_y1, action_y0 + evidence_h))
+            self._draw_case_evidence_row(c, evidence_box)
+            action_y0 = evidence_box[3] + gap
         self._draw_case_controls(c, body_x0, action_y0, body_x1, min(content_y1, action_y0 + action_h))
 
     def _draw_application_info_panel(self, c, box):
@@ -1062,10 +1068,12 @@ class PermitDeskView:
         c.create_rectangle(tx0, strip_y0, tx1, strip_y1, fill=Palette.CONTENT, outline=Palette.BORDER, tags=("applicant-strip",))
         c.create_text(tx0 + 10, strip_y0 + 8, text="APPLICANT", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
         contact_x = tx0 + max(260, int((tx1 - tx0) * 0.45))
-        c.create_text(tx0 + 88, strip_y0 + 7, text=self._fit_px(applicant, Type.BODY, "bold", contact_x - tx0 - 100), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
+        applicant_x = tx0 + max(88, 10 + (self._text_w("APPLICANT", Type.SMALL, "bold") or 0) + Space.S)
+        c.create_text(applicant_x, strip_y0 + 7, text=self._fit_px(applicant, Type.BODY, "bold", contact_x - applicant_x - 12), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
         if contact:
             c.create_text(contact_x, strip_y0 + 8, text="CONTACT", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
-            c.create_text(contact_x + 66, strip_y0 + 7, text=self._fit_px(contact, Type.BODY, "bold", tx1 - contact_x - 76), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
+            value_x = contact_x + max(66, (self._text_w("CONTACT", Type.SMALL, "bold") or 0) + Space.S)
+            c.create_text(value_x, strip_y0 + 7, text=self._fit_px(contact, Type.BODY, "bold", tx1 - value_x - 10), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
         econ_text = ""
         econ_color = Palette.MUTED
         econ_y = y1
@@ -1092,7 +1100,8 @@ class PermitDeskView:
         if note_h >= 24:
             c.create_rectangle(tx0, yy, tx1, yy + note_h, fill=Palette.WARN_TINT if not inspected else Palette.SELECT, outline="")
             c.create_rectangle(tx0, yy, tx0 + 4, yy + note_h, fill=note_color, outline="")
-            note_lines = self._fit_lines_px(note, Type.BODY, "bold", tx1 - tx0 - 24, 1 if note_h < 34 else 2)
+            note_rows = max(1, min(2, (note_h - 8) // self._line_h(Type.BODY, "bold")))
+            note_lines = self._fit_lines_px(note, Type.BODY, "bold", tx1 - tx0 - 24, note_rows)
             c.create_text(tx0 + 12, yy + 8, text="\n".join(note_lines), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
 
     def _draw_case_evidence_row(self, c, box):
@@ -1201,15 +1210,15 @@ class PermitDeskView:
             ("Inspect File", "1 AP", "reveal filed risk", Palette.WATCH, self.callbacks.inspect, False, True, "I", "Spend AP to reveal risk and outcomes.", ""),
             _stamp_control(
                 approve, Palette.GOOD, self.callbacks.approve,
-                ("Issue Permit", "1 AP", ("City: file permit", "Local: update target"), "A", "Issue the permit and file the selected map change."),
+                ("Issue Permit", "1 AP", ("file permit", "update target"), "A", "Issue the permit and file the selected map change."),
             ),
             _stamp_control(
                 mitigate, Palette.MITIGATE, self.callbacks.approve_mitigated,
-                ("Add Conditions", "1 AP", ("City: add terms", "Local: reduce risk"), "M", "Issue the permit with mitigation conditions."),
+                ("Add Conditions", "1 AP", ("add terms", "reduce risk"), "M", "Issue the permit with mitigation conditions."),
             ),
             _stamp_control(
                 deny, Palette.BAD, self.callbacks.deny,
-                ("Deny", "0 AP", ("City: reject filing", "Local: unresolved pressure"), "D", "Deny the filing."),
+                ("Deny", "0 AP", ("reject filing", "unresolved pressure"), "D", "Deny the filing."),
             ),
         )
         gap = 8
@@ -1232,8 +1241,14 @@ class PermitDeskView:
         fill = Palette.CONTENT if enabled else Palette.SUBTLE
         outline = Palette.INK if enabled and hover else color if enabled else Palette.BORDER
         tone = color if enabled else Palette.MUTED
+        _record_box(c, "stamp-card", (x0, y0, x1, y1), {"label": label})
         c.create_rectangle(x0, y0, x1, y1, fill=fill, outline=outline, width=2 if hover else 1)
         c.create_rectangle(x0, y0, x0 + 4, y1, fill=tone, outline="")
+        if enabled:
+            self._add_target("case-action", label, (x0, y0, x1, y1), callback)
+        if x1 - x0 < STACKED_CARD_W:
+            self._draw_stacked_card_body(c, x0, y0, x1, y1, label, cost, detail, tone, enabled, hotkey, disabled_reason)
+            return
         impact_w = max(118, min(160, int((x1 - x0) * 0.44)))
         impact_x0 = max(x0 + 104, x1 - impact_w)
         c.create_line(impact_x0, y0 + 7, impact_x0, y1 - 7, fill=Palette.BORDER, tags=("impact-divider",))
@@ -1270,8 +1285,39 @@ class PermitDeskView:
                 c.create_text(x0 + 12, y1 - 17, text=self._fit_px(disabled_reason, Type.SMALL, "normal", label_w), anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL))
         elif tooltip:
             c.create_text(impact_label_x, y1 - 18, text=self._fit_px(tooltip, Type.SMALL, "normal", impact_w_text), anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL))
-        if enabled:
-            self._add_target("case-action", label, (x0, y0, x1, y1), callback)
+
+    def _draw_stacked_card_body(self, c, x0, y0, x1, y1, label, cost, detail, tone, enabled, hotkey, disabled_reason):
+        """Stack a narrow stamp card: label, hotkey and cost, then impact lines while they fit."""
+
+        tx0 = x0 + 12
+        text_w = x1 - tx0 - 8
+        small_h = self._line_h(Type.SMALL)
+        y = y0 + 6
+        c.create_text(tx0, y, text=self._fit_px(label, Type.BODY, "bold", text_w), anchor="nw", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(Type.BODY, "bold"))
+        y += self._line_h(Type.BODY, "bold") + 3
+        badge_h = small_h + 4
+        cost_x = tx0
+        if hotkey:
+            c.create_rectangle(tx0, y, tx0 + 20, y + badge_h, fill=Palette.SUBTLE, outline=Palette.BORDER, tags=("hotkey-badge",))
+            c.create_text(tx0 + 10, y + 2, text=hotkey, anchor="n", fill=Palette.INK if enabled else Palette.MUTED, font=self._font(Type.SMALL, "bold"), tags=("hotkey-badge",))
+            cost_x = tx0 + 28
+        c.create_text(cost_x, y + 2, text=self._fit_px(cost, Type.SMALL, "bold", x1 - cost_x - 8), anchor="nw", fill=tone, font=self._font(Type.SMALL, "bold"), tags=("cost-line",))
+        y += badge_h + 3
+        if not enabled and disabled_reason:
+            lines = [(None, line) for line in self._wrap_px(disabled_reason, Type.SMALL, "normal", text_w)]
+        elif isinstance(detail, tuple):
+            lines = [(_impact_tone(detail[0]), f"City: {detail[0]}"), (_impact_tone(detail[1]), f"Local: {detail[1]}")]
+        else:
+            lines = [(_impact_tone(detail), detail)]
+        for marker, line in lines:
+            if y + small_h > y1 - 3:
+                break
+            line_x = tx0
+            if marker is not None:
+                _draw_impact_marker(c, tx0 + 4, y + small_h // 2, marker)
+                line_x = tx0 + 14
+            c.create_text(line_x, y, text=self._fit_px(line, Type.SMALL, "normal", x1 - line_x - 8), anchor="nw", fill=Palette.MUTED if marker is None else Palette.INK, font=self._font(Type.SMALL))
+            y += small_h
 
     def _draw_case_action(self, c, x0, y0, x1, y1, label, color, callback, primary=False, enabled=True):
         """Draw an in-card action button and register it."""
@@ -1728,8 +1774,19 @@ def _folder_key_top(rail_box):
     return y1 - key_h
 
 
-def _workspace_table_top(workspace_box):
-    """Return the shared top edge for the live attribute table."""
+def _table_top(rail_box, brief):
+    """Return the district table top: level with the map key unless the decision brief needs the room."""
+
+    if not brief:
+        return _folder_key_top(rail_box)
+    _x0, y0, _x1, y1 = rail_box
+    # The decision brief starts 26 px under the panel top and ends 14 px above the table.
+    brief_floor = y0 + 26 + DECISION_BRIEF_MIN_H + 14
+    return min(max(_folder_key_top(rail_box), brief_floor), y1 - TABLE_MIN_H)
+
+
+def _workspace_table_top(workspace_box, brief):
+    """Return the shared top edge for the live attribute table; ``brief`` when it sits under the decision brief."""
 
     x0, y0, x1, y1 = workspace_box
     content = (x0 + 12, y0 + 12, x1 - 12, y1 - 12)
@@ -1737,7 +1794,7 @@ def _workspace_table_top(workspace_box):
     panel_y1 = content[3]
     rail_w = min(252, max(230, int((content[2] - content[0]) * 0.25)))
     rail_box = (content[0], panel_y0, content[0] + rail_w, panel_y1)
-    return _folder_key_top(rail_box)
+    return _table_top(rail_box, brief)
 
 
 def _legend_subset(rows, group, labels):
