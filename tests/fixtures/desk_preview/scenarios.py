@@ -117,6 +117,12 @@ def final_audit():
     )
 
 
+# Scenarios drawn with the scrolling ticker (status line cleared) at this offset.
+TICKER_OFFSETS = {
+    "reports": 520,
+}
+
+
 SCENARIOS = {
     "applications": applications_mid_week,
     "reports": filed_reports_long,

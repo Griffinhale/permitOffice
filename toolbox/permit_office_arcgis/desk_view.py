@@ -25,6 +25,10 @@ from .desk_model import (
 # pane that fills half of a 1920x1080 monitor beside ArcGIS Pro.
 MIN_DESK_W = 1120
 MIN_DESK_H = 860
+# How far the ticker masks reach past the strip ends: past the edge of any screen.
+MASK_REACH = 100_000
+# Legend glyphs are drawn in an 18 px square.
+MAP_KEY_SYMBOL_H = 18
 FEATURE_KEY_GROUPS = ("Selection", "PermitPoints", "PermitLines", "PermitZones")
 MAP_STATE_KEY_GROUPS = ("PermitDistricts", "District display", "Prosperity", "Community")
 MAP_CHEAT_GROUPS = ("MapCheat",)
@@ -376,25 +380,37 @@ class PermitDeskView:
         c.create_rectangle(x0 + 1, y1 - 4, x0 + 1 + int((x1 - x0 - 2) * meter / 100), y1 - 1, fill=fill, outline="")
 
     def _draw_status_strip(self, c, box):
-        """Draw the one-line ambient status (office-day note, selection, errors)."""
+        """Draw the one-line ambient status (office-day note, selection, errors).
+
+        Canvas text cannot be clipped, so the scrolling marquee is masked on both
+        sides after it is drawn: desk-colored blocks outside the strip and a
+        strip-colored block under the STATUS label.
+        """
 
         x0, y0, x1, y1 = box
-        c.create_rectangle(x0, y0, x1, y1, fill=Palette.DESK_DARK, outline="", tags=("status-strip",))
+        tags = ("status-strip",)
+        c.create_rectangle(x0, y0, x1, y1, fill=Palette.DESK_DARK, outline="", tags=tags)
         mid = (y0 + y1) // 2
-        label_w = 78
-        text_x0 = x0 + label_w
+        label_x = x0 + 12
+        label_w = self._text_w("STATUS", 8, "bold")
+        text_x0 = x0 + max(78, (label_w or 0) + 28)
         if self.model.status_text:
-            text = _clip(self.model.status_text, max(40, (x1 - x0 - 90) // 7))
-            c.create_text(text_x0, mid, text=text, anchor="w", fill=Palette.PAPER, font=self._font(10), tags=("status-strip",))
+            text = self._fit_px(self.model.status_text, 10, "normal", x1 - text_x0 - 12)
+            c.create_text(text_x0, mid, text=text, anchor="w", fill=Palette.PAPER, font=self._font(10), tags=tags)
         else:
             ticker = "     /     ".join(self.model.ticker_items or ("Ready.",))
             marquee = f"{ticker}     /     {ticker}"
-            text_w = max(1, len(marquee) * 7)
-            travel = max(1, text_w + (x1 - text_x0))
-            start_x = x1 - (self._ticker_offset_px % travel)
-            c.create_text(start_x, mid, text=marquee, anchor="w", fill=Palette.PAPER, font=self._font(10), tags=("status-strip", "status-marquee"))
-        c.create_rectangle(x0, y0, text_x0 - 6, y1, fill=Palette.DESK_DARK, outline="", tags=("status-strip",))
-        c.create_text(x0 + 12, mid, text="STATUS", anchor="w", fill=Palette.LEDGER_LINE, font=self._font(8, "bold"), tags=("status-strip",))
+            window_w = max(1, x1 - text_x0)
+            text_w = self._text_w(marquee, 10, "normal")
+            if text_w is None:  # headless (no Tk fonts): scroll one window width per loop
+                text_w = window_w
+            start_x = x1 - (self._ticker_offset_px % max(1, text_w + window_w))
+            c.create_text(start_x, mid, text=marquee, anchor="w", fill=Palette.PAPER, font=self._font(10), tags=tags + ("status-marquee",))
+            # Mask both ends: nothing scrolls past the strip into the desk margin.
+            c.create_rectangle(x0 - MASK_REACH, y0, x0, y1, fill=Palette.DESK, outline="", tags=tags)
+            c.create_rectangle(x1, y0, x1 + MASK_REACH, y1, fill=Palette.DESK, outline="", tags=tags)
+        c.create_rectangle(x0, y0, text_x0 - 6, y1, fill=Palette.DESK_DARK, outline="", tags=tags)
+        c.create_text(label_x, mid, text="STATUS", anchor="w", fill=Palette.LEDGER_LINE, font=self._font(8, "bold"), tags=tags)
 
     def _draw_main_workspace(self, c, box):
         """Draw the primary Applications/Filed Reports tab workspace."""
@@ -583,6 +599,7 @@ class PermitDeskView:
             c.create_text(x1 - 12, y0 + 16, text="CASE LAYERS", anchor="ne", fill=Palette.MUTED, font=self._font(7, "bold"))
         c.create_line(x0 + 12, y0 + 38, x1 - 12, y0 + 38, fill=Palette.LINE)
         y = y0 + 52
+        bottom = y1 - 10
         last_group = ""
         group_filter = set(groups or ())
         if case_rows:
@@ -592,33 +609,40 @@ class PermitDeskView:
         if groups:
             order = {group: index for index, group in enumerate(groups)}
             rows.sort(key=lambda row: order.get(getattr(row, "group", "Selection"), len(order)))
+        row_h = self._map_key_row_h(detail=True)
         for row in rows:
-            if y > y1 - 30:
-                break
             group = getattr(row, "group", "Selection")
             if not case_rows and group != last_group:
-                c.create_text(x0 + 12, y, text=group, anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
                 field = LEGEND_GROUP_FIELDS.get(group)
+                heading_h = self._line_h(8, "bold") + (self._line_h(7, "bold") if field else 0) + 2
+                if y + heading_h + row_h > bottom:
+                    break
+                c.create_text(x0 + 12, y, text=group, anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
                 if field:
-                    c.create_text(x0 + 12, y + 14, text=field, anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
-                    y += 31
-                else:
-                    y += 18
+                    c.create_text(x0 + 12, y + self._line_h(8, "bold"), text=field, anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
+                y += heading_h
                 last_group = group
+            if y + row_h > bottom:
+                break
             self._draw_map_key_row(c, x0 + 12, y, x1 - 12, row)
-            y += 31
+            y += row_h
 
     def _draw_map_cheat_sheet(self, c, x0, y0, x1, y1):
-        """Draw one player-facing map symbology cheat sheet."""
+        """Draw one player-facing map symbology cheat sheet.
+
+        Row heights come from measured line heights. When everything does not
+        fit, sublabels go first, then rows from the end of the longest section,
+        so rows never overlap or cross the bottom edge.
+        """
 
         rows = list(self.model.map_legend_rows)
         selected = [row for row in rows if row.group == "Selection" and row.label == "Selected target"][:1]
-        compact = (y1 - y0) < 420
         features = (
             selected
-            + _legend_subset(rows, "PermitPoints", ("Proposed", "Maintained", "Special Interest"))
+            + _legend_subset(rows, "PermitPoints", ("Proposed",))
             + _legend_subset(rows, "PermitLines", ("Road",))
             + _legend_subset(rows, "PermitZones", ("Active",))
+            + _legend_subset(rows, "PermitPoints", ("Maintained", "Special Interest"))
         )
         fills = _legend_subset(rows, "PermitDistricts", ("Residential", "Mercantile", "Industrial", "Civic", "Academic", "Natural"))
         overlays = (
@@ -626,43 +650,64 @@ class PermitDeskView:
             + _legend_subset(rows, "Prosperity", ("Stable",))
             + _legend_subset(rows, "Community", ("Stable Identity", "Contested Buyout"))
         )
-        if compact:
-            features = selected + _legend_subset(rows, "PermitPoints", ("Proposed",)) + _legend_subset(rows, "PermitLines", ("Road",))
-        feature_limit, fill_limit, overlay_limit = (3, 3, 2) if compact else (6, 6, 6)
-        sections = (
-            ("FEATURES", tuple(_friendly_legend_row(row) for row in features[:feature_limit])),
-            ("DISTRICT FILLS", tuple(_friendly_legend_row(row) for row in fills[:fill_limit])),
-            ("OVERLAYS", tuple(_friendly_legend_row(row) for row in overlays[:overlay_limit])),
-        )
-        heading_h = 13 if compact else 18
-        row_h = 18 if compact else 25
-        section_gap = 3 if compact else 7
+        sections = [
+            ["FEATURES", [_friendly_legend_row(row) for row in features]],
+            ["DISTRICT FILLS", [_friendly_legend_row(row) for row in fills]],
+            ["OVERLAYS", [_friendly_legend_row(row) for row in overlays]],
+        ]
+        heading_h = self._line_h(7, "bold") + 2
+        section_gap = 6
+
+        def height(detail):
+            row_h = self._map_key_row_h(detail)
+            return sum(heading_h + row_h * len(section_rows) for _title, section_rows in sections) + section_gap * (len(sections) - 1)
+
+        available = y1 - y0
+        detail = height(True) <= available
+        while not detail and height(False) > available:
+            # Ties trim the later section first, so FEATURES keeps the most rows.
+            longest = max(reversed(sections), key=lambda section: len(section[1]))
+            if len(longest[1]) <= 1:
+                break
+            longest[1].pop()
+        row_h = self._map_key_row_h(detail)
         y = y0
         for title, section_rows in sections:
-            if y + heading_h > y1:
+            if y + heading_h + row_h > y1:
                 break
             c.create_text(x0, y, text=title, anchor="nw", fill=Palette.MUTED, font=self._font(7, "bold"))
             y += heading_h
             for row in section_rows:
                 if y + row_h > y1:
                     break
-                self._draw_map_key_row(c, x0, y, x1, row)
+                self._draw_map_key_row(c, x0, y, x1, row, detail=detail)
                 y += row_h
             y += section_gap
 
-    def _draw_map_key_row(self, c, x0, y0, x1, row):
-        """Draw one bounded legend row with swatch, label, and detail."""
+    def _map_key_row_h(self, detail=True):
+        """Return one map key row's height: symbol or label (+ sublabel), plus a gap."""
 
+        text_h = self._line_h(8, "bold") + (self._line_h(7) if detail else 0)
+        return max(MAP_KEY_SYMBOL_H, text_h) + (4 if detail else 3)
+
+    def _draw_map_key_row(self, c, x0, y0, x1, row, detail=True):
+        """Draw one bounded legend row with swatch, label, and optional detail."""
+
+        label_h = self._line_h(8, "bold")
+        text_h = label_h + (self._line_h(7) if detail else 0)
+        symbol_y = y0 + max(0, (text_h - MAP_KEY_SYMBOL_H) // 2)
         if hasattr(row, "group"):
-            self._draw_legend_symbol(c, x0, y0 + 1, row)
+            self._draw_legend_symbol(c, x0, symbol_y, row)
         else:
-            self._draw_case_symbol(c, x0, y0 + 1, row)
+            self._draw_case_symbol(c, x0, symbol_y, row)
+        text_y = y0 + max(0, (MAP_KEY_SYMBOL_H - text_h) // 2)
         state = getattr(row, "state", "")
-        label_w = x1 - x0 - (52 if state else 20)
-        c.create_text(x0 + 20, y0 - 1, text=self._fit_px(row.label, 8, "bold", label_w), anchor="nw", fill=Palette.INK, font=self._font(8, "bold"))
-        c.create_text(x0 + 20, y0 + 13, text=self._fit_px(row.detail, 7, "normal", label_w), anchor="nw", fill=Palette.MUTED, font=self._font(7))
+        label_w = x1 - x0 - (52 if state else 24)
+        c.create_text(x0 + 24, text_y, text=self._fit_px(row.label, 8, "bold", label_w), anchor="nw", fill=Palette.INK, font=self._font(8, "bold"))
+        if detail:
+            c.create_text(x0 + 24, text_y + label_h, text=self._fit_px(row.detail, 7, "normal", label_w), anchor="nw", fill=Palette.MUTED, font=self._font(7))
         if state:
-            c.create_text(x1, y0 - 1, text=_clip(state, 5), anchor="ne", fill=_tone_color(getattr(row, "tone", "neutral")), font=self._font(7, "bold"))
+            c.create_text(x1, text_y, text=self._fit_px(state, 7, "bold", 44), anchor="ne", fill=_tone_color(getattr(row, "tone", "neutral")), font=self._font(7, "bold"))
 
     def _draw_case_symbol(self, c, x0, y0, row):
         """Draw a map symbol matching the row geometry when available."""
@@ -1625,8 +1670,8 @@ class PermitDeskView:
                 hi = mid - 1
         return (text[:lo] + "...") if lo else "..."
 
-    def _px_measurer(self, size, weight):
-        """Return a cached Tk font ``measure`` callable, or None if unavailable."""
+    def _tk_font(self, size, weight):
+        """Return a cached Tk Font for the desk family, or None without a Tk root."""
 
         cache = getattr(self, "_font_cache", None)
         if cache is None:
@@ -1639,8 +1684,31 @@ class PermitDeskView:
                 cache[key] = tkfont.Font(root=self.root, family="Segoe UI", size=size, weight=weight)
             except Exception:
                 cache[key] = None
-        font = cache[key]
+        return cache[key]
+
+    def _px_measurer(self, size, weight):
+        """Return a cached Tk font ``measure`` callable, or None if unavailable."""
+
+        font = self._tk_font(size, weight)
         return font.measure if font is not None else None
+
+    def _text_w(self, text, size, weight="normal"):
+        """Return the measured pixel width of ``text``, or None when fonts are unavailable."""
+
+        measure = self._px_measurer(size, weight)
+        return measure(text) if measure is not None else None
+
+    def _line_h(self, size, weight="normal"):
+        """Return the font's line height in pixels (Tk linespace when available)."""
+
+        font = self._tk_font(size, weight)
+        if font is not None:
+            try:
+                return int(font.metrics("linespace"))
+            except Exception:
+                pass
+        # Headless fallback: points to 96-dpi pixels, times Segoe UI's ~1.33 linespace.
+        return int(round(abs(size) * 96 / 72 * 1.33)) + 1
 
 
 def _draw_ruled_block(c, x0, y0, x1, y1, label, text, accent, font_factory, max_y=None):

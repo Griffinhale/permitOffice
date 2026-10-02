@@ -1141,6 +1141,127 @@ def test_status_strip_marquee_draws_wire_text_at_scrolled_position():
     assert second_wire < first_wire
 
 
+def _stub_measurer(size, _weight):
+    """Return a deterministic width function standing in for Tk font.measure."""
+
+    return lambda text: int(len(text) * abs(size) * 0.62)
+
+
+def _covered(spans, lo, hi):
+    """Return whether the x interval [lo, hi] is covered by the union of spans."""
+
+    if hi <= lo:
+        return True
+    cursor = lo
+    for start, end in sorted(spans):
+        if start > cursor:
+            return False
+        cursor = max(cursor, end)
+        if cursor >= hi:
+            return True
+    return cursor >= hi
+
+
+def _marquee_mask_report(view, canvas, strip):
+    """Return (text span, spans masked after it, STATUS label span, spans masked before the label)."""
+
+    x0, y0, x1, y1 = strip
+    created = canvas.created
+    text_index, (_kind, args, kwargs) = next(
+        (index, entry) for index, entry in enumerate(created) if entry[0] == "text" and "status-marquee" in (entry[2].get("tags") or ())
+    )
+    measure = view._px_measurer(kwargs["font"][1], kwargs["font"][2])
+    text_span = (args[0], args[0] + measure(kwargs["text"]))
+    label_index, (_k, label_args, label_kwargs) = next(
+        (index, entry) for index, entry in enumerate(created) if entry[0] == "text" and entry[2].get("text") == "STATUS"
+    )
+    label_span = (label_args[0], label_args[0] + view._px_measurer(label_kwargs["font"][1], label_kwargs["font"][2])("STATUS"))
+
+    def masks(lo_index, hi_index):
+        return [
+            (rect_args[0], rect_args[2])
+            for kind, rect_args, _kw in created[lo_index + 1 : hi_index]
+            if kind == "rect" and rect_args[1] <= y0 and rect_args[3] >= y1
+        ]
+
+    return text_span, masks(text_index, len(created)), label_span, masks(text_index, label_index)
+
+
+def test_ticker_text_stays_inside_the_status_strip():
+    """Verify marquee text outside the strip, or under STATUS, is masked at every offset."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    view._px_measurer = _stub_measurer
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+    strip = (20, 78, 620, 106)
+    view._status_strip_box = strip
+
+    for offset in (0, 150, 420, 900, 2400):
+        canvas.created.clear()
+        view.update_status_marquee(offset)
+        (tx0, tx1), after, label_span, before_label = _marquee_mask_report(view, canvas, strip)
+        assert _covered(after, tx0, min(tx1, strip[0])), offset
+        assert _covered(after, max(tx0, strip[2]), tx1), offset
+        assert _covered(before_label, *label_span), offset
+
+
+def test_status_text_is_fitted_to_the_strip_by_measured_width():
+    """Verify a long one-off status message never runs past the strip's right edge."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    view._px_measurer = _stub_measurer
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+    strip = (20, 78, 620, 106)
+    view._status_strip_box = strip
+
+    view.update_status_strip("Decision filed. " * 30)
+
+    _kind, args, kwargs = next(entry for entry in canvas.created if entry[0] == "text" and str(entry[2].get("text", "")).startswith("Decision"))
+    assert args[0] + _stub_measurer(kwargs["font"][1], kwargs["font"][2])(kwargs["text"]) <= strip[2]
+
+
+def _left_column_text_rows(view, canvas, box):
+    """Return (top, bottom, text) for left-anchored text drawn inside ``box``, top-down."""
+
+    x0, y0, x1, y1 = box
+    rows = []
+    for kind, args, kwargs in canvas.created:
+        if kind != "text" or kwargs.get("anchor") != "nw":
+            continue
+        if not (x0 <= args[0] < x1 and y0 <= args[1] <= y1):
+            continue
+        _family, size, weight = kwargs["font"]
+        lines = str(kwargs.get("text", "")).count("\n") + 1
+        rows.append((args[1], args[1] + lines * view._line_h(size, weight), kwargs.get("text")))
+    return sorted(rows)
+
+
+def test_map_key_rows_do_not_overlap_at_compact_and_full_heights():
+    """Verify map key labels, sublabels, and headings never share vertical space."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    for height in (240, 300, 380, 470, 560, 760):
+        view, _callbacks = _view_for_drawing(model)
+        canvas = _FakeCanvas()
+        box = (0, 0, 252, height)
+
+        view._draw_map_key_rail(canvas, box, groups=("MapCheat",))
+
+        rows = _left_column_text_rows(view, canvas, box)
+        assert len(rows) >= 4, height
+        for (top_a, bottom_a, text_a), (top_b, _bottom_b, text_b) in zip(rows, rows[1:]):
+            assert top_b >= bottom_a, (height, text_a, text_b)
+        assert rows[-1][1] <= height, height
+
+
 def test_hybrid_layout_gives_unified_map_key_legible_block():
     """Verify the folder rail gives the unified map key a legible block."""
 

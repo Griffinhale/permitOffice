@@ -173,7 +173,7 @@ def render_all(out_dir, display, scenario_names=None, stand_in=""):
     import tkinter as tk
     import tkinter.font as tkfont
 
-    from scenarios import SCENARIOS
+    from scenarios import SCENARIOS, TICKER_OFFSETS
     from toolbox.permit_office_arcgis.desk_view import PermitDeskView
 
     names = scenario_names or list(SCENARIOS)
@@ -189,6 +189,8 @@ def render_all(out_dir, display, scenario_names=None, stand_in=""):
                 view = PermitDeskView(root, _callbacks(), _noop)
                 root.update()
                 view.render(model)
+                if name in TICKER_OFFSETS:
+                    view.update_status_marquee(TICKER_OFFSETS[name])
                 if not results:
                     actual = tkfont.Font(root=root, family="Segoe UI", size=9).actual("family")
                     if actual.lower() != "segoe ui":
