@@ -172,6 +172,33 @@ lands and this check passes live.
       style from the shipped `.lyrx` files: base type, prosperity, and identity
       look right, with no default single-symbol layer.
 
+## 13. Dashboard look (UI7) *
+Linux previews use substitute fonts and Tk 9; only Pro (Tk 8.6, Segoe UI,
+Windows DPI) proves the look. Run each item at the default desk size
+(1180 x 1040 client) and at the minimum size (1180 x 860), on `ar_probe.aprx`
+or the `fresh.gdb` test project, never a real save. Screenshot both tabs at
+both sizes and note the Windows display scale.
+- [ ] Header: week, clock, AP and $ values are readable on the light title row
+      (no green-on-green), and values never run into their labels.
+- [ ] Map key: no label overlaps its sublabel or the next row at either size;
+      when the rail is short, rows or sublabels drop instead of overlapping.
+- [ ] Status ticker: scrolling text never shows outside its strip or under the
+      STATUS label. Open the menu and the help card and wait 10+ seconds each:
+      the ticker stays under them and no menu row is covered.
+- [ ] Decision brief: description and inspection note visible above Budget;
+      all six stamp cards keep labels, hotkey badges and costs separate and
+      inside their cards; long text ends in an ellipsis, not past an edge.
+- [ ] Report detail: a week report and a decision report show headed sections
+      (City effects, Local changes, Economy, Docket...) with no `...` cut-off;
+      long reports scroll by mouse wheel; metric values stay separate.
+- [ ] District table: shows district names, not `D0000` ids; targets and
+      changed districts come first; rows fill the box and scroll when there
+      are more than fit; column lines stop at the last row.
+- [ ] District groups: a state word in its tone color, no `?` glyphs and no
+      invented trend lines.
+- [ ] Menu and help card: every row and button tints light blue on hover.
+- [ ] Geoprocessing messages: no Python error or traceback for the whole run.
+
 ---
 **On any failure:** capture the Geoprocessing message log + a screenshot, note the
 exact step, and file it. Items 2 (grievance), 1 (workspace), 3 (repaint), and 7
