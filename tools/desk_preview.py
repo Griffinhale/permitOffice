@@ -123,11 +123,11 @@ def _noop(*_args):
 def _callbacks():
     """Return a DeskCallbacks bundle where every action does nothing."""
 
+    from dataclasses import fields
+
     from toolbox.permit_office_arcgis.desk_model import DeskCallbacks
 
-    names = ("toggle_exhibit", "update_from_map", "inspect", "approve", "approve_mitigated", "deny", "advance_turn", "new_game", "scorecard", "close")
-    extra = ("select_desk_tab", "select_report", "show_help", "end_game", "cancel_queue_autoclose", "pause_queue_autoclose")
-    return DeskCallbacks(**{name: _noop for name in names + extra})
+    return DeskCallbacks(**{field.name: _noop for field in fields(DeskCallbacks)})
 
 
 def _grab(root, display, path):
@@ -241,7 +241,9 @@ def main(argv=None):
         shutil.rmtree(work_dir, ignore_errors=True)
     if args.check:
         blank = [path for path, image in results if _is_blank(image)]
-        expected = len(SIZES) * len(__import__("scenarios").SCENARIOS)
+        from scenarios import SCENARIOS
+
+        expected = len(SIZES) * len(SCENARIOS)
         if blank or len(results) != expected:
             print(f"check failed: {len(results)}/{expected} rendered, blank: {[str(p) for p in blank]}", file=sys.stderr)
             return 1
