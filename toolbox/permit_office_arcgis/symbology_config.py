@@ -2,8 +2,8 @@
 
 import os
 
-# Styled layer files exported from Pro (ruling D2). A layer whose file is
-# present is added from it with its full style; code styling covers the rest.
+# Styled layer files exported from Pro (rulings D2, D7). Every Permit Office
+# layer and ring slot is added from its file; there is no code styling.
 LAYER_FILE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "layers")
 LAYER_FILE_NAMES = {
     "districts": "districts.lyrx",
@@ -83,20 +83,12 @@ IDENTITY_STATE_SYMBOLS = {
 }
 
 # Prosperity overlay: transparent fills (alpha 0) so the land-use-type fill stays
-# visible beneath; the graduated thriving->failing color is carried on the
-# outline (see PROSPERITY_BAND_OUTLINE / symbol_style_for).
+# visible beneath; the shipped prosperity.lyrx carries the graduated outline.
 PROSPERITY_BAND_SYMBOLS = {
     "thriving": ([106, 162, 114, 0], "Thriving"),
     "stable": ([170, 186, 170, 0], "Stable"),
     "strained": ([216, 159, 84, 0], "Strained"),
     "failing": ([196, 90, 74, 0], "Failing"),
-}
-
-PROSPERITY_BAND_OUTLINE = {
-    "thriving": [70, 150, 96, 100],
-    "stable": [150, 170, 150, 100],
-    "strained": [210, 150, 70, 100],
-    "failing": [196, 70, 60, 100],
 }
 
 SYMBOLS_BY_FIELD = {
@@ -111,129 +103,8 @@ RENDER_FIELD_BY_LAYER_KEY = {
     "points": "display_state",
     "lines": "display_state",
     "zones": "display_state",
-    "district_display": "display_state",
     # Overlay layers reuse the PermitDistricts feature class with a different
     # render field so type, prosperity, and identity each get a visual channel.
     "district_prosperity": "prosperity_band",
     "district_identity": "identity_state",
 }
-
-LAYER_TRANSPARENCY = {
-    "districts": 10,
-    "points": 0,
-    "lines": 0,
-    "zones": 35,
-    "district_display": 35,
-    "district_prosperity": 0,
-    "district_identity": 25,
-}
-
-DISTRICT_OUTLINE_COLOR = [242, 238, 226, 100]
-FEATURE_OUTLINE_COLOR = [78, 82, 78, 100]
-
-SYMBOL_STYLE_BY_LAYER = {
-    "districts": {
-        "outline_color": DISTRICT_OUTLINE_COLOR,
-        "outline_width": 3.0,
-    },
-    "district_display": {
-        "outline_color": [93, 48, 48, 100],
-        "outline_width": 3.2,
-    },
-    "zones": {
-        "outline_color": FEATURE_OUTLINE_COLOR,
-        "outline_width": 1.1,
-    },
-    "lines": {
-        "outline_color": FEATURE_OUTLINE_COLOR,
-        "outline_width": 3.0,
-    },
-    "points": {
-        "outline_color": [245, 241, 231, 100],
-        "outline_width": 0.9,
-        "size": 9.0,
-    },
-}
-
-
-def symbol_style_for(layer_key, value):
-    """Return ArcGIS symbol hints for a layer/value pair."""
-
-    style = SYMBOL_STYLE_BY_LAYER.get(layer_key or "", {})
-    outline_color = style.get("outline_color", [86, 98, 92, 100])
-    outline_width = float(style.get("outline_width", 1.2))
-    if layer_key == "district_prosperity":
-        # Graduated thriving->failing outline over a transparent fill.
-        return {
-            "outline_color": PROSPERITY_BAND_OUTLINE.get(value, [150, 170, 150, 100]),
-            "outline_width": 3.4,
-            "size": None,
-        }
-    if layer_key == "district_identity":
-        # Thick alert outline so contested/vulnerable districts read as overlays.
-        return {
-            "outline_color": [93, 48, 48, 100] if value != "stable" else [226, 232, 222, 0],
-            "outline_width": 3.4 if value != "stable" else 0.0,
-            "size": None,
-        }
-    if value == "special_interest":
-        # Special-interest anchor points read larger than ordinary context dots.
-        return {
-            "outline_color": [93, 60, 30, 100],
-            "outline_width": max(outline_width, 1.4),
-            "size": 15.0,
-        }
-    if value == "proposed":
-        outline_color = [31, 220, 222, 100]
-        outline_width = max(outline_width, 3.2)
-    elif value in ("vulnerable", "contested", "converted", "overextended"):
-        outline_color = [93, 48, 48, 100]
-        outline_width = max(outline_width, 3.2)
-    elif value in ("incident", "failed", "daily_pressure", "high_exposure", "aggrieved", "grievance", "hazard"):
-        outline_color = [93, 48, 48, 100]
-    elif value in ("road", "utility"):
-        outline_width = max(outline_width, 2.8)
-    return {
-        "outline_color": outline_color,
-        "outline_width": outline_width,
-        "size": style.get("size"),
-    }
-
-
-def apply_symbol_style(symbol, layer_key, value):
-    """Best-effort ArcGIS symbol styling across geometry types."""
-
-    style = symbol_style_for(layer_key, value)
-    assignments = [
-        ("outlineColor", {"RGB": style["outline_color"]}),
-        ("outlineWidth", style["outline_width"]),
-        ("width", style["outline_width"]),
-    ]
-    if style["size"] is not None:
-        assignments.append(("size", style["size"]))
-    for attr, attr_value in assignments:
-        try:
-            setattr(symbol, attr, attr_value)
-        except Exception:
-            pass
-
-
-def apply_default_symbol_style(symbol, layer_key):
-    """Give unique-value renderer fallbacks a visible symbol."""
-
-    fallback = {
-        "districts": ([220, 220, 208, 100], [242, 238, 226, 100], 3.0),
-        "zones": ([190, 184, 170, 70], [78, 82, 78, 100], 1.1),
-        "lines": ([78, 82, 78, 100], [78, 82, 78, 100], 3.0),
-        "points": ([78, 82, 78, 100], [245, 241, 231, 100], 0.9),
-    }.get(layer_key or "", ([190, 184, 170, 100], [86, 98, 92, 100], 1.2))
-    for attr, attr_value in (
-        ("color", {"RGB": fallback[0]}),
-        ("outlineColor", {"RGB": fallback[1]}),
-        ("outlineWidth", fallback[2]),
-        ("width", fallback[2]),
-    ):
-        try:
-            setattr(symbol, attr, attr_value)
-        except Exception:
-            pass

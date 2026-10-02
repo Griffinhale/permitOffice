@@ -43,9 +43,9 @@ The codebase is split so the game is testable without ArcGIS Pro.
 - `city_features.py` - baseline city detail seeded onto a new board.
 - `map_layers.py` - map layer add/remove, refresh, and the district/support
   display rings.
-- `symbology.py` - unique-value symbology, labels, and transparency applied in
-  code when no shipped `.lyrx` covers a layer.
-- `geometry.py` - re-exports the four modules above for one release.
+- `geometry.py` - re-exports the three modules above for one release.
+- `toolbox/layers/*.lyrx` - the six layer styles exported from Pro; every layer
+  and ring slot is added from one of them.
 - `redraw_plan.py` - ArcPy-free redraw planning: which layers a command
   changes and whether they are refreshed or re-added.
 - `map_redraw.py` - `rebuild_output_layers`, which carries out a redraw plan on

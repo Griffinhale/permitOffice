@@ -46,9 +46,9 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       failure the old visible slot should remain visible.
 
 ## 4. Symbology (#9) *
-- [ ] On launch the log emits the six `[SYM] set ... unique-value symbology on ...`
-      lines (PermitDistricts/Points/Lines/Zones + District Prosperity + District
-      Identity).
+- [ ] On a new game the log emits six `[SYM] styled ... from ....lyrx` lines,
+      one per layer (districts, points, lines, zones, prosperity, identity), and
+      no `could not point` or `missing toolbox/layers` warning.
 - [ ] District base renders by `district_type`; the Prosperity overlay by
       `prosperity_band`; the Identity overlay by `identity_state`.
 - [ ] Feature layers render by `display_state`; proposed-feature exhibits stay

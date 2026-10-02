@@ -18,7 +18,9 @@ sys.modules.setdefault(
 
 from toolbox import arcpy_permit_office_rules as rules
 from toolbox.permit_office_arcgis import geometry
-from toolbox.permit_office_arcgis import city_features, map_layers, proposals, symbology
+import pytest
+
+from toolbox.permit_office_arcgis import city_features, map_layers, proposals
 from toolbox.permit_office_arcgis.schema import DISTRICT_FIELDS
 
 
@@ -31,10 +33,28 @@ class FakeField:
 def _patch_split(monkeypatch, name, value):
     """Patch a name in each module split out of geometry.py that holds it."""
 
-    for module in (proposals, city_features, map_layers, symbology):
+    for module in (proposals, city_features, map_layers):
         if name in vars(module):
             monkeypatch.setattr(module, name, value)
 
+
+
+@pytest.fixture(autouse=True)
+def styled_adds(monkeypatch):
+    """Add ring slots straight from the path and record the style key used.
+
+    These tests cover ring and flip mechanics; the .lyrx add path itself is
+    covered in test_permit_office_symbology.py.
+    """
+
+    keys = []
+
+    def add(active_map, data_path, layer_key, messages):
+        keys.append(layer_key)
+        return active_map.addDataFromPath(data_path)
+
+    monkeypatch.setattr(map_layers, "_add_styled_layer", add)
+    return keys
 
 
 class FakeMessages:
@@ -459,7 +479,7 @@ def test_refresh_feature_scope_falls_back_to_readd_when_feature_ring_fails(monke
     ]
 
 
-def test_feature_display_ring_rehydrates_points_and_hides_base_layer(monkeypatch):
+def test_feature_display_ring_rehydrates_points_and_hides_base_layer(monkeypatch, styled_adds):
     """Verify support feature redraw uses a visible refreshed ring slot."""
 
     calls = []
@@ -484,14 +504,13 @@ def test_feature_display_ring_rehydrates_points_and_hides_base_layer(monkeypatch
         RefreshLayer=lambda name: calls.append(("refresh", name, next(layer.visible for layer in layers if layer.name == name))),
     )
     _patch_split(monkeypatch, "arcpy", fake)
-    _patch_split(monkeypatch, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
 
     handled = geometry._rehydrate_feature_display_ring(_paths(), CapturingMessages(), geometry.POINTS)
 
     assert handled is True
     assert ("remove", "Permit Office Predrawn Points 1") in calls
     assert ("add", "points") in calls
-    assert ("sym", "Permit Office Predrawn Points 1", "points") in calls
+    assert styled_adds == ["points"]
     assert ("refresh", "Permit Office Predrawn Points 1", True) in calls
     assert base_points.visible is False
 
@@ -515,7 +534,6 @@ def test_feature_display_ring_refreshes_visible_slot_without_rehydrate(monkeypat
     )
     _patch_split(monkeypatch, "arcpy", fake)
     _patch_split(monkeypatch, "_query_flip_supported", lambda: True)
-    _patch_split(monkeypatch, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
 
     handled = geometry._refresh_visible_feature_display_ring(_paths(), CapturingMessages(), geometry.POINTS)
 
@@ -586,7 +604,7 @@ def test_apply_ring_redraw_dispatches_to_district_ring(monkeypatch):
     assert calls == [({geometry.DISTRICTS, geometry.POINTS}, {geometry.DISTRICTS})]
 
 
-def test_district_ring_styles_slots_with_base_district_symbology(monkeypatch):
+def test_district_ring_styles_slots_with_base_district_symbology(monkeypatch, styled_adds):
     """Verify ring slots render district_type like PermitDistricts, not display_state."""
 
     calls = []
@@ -609,13 +627,12 @@ def test_district_ring_styles_slots_with_base_district_symbology(monkeypatch):
         RefreshLayer=lambda name: calls.append(("refresh", name)),
     )
     _patch_split(monkeypatch, "arcpy", fake)
-    _patch_split(monkeypatch, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    _patch_split(monkeypatch, "_query_flip_supported", lambda: False)
 
     handled = geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.DISTRICTS})
 
     assert handled is True
-    assert ("sym", "Permit Office Predrawn 1", "districts") in calls
-    assert ("sym", "Permit Office Predrawn 1", "district_display") not in calls
+    assert styled_adds == ["districts"]
 
 
 def test_district_ring_hides_base_district_family_layers(monkeypatch):
@@ -643,7 +660,7 @@ def test_district_ring_hides_base_district_family_layers(monkeypatch):
         RefreshLayer=lambda name: calls.append(("refresh", name)),
     )
     _patch_split(monkeypatch, "arcpy", fake)
-    _patch_split(monkeypatch, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    _patch_split(monkeypatch, "_query_flip_supported", lambda: False)
 
     handled = geometry.apply_ring_redraw(_paths(), CapturingMessages(), layer_names={geometry.DISTRICTS})
 
@@ -968,9 +985,6 @@ def _patch_flip(monkeypatch, fake):
     geometry._PRO_VERSION_CACHE.clear()
     _patch_split(monkeypatch, "arcpy", fake)
     _patch_split(monkeypatch, "_refresh_feature_scope", lambda *args, **kwargs: None)
-    _patch_split(monkeypatch, "apply_simple_symbology", lambda *args: None)
-    _patch_split(monkeypatch, "_configure_labels", lambda *args: None)
-    _patch_split(monkeypatch, "_tune_layer_visibility", lambda *args: None)
 
 
 def test_district_redraw_flips_visible_slot_query_on_supported_pro(monkeypatch):
@@ -1110,7 +1124,6 @@ def test_district_redraw_keeps_feature_ring_seed_below_query_flip_version(monkey
     fake, _slot, lines, calls = _district_flip_map_with_base_lines("3.6")
     _patch_split(monkeypatch, "arcpy", fake)
     _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
-    _patch_split(monkeypatch, "_prepare_district_display_layer", lambda *args, **kwargs: None)
 
     geometry.apply_ring_redraw(
         _paths(),
@@ -1177,9 +1190,3 @@ def test_support_metadata_goes_through_encode_json(monkeypatch):
 
     assert ({"note": "x" * 5000}, {"limit": 2048}) in calls
     assert all(not (isinstance(value, str) and value.startswith('{"note"')) for value in attrs)
-
-
-def test_district_display_layer_has_no_style_skip_flag():
-    import inspect
-
-    assert "skip_if_style_matches" not in inspect.signature(geometry._prepare_district_display_layer).parameters

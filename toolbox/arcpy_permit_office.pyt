@@ -37,7 +37,6 @@ for _module_name in (
     "permit_office_arcgis.store",
     "permit_office_arcgis.symbology_config",
     "permit_office_arcgis.layer_ring",
-    "permit_office_arcgis.symbology",
     "permit_office_arcgis.map_layers",
     "permit_office_arcgis.proposals",
     "permit_office_arcgis.city_features",

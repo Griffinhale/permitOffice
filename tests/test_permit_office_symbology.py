@@ -1,4 +1,4 @@
-"""Pure tests for ArcGIS Pro symbology API compatibility shims."""
+"""Pure tests for layer styling from the shipped .lyrx files."""
 
 from __future__ import annotations
 
@@ -15,13 +15,18 @@ sys.modules.setdefault(
     ),
 )
 
-from toolbox.permit_office_arcgis.geometry import apply_simple_symbology, remove_outputs_from_map, _configure_labels, _order_output_layers, _tune_layer_visibility
-from toolbox.permit_office_arcgis import city_features, map_layers, proposals, symbology
+import json
+from pathlib import Path
+
+import pytest
+
+from toolbox.permit_office_arcgis.geometry import remove_outputs_from_map, _order_output_layers
+from toolbox.permit_office_arcgis import city_features, map_layers, proposals
 
 def _patch_split(monkeypatch, name, value):
     """Patch a name in each module split out of geometry.py that holds it."""
 
-    for module in (proposals, city_features, map_layers, symbology):
+    for module in (proposals, city_features, map_layers):
         if name in vars(module):
             monkeypatch.setattr(module, name, value)
 
@@ -130,30 +135,6 @@ class FakeMap:
         self.layers.insert(insert_index, move_layer)
 
 
-class FakeCimLayer(FakeLayer):
-    """Layer double exposing ArcGIS CIM definition methods."""
-
-    def __init__(self, renderer) -> None:
-        """Initialize CIM renderer state used by fallback tests."""
-
-        super().__init__(renderer)
-        self.cim_renderer = SimpleNamespace(fields=None, useDefaultSymbol=False, isDefaultSymbolVisible=False)
-        self.cim_definition = SimpleNamespace(renderer=self.cim_renderer)
-        self.requested_cim_versions: list[str] = []
-        self.assigned_definition = None
-
-    def getDefinition(self, cim_version: str):
-        """Return the fake CIM definition and record requested version."""
-
-        self.requested_cim_versions.append(cim_version)
-        return self.cim_definition
-
-    def setDefinition(self, definition) -> None:
-        """Record the CIM definition assigned by the helper."""
-
-        self.assigned_definition = definition
-
-
 class FieldsListRenderer:
     """Renderer variant accepting list-valued fields."""
 
@@ -162,143 +143,6 @@ class FieldsListRenderer:
 
         self.fields = None
         self.useDefaultSymbol = False
-
-
-class FakeSymbol:
-    """Mutable symbol object used for style assertions."""
-
-    def __init__(self) -> None:
-        """Initialize symbol color state."""
-
-        self.color = None
-
-
-class FakeItem:
-    """Unique-value item double with value, label, and symbol."""
-
-    def __init__(self, value: str) -> None:
-        """Create one fake unique-value item."""
-
-        self.values = [[value]]
-        self.label = value
-        self.symbol = FakeSymbol()
-
-
-class FakeGroup:
-    """Unique-value renderer group double."""
-
-    def __init__(self, heading: str = "display_state") -> None:
-        """Initialize a group heading and empty item list."""
-
-        self.heading = heading
-        self.items: list[FakeItem] = []
-
-
-class StyledRenderer(FieldsListRenderer):
-    """Renderer variant that supports value seeding and styling."""
-
-    def __init__(self) -> None:
-        """Initialize renderer groups, added-value capture, and default symbol."""
-
-        super().__init__()
-        self.groups = [FakeGroup()]
-        self.added_values = None
-        self.defaultSymbol = FakeSymbol()
-
-    def addValues(self, values_or_items) -> None:
-        """Add unique-value items to the first fake group."""
-
-        self.added_values = values_or_items
-        existing = {item.values[0][0] for item in self.groups[0].items}
-        for value in values_or_items.get(self.groups[0].heading, []):
-            if value not in existing:
-                self.groups[0].items.append(FakeItem(value))
-
-
-class FieldRenderer:
-    """Renderer variant accepting only singular field assignment."""
-
-    def __init__(self) -> None:
-        """Initialize the singular field backing value."""
-
-        self._field = None
-        self.useDefaultSymbol = False
-
-    @property
-    def fields(self):
-        """Return unsupported list-field state."""
-
-        return None
-
-    @fields.setter
-    def fields(self, value) -> None:
-        """Reject list-field assignment."""
-
-        raise RuntimeError("fields is not supported")
-
-    @property
-    def field(self):
-        """Return the singular renderer field."""
-
-        return self._field
-
-    @field.setter
-    def field(self, value) -> None:
-        """Accept singular field assignment."""
-
-        self._field = value
-
-
-class FieldsTupleRenderer:
-    """Renderer variant accepting tuple-valued fields only."""
-
-    def __init__(self) -> None:
-        """Initialize tuple field state."""
-
-        self._fields = None
-        self.useDefaultSymbol = False
-
-    @property
-    def fields(self):
-        """Return assigned tuple fields."""
-
-        return self._fields
-
-    @fields.setter
-    def fields(self, value) -> None:
-        """Reject list fields but accept tuple fields."""
-
-        if isinstance(value, list):
-            raise RuntimeError("list fields are not supported")
-        self._fields = value
-
-
-class RejectingRenderer:
-    """Renderer variant that rejects all direct field setters."""
-
-    @property
-    def fields(self):
-        """Expose unsupported fields property."""
-
-        return None
-
-    @fields.setter
-    def fields(self, value) -> None:
-        """Reject fields assignment."""
-
-        raise RuntimeError("fields is not supported")
-
-    @property
-    def field(self):
-        """Expose unsupported field property."""
-
-        return None
-
-    @field.setter
-    def field(self, value) -> None:
-        """Reject field assignment."""
-
-        raise RuntimeError("field is not supported")
 
 
 def test_district_layers_render_by_district_type_by_default():
@@ -317,48 +161,6 @@ def test_identity_transition_symbol_values_are_configured():
     identity_symbols = SYMBOLS_BY_FIELD["identity_state"]
     assert {"stable", "vulnerable", "contested", "converted", "overextended"} <= set(identity_symbols)
     assert "district_type" in SYMBOLS_BY_FIELD
-
-
-def test_identity_transition_symbol_style_gets_strong_outline():
-    """Verify identity transition values get high-contrast outlines."""
-
-    from toolbox.permit_office_arcgis.symbology_config import symbol_style_for
-
-    style = symbol_style_for("districts", "contested")
-
-    assert style["outline_color"] == [93, 48, 48, 100]
-    assert style["outline_width"] == 3.2
-
-
-def test_apply_simple_symbology_uses_district_type_for_districts():
-    """Verify district layers render by district_type."""
-
-    renderer = FieldsListRenderer()
-    layer = FakeLayer(renderer)
-    messages = FakeMessages()
-
-    apply_simple_symbology(layer, "districts", messages)
-
-    assert layer.symbology.updated_renderer == "UniqueValueRenderer"
-    assert renderer.fields == ["district_type"]
-    assert renderer.useDefaultSymbol is True
-    assert layer.assigned_symbology is layer.symbology
-    assert layer.symbology_assignment_count == 1
-    assert messages.warnings == []
-
-
-def test_apply_simple_symbology_uses_display_state_for_support_layers():
-    """Verify support layers render by display_state."""
-
-    renderer = FieldsListRenderer()
-    layer = FakeLayer(renderer)
-    messages = FakeMessages()
-
-    apply_simple_symbology(layer, "points", messages)
-
-    assert renderer.fields == ["display_state"]
-    assert layer.assigned_symbology is layer.symbology
-    assert messages.warnings == []
 
 
 def test_support_feature_symbol_values_cover_seeded_city_detail_classes():
@@ -385,146 +187,6 @@ def test_support_feature_symbol_values_cover_seeded_city_detail_classes():
     assert display_symbols["road"][1] == "Road"
     assert display_symbols["utility"][1] == "Utility"
     assert display_symbols["housing"][1] == "Housing"
-
-
-def test_support_feature_style_hints_preserve_line_and_proposed_readability():
-    """Verify roads/utilities and proposed features get readable style hints."""
-
-    from toolbox.permit_office_arcgis.symbology_config import symbol_style_for
-
-    road = symbol_style_for("lines", "road")
-    utility = symbol_style_for("lines", "utility")
-    proposed_point = symbol_style_for("points", "proposed")
-
-    assert road["outline_width"] >= 3.0
-    assert utility["outline_width"] >= 3.0
-    assert proposed_point["outline_color"] == [31, 220, 222, 100]
-    assert proposed_point["outline_width"] >= 3.2
-
-
-def test_apply_simple_symbology_seeds_and_styles_district_type_classes():
-    """Verify known district types receive labels and symbols."""
-
-    renderer = StyledRenderer()
-    layer = FakeLayer(renderer)
-    messages = FakeMessages()
-
-    apply_simple_symbology(layer, "districts", messages)
-
-    items = {item.values[0][0]: item for item in renderer.groups[0].items}
-    assert "residential" in items
-    assert "mercantile" in items
-    assert "industrial" in items
-    assert "civic" in items
-    assert "academic" in items
-    assert "natural" in items
-    assert items["residential"].label == "Residential"
-    assert items["mercantile"].label == "Mercantile"
-    assert items["industrial"].symbol.color == {"RGB": [174, 166, 154, 100]}
-    assert items["residential"].symbol.outlineColor == {"RGB": [242, 238, 226, 100]}
-    assert items["residential"].symbol.outlineWidth == 3.0
-    assert renderer.defaultSymbol.color == {"RGB": [220, 220, 208, 100]}
-    assert renderer.defaultSymbol.outlineColor == {"RGB": [242, 238, 226, 100]}
-    assert renderer.defaultSymbol.outlineWidth == 3.0
-    assert renderer.useDefaultSymbol is True
-    assert layer.assigned_symbology is layer.symbology
-    assert messages.warnings == []
-
-
-def test_apply_simple_symbology_falls_back_to_field_attribute():
-    """Verify symbology uses singular field when fields is unavailable."""
-
-    renderer = FieldRenderer()
-    layer = FakeLayer(renderer)
-    messages = FakeMessages()
-
-    apply_simple_symbology(layer, "points", messages)
-
-    assert renderer.field == "display_state"
-    assert layer.assigned_symbology is layer.symbology
-    assert layer.symbology_assignment_count == 1
-    assert messages.warnings == []
-
-
-def test_apply_simple_symbology_falls_back_to_fields_tuple():
-    """Verify symbology uses tuple fields when list fields fail."""
-
-    renderer = FieldsTupleRenderer()
-    layer = FakeLayer(renderer)
-    messages = FakeMessages()
-
-    apply_simple_symbology(layer, "points", messages)
-
-    assert renderer.fields == ("display_state",)
-    assert layer.assigned_symbology is layer.symbology
-    assert layer.symbology_assignment_count == 1
-    assert messages.warnings == []
-
-
-def test_apply_simple_symbology_warns_once_when_no_field_api_works():
-    """Verify direct renderer failures produce one useful warning."""
-
-    layer = FakeLayer(RejectingRenderer())
-    messages = FakeMessages()
-
-    apply_simple_symbology(layer, "districts", messages)
-
-    assert layer.assigned_symbology is None
-    assert len(messages.warnings) == 1
-    assert "[SYM] WARN: unique-value symbology skipped for Fake Layer" in messages.warnings[0]
-    assert "fields is not supported" in messages.warnings[0]
-
-
-def test_apply_simple_symbology_falls_back_to_cim_field_setter():
-    """Verify CIM fallback configures renderer fields."""
-
-    layer = FakeCimLayer(RejectingRenderer())
-    messages = FakeMessages()
-
-    apply_simple_symbology(layer, "districts", messages)
-
-    assert layer.assigned_symbology is layer.symbology
-    assert layer.symbology_assignment_count == 1
-    assert layer.requested_cim_versions == ["V3"]
-    assert layer.cim_renderer.fields == ["district_type"]
-    assert layer.cim_renderer.useDefaultSymbol is True
-    assert layer.cim_renderer.isDefaultSymbolVisible is True
-    assert layer.assigned_definition is layer.cim_definition
-    assert messages.warnings == []
-
-
-def test_apply_simple_symbology_returns_quietly_without_symbology_support():
-    """Verify layers without symbology support are skipped quietly."""
-
-    layer = FakeLayer(FieldsListRenderer(), supports_symbology=False)
-    messages = FakeMessages()
-
-    apply_simple_symbology(layer, "districts", messages)
-
-    assert layer.assigned_symbology is None
-    assert messages.warnings == []
-
-
-def test_tune_layer_visibility_makes_zones_transparent():
-    """Verify configured layer transparency is applied."""
-
-    layer = FakeLayer(FieldsListRenderer())
-
-    _tune_layer_visibility(layer, "zones")
-
-    assert layer.transparency == 35
-
-
-def test_configure_labels_turns_on_district_name_labels():
-    """Verify district label classes display district names."""
-
-    layer = FakeLayer(FieldsListRenderer())
-
-    _configure_labels(layer, "districts")
-
-    assert layer.showLabels is True
-    assert layer.label_classes[0].expression == "$feature.district_name"
-    assert layer.label_classes[0].visible is True
 
 
 def test_remove_outputs_from_map_removes_stale_permit_layers(monkeypatch):
@@ -569,43 +231,6 @@ def test_order_output_layers_keeps_lines_on_top_and_districts_on_bottom():
         "PermitZones",
         "PermitDistricts",
     ]
-
-
-def test_overlay_layers_render_prosperity_and_identity_fields():
-    """Verify the district overlays render by prosperity_band and identity_state."""
-
-    messages = FakeMessages()
-    prosperity_renderer = FieldsListRenderer()
-    apply_simple_symbology(FakeLayer(prosperity_renderer), "district_prosperity", messages)
-    assert prosperity_renderer.fields == ["prosperity_band"]
-
-    identity_renderer = FieldsListRenderer()
-    apply_simple_symbology(FakeLayer(identity_renderer), "district_identity", messages)
-    assert identity_renderer.fields == ["identity_state"]
-    assert messages.warnings == []
-
-
-def test_prosperity_overlay_outline_is_graduated_over_transparent_fill():
-    """Verify prosperity bands carry a graduated outline and a transparent fill."""
-
-    from toolbox.permit_office_arcgis.symbology_config import PROSPERITY_BAND_SYMBOLS, symbol_style_for
-
-    thriving = symbol_style_for("district_prosperity", "thriving")
-    failing = symbol_style_for("district_prosperity", "failing")
-    assert thriving["outline_color"] != failing["outline_color"]
-    assert thriving["outline_width"] >= 3.0
-    # Fill is transparent (alpha 0) so the land-use fill stays visible beneath.
-    assert all(color[3] == 0 for color, _label in PROSPERITY_BAND_SYMBOLS.values())
-
-
-def test_special_interest_point_reads_larger_than_context():
-    """Verify special-interest points are sized larger than ordinary points."""
-
-    from toolbox.permit_office_arcgis.symbology_config import symbol_style_for
-
-    base = symbol_style_for("points", "context")
-    special = symbol_style_for("points", "special_interest")
-    assert special["size"] > (base["size"] or 9.0)
 
 
 def test_order_output_layers_stacks_overlays_above_base_district_fill():
@@ -748,24 +373,6 @@ def test_ring_slot_styled_from_lyrx_without_update_renderer(monkeypatch, tmp_pat
     assert all(layer.symbology.updated_renderer is None for layer in active_map.layers)
 
 
-def test_missing_lyrx_falls_back_to_code_styling(monkeypatch, tmp_path):
-    """Verify a layer whose .lyrx is not shipped yet is still added and styled in code."""
-
-    from toolbox.permit_office_arcgis import geometry, symbology_config
-
-    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path, names=("districts",))))
-    active_map = FakeLyrxMap()
-    _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
-
-    geometry.add_outputs_to_map({"districts": "/saves/game.gdb/PermitDistricts", "points": "/saves/game.gdb/PermitPoints"}, FakeMessages(), layer_names={"PermitPoints", "PermitDistricts"})
-
-    by_name = {layer.name: layer for layer in active_map.layers}
-    assert active_map.added_paths == ["/saves/game.gdb/PermitPoints", "/saves/game.gdb/PermitDistricts", "/saves/game.gdb/PermitDistricts"]
-    assert by_name["PermitDistricts"].symbology.updated_renderer is None
-    assert by_name["PermitPoints"].symbology.updated_renderer == "UniqueValueRenderer"
-    assert by_name["District Prosperity"].symbology.updated_renderer == "UniqueValueRenderer"
-
-
 def test_layer_file_path_maps_keys_to_shipped_file_names(monkeypatch, tmp_path):
     from toolbox.permit_office_arcgis import symbology_config
 
@@ -776,8 +383,25 @@ def test_layer_file_path_maps_keys_to_shipped_file_names(monkeypatch, tmp_path):
     assert symbology_config.layer_file_path("unknown") is None
 
 
-def test_lyrx_layer_that_cannot_be_repointed_falls_back_to_code_styling(monkeypatch, tmp_path):
-    """Verify a .lyrx layer left on the export's data is replaced, not kept."""
+def test_missing_lyrx_fails_without_code_styling(monkeypatch, tmp_path):
+    """Verify a missing .lyrx is reported, not drawn unstyled (ruling D7)."""
+
+    from toolbox.permit_office_arcgis import geometry, symbology_config
+
+    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path, names=("districts",))))
+    active_map = FakeLyrxMap()
+    _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
+    messages = FakeMessages()
+
+    geometry.add_outputs_to_map({"points": "/saves/game.gdb/PermitPoints"}, messages, layer_names={"PermitPoints"})
+
+    assert active_map.added_paths == []
+    assert active_map.layers == []
+    assert any("missing toolbox/layers/points.lyrx" in text for text in messages.warnings)
+
+
+def test_lyrx_layer_that_cannot_be_repointed_is_removed_and_reported(monkeypatch, tmp_path):
+    """Verify a .lyrx layer left on the export's data is not kept on the map."""
 
     from toolbox.permit_office_arcgis import geometry, symbology_config
 
@@ -789,8 +413,30 @@ def test_lyrx_layer_that_cannot_be_repointed_falls_back_to_code_styling(monkeypa
 
     geometry.add_outputs_to_map({"points": "/saves/game.gdb/PermitPoints"}, messages, layer_names={"PermitPoints"})
 
-    assert [layer.name for layer in active_map.layers] == ["PermitPoints"]
-    points = active_map.layers[0]
-    assert points.dataSource == "/saves/game.gdb/PermitPoints"
-    assert points.symbology.updated_renderer == "UniqueValueRenderer"
+    assert active_map.layers == []
+    assert active_map.added_paths == []
     assert any("could not point points.lyrx" in text for text in messages.warnings)
+
+
+@pytest.mark.parametrize("layer_key", sorted(map_layers.LAYER_FILE_NAMES))
+def test_shipped_lyrx_has_a_class_for_every_value_the_game_writes(layer_key):
+    """Verify each shipped style renders its field with no value left to the default symbol."""
+
+    from toolbox.permit_office_arcgis import symbology_config
+
+    path = Path(symbology_config.LAYER_FILE_DIR) / symbology_config.LAYER_FILE_NAMES[layer_key]
+    document = json.loads(path.read_text(encoding="utf-8"))
+    (definition,) = document["layerDefinitions"]
+    renderer = definition["renderer"]
+    field_name = symbology_config.RENDER_FIELD_BY_LAYER_KEY[layer_key]
+    values = {
+        value["fieldValues"][0]
+        for group in renderer.get("groups") or []
+        for item in group.get("classes") or []
+        for value in item.get("values") or []
+    }
+
+    assert renderer["type"] == "CIMUniqueValueRenderer"
+    assert renderer["fields"] == [field_name]
+    assert set(symbology_config.SYMBOLS_BY_FIELD[field_name]) <= values
+    assert not definition["featureTable"].get("definitionExpression")

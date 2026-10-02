@@ -11,8 +11,7 @@ import arcpy
 from .layer_ring import DisplayLayerRing, DistrictLayerRing
 from .messages import _log, _warn
 from .schema import DISTRICTS, LINES, POINTS, ZONES
-from .symbology import _apply_code_style, _style_in_code
-from .symbology_config import layer_file_path
+from .symbology_config import LAYER_FILE_NAMES, layer_file_path
 
 
 # District overlay layers reuse the PermitDistricts feature class with different
@@ -123,7 +122,6 @@ def add_outputs_to_map(paths, messages, layer_names=None):
                 lyr.name = name
                 existing[name] = lyr
                 _log(messages, "MAP", f"added {name}")
-            _style_in_code(existing[name], key, messages)
         # Add the prosperity and identity overlays from the same districts source.
         if layer_names is None or DISTRICTS in layer_names:
             for name, key in ((DISTRICT_PROSPERITY, "district_prosperity"), (DISTRICT_IDENTITY, "district_identity")):
@@ -132,32 +130,27 @@ def add_outputs_to_map(paths, messages, layer_names=None):
                     lyr.name = name
                     existing[name] = lyr
                     _log(messages, "MAP", f"added {name}")
-                _style_in_code(existing[name], key, messages)
         _order_output_layers(active_map, existing)
     except Exception as exc:
         _warn(messages, "MAP", f"add outputs failed: {exc}")
 
 
 def _add_styled_layer(active_map, data_path, layer_key, messages):
-    """Add a layer for data_path, styled from its shipped .lyrx when present.
+    """Add a layer for data_path from its shipped .lyrx, pointed at this save.
 
-    Without a .lyrx the layer is added bare and _style_in_code styles it. If
-    the .lyrx layer cannot be pointed at this save, it is dropped and the layer
-    is added from the path and styled in code here.
+    Raises when the .lyrx is missing or cannot be pointed at data_path, so no
+    layer is left unstyled or drawing the export's data (ruling D7).
     """
 
     layer_file = layer_file_path(layer_key)
     if layer_file is None:
-        return active_map.addDataFromPath(data_path)
+        raise RuntimeError(f"missing toolbox/layers/{LAYER_FILE_NAMES.get(layer_key, layer_key + '.lyrx')}")
     layer = active_map.addLayer(arcpy.mp.LayerFile(layer_file))[0]
     if _point_layer_at(layer, data_path):
         _log(messages, "SYM", f"styled {layer_key} from {os.path.basename(layer_file)}")
         return layer
-    _warn(messages, "SYM", f"could not point {os.path.basename(layer_file)} at {data_path}; styling in code")
     active_map.removeLayer(layer)
-    layer = active_map.addDataFromPath(data_path)
-    _apply_code_style(layer, layer_key, messages)
-    return layer
+    raise RuntimeError(f"could not point {os.path.basename(layer_file)} at {data_path}")
 
 
 def _point_layer_at(layer, data_path):
@@ -255,16 +248,6 @@ def _set_definition_query(layer, definition_query):
         pass
 
 
-def _prepare_district_display_layer(layer, messages, definition_query=None):
-    _set_definition_query(layer, definition_query)
-    _style_in_code(layer, "districts", messages)
-
-
-def _prepare_feature_display_layer(layer, messages, layer_key, definition_query=None):
-    _set_definition_query(layer, definition_query)
-    _style_in_code(layer, layer_key, messages)
-
-
 def _is_predrawn_district_layer_name(name):
     return name.startswith(PREDRAWN_LAYER_PREFIX) and not _is_predrawn_feature_layer_name(name)
 
@@ -340,15 +323,12 @@ def _rehydrate_feature_display_ring(paths, messages, layer_name):
     if active_map is None:
         return False
 
-    def _copy_style(layer):
-        _prepare_feature_display_layer(layer, messages, layer_key, "1=1")
-
     try:
         ring = DisplayLayerRing(
             active_map,
             prefix=prefix,
             arcpy_module=arcpy,
-            style_copier=_copy_style,
+            style_copier=lambda layer: _set_definition_query(layer, "1=1"),
             layer_adder=lambda path: _add_styled_layer(active_map, path, layer_key, messages),
         )
         ring.prepare_and_swap(paths[path_key])
@@ -510,9 +490,6 @@ def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None)
         _log_redraw(messages, "district-ring", "no-active-map", started)
         return
 
-    def _copy_style(layer):
-        _prepare_district_display_layer(layer, messages, "1=1")
-
     if _query_flip_supported():
         flipped = _flip_visible_district_slot(active_map, paths["districts"], messages)
         phases.mark("query_flip")
@@ -529,7 +506,7 @@ def _apply_district_ring_redraw(paths, messages, layer_names, remove_scope=None)
     ring = DistrictLayerRing(
         active_map,
         arcpy_module=arcpy,
-        style_copier=_copy_style,
+        style_copier=lambda layer: _set_definition_query(layer, "1=1"),
         phase_marker=phases.mark,
         layer_adder=lambda path: _add_styled_layer(active_map, path, "districts", messages),
     )

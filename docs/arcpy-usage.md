@@ -112,11 +112,13 @@ Timings are visible under `PERMIT_OFFICE_PERF=1` as `ring_redraw`,
 with phase labels such as `feature_PermitPoints_ring_refresh` and
 `feature_PermitPoints_ring_rehydrate`.
 
-**Symbology** (`symbology_config.py` + `symbology.py`): a `UniqueValueRenderer` set
-via `sym.updateRenderer("UniqueValueRenderer")`, with the render field assigned
-through multiple fallbacks (`renderer.fields` list → `renderer.field` string →
-CIM `getDefinition("V3"/"V2")` + `setDefinition`) because the accessible property
-varies by ArcGIS build. Districts render by `district_type`, support layers by
+**Symbology** (`toolbox/layers/*.lyrx`, `map_layers._add_styled_layer`): every
+Permit Office layer and ring slot is added with `Map.addLayer(arcpy.mp.LayerFile(...))`
+from a style exported from Pro, then pointed at the save with
+`updateConnectionProperties`; the new `dataSource` is checked because Pro can skip
+an invalid update without raising. A missing or unrepointable `.lyrx` is an error,
+not a code-styled fallback (ruling D7). Districts render by `district_type`, the
+overlays by `prosperity_band` and `identity_state`, support layers by
 `display_state`.
 
 ## 5. Selection & analysis
