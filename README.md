@@ -162,6 +162,8 @@ do not replace a live ArcGIS Pro smoke test.
 - `docs/docket-items.md` - docket template/item shape with worked examples.
 - `docs/writing-and-tone.md` - the municipal voice and real copy examples.
 - `docs/arcgis-pro-smoke-checklist.md` - the manual live test in ArcGIS Pro.
+- `docs/live-testing-loop.md` - how sub-second map bugs get caught: a lead on
+  Linux, an agent driving Pro inside a Windows VM, and a frame-stamped recorder.
 
 ## Current Status
 
