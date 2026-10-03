@@ -93,3 +93,28 @@ def test_dashboard_uses_the_shared_redraw_planners():
     assert dashboard._week_close_redraw_layers is redraw_plan._week_close_redraw_layers
     assert dashboard.rebuild_output_layers is map_redraw.rebuild_output_layers
     assert map_redraw._redraw_plan is redraw_plan._redraw_plan
+
+
+def test_selection_layers_for_item_names_targets_and_the_proposal_layer():
+    """A case selects districts for its targets and the layer holding its proposal."""
+
+    point_case = rules.DocketItem("CASE-p", "street_vendor_compact", "Vendor", "POINT", 1, target_cell_ids=["D0001"])
+    line_case = rules.DocketItem("CASE-l", "connector_corridor", "Road", "LINE", 1, target_cell_ids=["D0001", "D0002"])
+    zone_case = rules.DocketItem("CASE-z", "market_square", "Square", "POLYGON", 1, target_cell_ids=["D0003"])
+
+    assert redraw_plan.selection_layers_for_item(point_case) == frozenset({"PermitDistricts", "PermitPoints"})
+    assert redraw_plan.selection_layers_for_item(line_case) == frozenset({"PermitDistricts", "PermitLines"})
+    assert redraw_plan.selection_layers_for_item(zone_case) == frozenset({"PermitDistricts", "PermitZones"})
+    assert redraw_plan.selection_layers_for_item(None) == frozenset()
+
+
+def test_selection_layers_for_item_keeps_districts_for_an_unresolved_case_without_targets():
+    """An open case with no targets yet still gets a proposal with suggested targets."""
+
+    open_case = rules.DocketItem("CASE-o", "street_vendor_compact", "Vendor", "POINT", 1)
+    done_case = rules.DocketItem("CASE-d", "street_vendor_compact", "Vendor", "POINT", 1, status="approved")
+    odd_case = rules.DocketItem("CASE-x", "street_vendor_compact", "Vendor", "MULTIPATCH", 1, target_cell_ids=["D0001"])
+
+    assert redraw_plan.selection_layers_for_item(open_case) == frozenset({"PermitDistricts", "PermitPoints"})
+    assert redraw_plan.selection_layers_for_item(done_case) == frozenset({"PermitPoints"})
+    assert redraw_plan.selection_layers_for_item(odd_case) == frozenset({"PermitDistricts"})

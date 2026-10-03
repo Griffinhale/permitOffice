@@ -76,6 +76,24 @@ On 3.7+ the district path now toggles that layer's own query in place instead.
 The district flip itself still drops the city shapes briefly; the recorded
 probes fit a query change redrawing the changed layer and every layer drawn
 above it.
+**October 2 follow-up (Pro 3.7, recorded single-call probe):** eight clips, one
+map call each, on the six base layers with no ring slots. A definition-query
+flip on the points layer drops only the points, for about 0.3 s. A GP
+`NEW_SELECTION` on any layer draws its highlight with no captured drop. A
+`setSelectionSet([], "NEW")` clear repaints only the cleared layer, for about
+one frame, and only the district clear shows white, because the base district
+fill is the bottom opaque layer. No single call dropped another layer, so the
+"every layer drawn above it" reading above is withdrawn for the base-layer
+case. What a player sees on a points-only decision is three one-frame repaints
+stacked by the pre-redraw selection clear, one per base layer that held the
+previous case's selection, plus the points flip. The fix is in the selection
+path, not the draw order. A later clip the same day (run 3) showed the ring-slot
+district flip and the overlay flips also drop only the flipped layer, white only
+where nothing opaque lies under it, so the week-close blink is a stack of per-layer
+drops too. Wrapping the same calls in `arcpy.PauseDrawing` (run 4) did not help:
+the pause neither holds the old frame nor repaints once; a paused district flip
+still drops the fills for about 0.2 s at block exit, and a paused decision shape
+hid the points for the whole block. PauseDrawing is not used.
 *(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
 reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
 later. Supersedes the earlier district-family remove+add default with a measured

@@ -101,6 +101,29 @@ def _decision_layer_names(item):
     return {DISTRICTS, feature_layer}
 
 
+UNRESOLVED_CASE_STATUSES = frozenset(("open", "inspected", "carried"))
+
+
+def selection_layers_for_item(item) -> frozenset[str]:
+    """Return the base layers ``select_case_context`` gives a NEW_SELECTION for this case.
+
+    Districts when the case has targets (an unresolved case without targets gets
+    a proposal with suggested targets, so it counts too), plus the feature layer
+    holding its proposal or subject feature. NEW_SELECTION replaces, so a
+    pre-redraw clear on these layers only adds a repaint (AR18).
+    """
+
+    if item is None:
+        return frozenset()
+    layers = set()
+    if getattr(item, "target_cell_ids", None) or getattr(item, "status", "") in UNRESOLVED_CASE_STATUSES:
+        layers.add(DISTRICTS)
+    feature_layer = _GEOM_TYPE_TO_LAYER.get(str(getattr(item, "geometry_type", "") or "").upper())
+    if feature_layer and (getattr(item, "item_id", "") or getattr(item, "subject_feature_id", "")):
+        layers.add(feature_layer)
+    return frozenset(layers)
+
+
 def _feature_layer_key_for_item(item):
     return {
         "POINT": "points",

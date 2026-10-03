@@ -6,16 +6,23 @@ import os
 
 import arcpy
 
-from ._perf import perf_active, perf_block
+from ._perf import perf_active, perf_block, perf_enabled
 from .map_layers import add_outputs_to_map, apply_ring_redraw, refresh_all, remove_outputs_from_map
 from .messages import _log, _warn
 from .redraw_plan import _redraw_plan
 from .schema import DISTRICTS, LINES, POINTS, ZONES
 
 
-def clear_output_selections(paths):
-    """Clear nonempty base-layer selections without creating path-based aliases."""
+def clear_output_selections(paths, messages=None, keep=()):
+    """Clear nonempty base-layer selections without creating path-based aliases.
 
+    ``keep`` names base layers the next case is about to overwrite with a
+    NEW_SELECTION; clearing those first only buys one extra repaint per layer
+    (AR18), so they are left alone. Under PERF one ``SELECT`` line names the
+    kept and cleared layers.
+    """
+
+    keep = frozenset(keep or ())
     with perf_block("sel"):
         try:
             active_map = arcpy.mp.ArcGISProject("CURRENT").activeMap
@@ -24,6 +31,8 @@ def clear_output_selections(paths):
         if active_map is None:
             return
         sources = {name: paths.get(key) for name, key in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones"))}
+        kept = []
+        cleared = []
         for layer in active_map.listLayers():
             name = getattr(layer, "name", "")
             if name not in sources or not sources[name]:
@@ -31,16 +40,21 @@ def clear_output_selections(paths):
             try:
                 if os.path.normcase(os.path.normpath(layer.dataSource)) != os.path.normcase(os.path.normpath(sources[name])):
                     continue
-                if layer.getSelectionSet():
-                    layer.setSelectionSet([], "NEW")
+                if not layer.getSelectionSet():
+                    continue
+                if name in keep:
+                    kept.append(name)
+                    continue
+                layer.setSelectionSet([], "NEW")
+                cleared.append(name)
             except Exception:
                 # Never turn an unresolved map layer into a GP feature-class input.
                 continue
+        if messages is not None and perf_enabled() and (kept or cleared):
+            _log(messages, "SELECT", f"clear kept={sorted(kept)} cleared={sorted(cleared)}")
 
 
-
-
-def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, dirty_scope=None, remove_scope_override=None):
+def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, dirty_scope=None, remove_scope_override=None, keep_selections=None):
     """Refresh (or, when forced, recreate) map layers after GDB edits.
 
     layer_names: optional iterable restricting the work to those names. None
@@ -48,6 +62,9 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
 
     force_readd: remove and re-add *every* in-scope layer from scratch. Needed
     when the layer set or symbology changes (e.g. a new game).
+
+    keep_selections: base layers whose selection the caller is about to replace
+    with a NEW_SELECTION; the pre-redraw clear skips them (AR18).
 
     The default district path is district-ring: one numeric predrawn district
     slot is re-added from the GDB, symbolized, made visible, then refreshed.
@@ -66,7 +83,7 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
     perf_messages = None if perf_active() else messages
     with perf_block("rebuild", perf_messages):
         if plan.clear_selections:
-            clear_output_selections(paths)
+            clear_output_selections(paths, messages, keep=keep_selections or ())
         mode = plan.mode
         scope = "all" if effective_layer_names is None else f"targeted={sorted(effective_layer_names)}"
         dirty = dirty_scope or "layers"

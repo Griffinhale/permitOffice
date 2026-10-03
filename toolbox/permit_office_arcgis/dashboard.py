@@ -61,6 +61,7 @@ from .redraw_plan import (
     _week_close_redraw_layers,
     hydrate_decision_redraw_plan,
     layer_names_for_plan,
+    selection_layers_for_item,
 )
 
 
@@ -85,6 +86,8 @@ MIDWEEK_MAP_REDRAW_DAYS = frozenset((2, 4))
 HOLD_DAY_ENV = "PERMIT_OFFICE_HOLD_DAY"
 PURE_WORKER_TIMEOUT_SECONDS = 1.0
 STARTUP_SESSION_DELAY_MS = 50
+# _finish_decision passes this when the next case could not be read before the redraw.
+_NEXT_UNREAD = object()
 _pure_worker_state = threading.local()
 
 
@@ -1239,6 +1242,13 @@ class DashboardController:
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
             command_finish(self.paths, command_id, result.command_status, filed_report)
+        # Read the next case now so the redraw's selection clear can leave alone
+        # the base layers its NEW_SELECTION is about to replace (AR18).
+        try:
+            next_item = self._next_triage_item(item.item_id)
+        except Exception:
+            next_item = _NEXT_UNREAD
+        keep_selections = selection_layers_for_item(None if next_item is _NEXT_UNREAD else next_item)
         if hydrated_plan is not None:
             redraw_names = layer_names_for_plan(hydrated_plan)
             remove_names = set(hydrated_plan.remove_readd_names)
@@ -1251,24 +1261,35 @@ class DashboardController:
                 layer_names=redraw_names,
                 dirty_scope=(DIRTY_DESK_ONLY if not redraw_names else None) if district_display_changed is False else DIRTY_DISTRICTS,
                 remove_scope_override=remove_names,
+                keep_selections=keep_selections,
             )
         else:
-            rebuild_output_layers(self.paths, self.messages, layer_names=layer_names, dirty_scope=DIRTY_DISTRICTS)
+            rebuild_output_layers(self.paths, self.messages, layer_names=layer_names, dirty_scope=DIRTY_DISTRICTS, keep_selections=keep_selections)
         self.district_layer = DISTRICTS
         self.status_var.set(filed_report)
         self._record_receipt(item.title, filed_report, result.affected_cell_ids, state, districts)
-        self._advance_triage_selection(item.item_id)
+        self._advance_triage_selection(item.item_id, next_item)
 
-    def _advance_triage_selection(self, resolved_item_id):
-        """Select the next open application or arm queue auto-close."""
+    def _next_triage_item(self, resolved_item_id):
+        """Return the next open application after a decision, or None when the queue is empty."""
 
-        try:
-            docket = read_docket(self.paths)
-        except Exception as exc:
-            _warn(self.messages, "DASH", f"next selection skipped: {exc}")
-            return
+        docket = read_docket(self.paths)
         active = [item for item in docket if item.status in ("open", "inspected", "active", "carried")]
-        next_item = next((item for item in active if item.item_id != resolved_item_id), active[0] if active else None)
+        return next((item for item in active if item.item_id != resolved_item_id), active[0] if active else None)
+
+    def _advance_triage_selection(self, resolved_item_id, next_item=_NEXT_UNREAD):
+        """Select the next open application or arm queue auto-close.
+
+        ``next_item`` is the case ``_finish_decision`` already read before the
+        redraw; the sentinel means read it here.
+        """
+
+        if next_item is _NEXT_UNREAD:
+            try:
+                next_item = self._next_triage_item(resolved_item_id)
+            except Exception as exc:
+                _warn(self.messages, "DASH", f"next selection skipped: {exc}")
+                return
         self.selected_desk_tab = "applications"
         if next_item is None:
             self.selected_item_id = ""
