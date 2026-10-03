@@ -324,7 +324,6 @@ def test_rebuild_planner_uses_production_ring_for_district_scope(monkeypatch):
     assert plan.mode == "district-readd"
     assert plan.remove_scope == frozenset((dashboard.DISTRICTS,))
     assert calls == [
-        ("clear", None),
         (
             "ring",
             {
@@ -332,6 +331,7 @@ def test_rebuild_planner_uses_production_ring_for_district_scope(monkeypatch):
                 "remove_scope": {dashboard.DISTRICTS},
             },
         ),
+        ("clear", None),
     ]
 
 
@@ -354,7 +354,6 @@ def test_rebuild_planner_readds_dirty_point_layer_when_in_scope(monkeypatch):
     assert plan.mode == "district-readd"
     assert plan.remove_scope == frozenset((dashboard.DISTRICTS, dashboard.POINTS))
     assert calls == [
-        ("clear", None),
         (
             "ring",
             {
@@ -362,6 +361,7 @@ def test_rebuild_planner_readds_dirty_point_layer_when_in_scope(monkeypatch):
                 "remove_scope": {dashboard.DISTRICTS, dashboard.POINTS},
             },
         ),
+        ("clear", None),
     ]
 
 
@@ -389,7 +389,6 @@ def test_rebuild_hydrated_plan_can_override_remove_scope(monkeypatch):
 
     assert plan.mode == "district-readd"
     assert calls == [
-        ("clear", None),
         (
             "ring",
             {
@@ -397,6 +396,7 @@ def test_rebuild_hydrated_plan_can_override_remove_scope(monkeypatch):
                 "remove_scope": {dashboard.DISTRICTS},
             },
         ),
+        ("clear", None),
     ]
 
 
@@ -417,7 +417,11 @@ def test_rebuild_planner_allows_desk_only_without_map_work(monkeypatch):
 
 
 def test_rebuild_planner_refreshes_feature_only_scope(monkeypatch):
-    """Verify feature-only dirty scopes avoid district re-adds."""
+    """Verify feature-only dirty scopes avoid district re-adds and clear after the requery.
+
+    AR18 v6: a clear 0.8 s before a layer's requery made two drops back to back
+    (zones ~1 s at week close); clearing after merges them.
+    """
 
     calls = []
     monkeypatch.setattr(map_redraw, "clear_output_selections", lambda paths, *args, **kwargs: calls.append(("clear", None)))
@@ -430,8 +434,8 @@ def test_rebuild_planner_refreshes_feature_only_scope(monkeypatch):
 
     assert plan.mode == "refresh-only"
     assert calls == [
-        ("clear", None),
         ("ring", {dashboard.POINTS}),
+        ("clear", None),
     ]
 
 
@@ -470,7 +474,6 @@ def test_rebuild_uses_production_ring_without_env_override(monkeypatch):
 
     assert plan.mode == "district-readd"
     assert calls == [
-        ("clear", None),
         (
             "ring",
             {
@@ -478,6 +481,7 @@ def test_rebuild_uses_production_ring_without_env_override(monkeypatch):
                 "remove_scope": {dashboard.DISTRICTS},
             },
         ),
+        ("clear", None),
     ]
 
 
@@ -501,7 +505,6 @@ def test_rebuild_falls_back_when_default_rehydrate_fails(monkeypatch):
 
     assert plan.mode == "district-readd"
     assert calls == [
-        ("clear", None),
         (
             "ring",
             {
@@ -512,6 +515,7 @@ def test_rebuild_falls_back_when_default_rehydrate_fails(monkeypatch):
         ("remove", {dashboard.DISTRICTS}),
         ("add", {dashboard.DISTRICTS}),
         ("refresh", {dashboard.DISTRICTS}),
+        ("clear", None),
     ]
     assert logs == [("REBUILD", "district-ring failed; falling back to district-readd")]
 
@@ -2603,9 +2607,9 @@ def test_decision_clear_skips_layers_the_next_case_selects(monkeypatch):
     """Verify a decision does not repaint layers the next case reselects (AR18).
 
     The next case selects on districts (targets) and points (its proposal), and
-    NEW_SELECTION replaces, so the pre-redraw clear must leave those two alone.
-    Lines held the previous case's road and the next case has none, so lines are
-    still cleared once, before the next case's selection.
+    NEW_SELECTION replaces, so the clear must leave those two alone. Lines held
+    the previous case's road and the next case has none, so lines are still
+    cleared once, after the redraw and before the next case's selection.
     """
 
     resolved = rules.DocketItem("CASE-done", "connector_corridor", "Done", "LINE", 1, status="approved")
@@ -2642,7 +2646,7 @@ def test_decision_clear_skips_layers_the_next_case_selects(monkeypatch):
 
     clears = [call for call in calls if call[0] == "clear"]
     assert clears == [("clear", dashboard.LINES, [], "NEW")]
-    assert [call[0] for call in calls] == ["clear", "ring", "context"]
+    assert [call[0] for call in calls] == ["ring", "clear", "context"]
     assert ("context", next_item.item_id) in calls
 
 

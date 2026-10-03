@@ -64,7 +64,12 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
     when the layer set or symbology changes (e.g. a new game).
 
     keep_selections: base layers whose selection the caller is about to replace
-    with a NEW_SELECTION; the pre-redraw clear skips them (AR18).
+    with a NEW_SELECTION; the selection clear skips them (AR18).
+
+    The selection clear runs after the redraw, not before: a clear repaints its
+    layer, and run ahead of that layer's requery the two drops landed back to
+    back (zones ~1 s at week close, points twice on a decision). Right after the
+    requery they overlap into one.
 
     The default district path is district-ring: one numeric predrawn district
     slot is re-added from the GDB, symbolized, made visible, then refreshed.
@@ -82,8 +87,6 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
     effective_layer_names = None if layer_names is None and plan.mode in ("force-readd", "district-readd") else set(plan.layer_names)
     perf_messages = None if perf_active() else messages
     with perf_block("rebuild", perf_messages):
-        if plan.clear_selections:
-            clear_output_selections(paths, messages, keep=keep_selections or ())
         mode = plan.mode
         scope = "all" if effective_layer_names is None else f"targeted={sorted(effective_layer_names)}"
         dirty = dirty_scope or "layers"
@@ -98,6 +101,8 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
                     remove_scope=remove_scope,
                 )
             if handled:
+                if plan.clear_selections:
+                    clear_output_selections(paths, messages, keep=keep_selections or ())
                 return plan
             _warn(messages, "REBUILD", f"district-ring failed; falling back to {mode}")
         fallback_remove_scope = set(remove_scope_override) if remove_scope_override is not None else None if plan.remove_scope is None else set(plan.remove_scope)
@@ -108,4 +113,6 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
             add_outputs_to_map(paths, messages, layer_names=effective_layer_names)
         with perf_block("refresh"):
             refresh_all(paths, messages, layer_names=effective_layer_names)
+        if plan.clear_selections:
+            clear_output_selections(paths, messages, keep=keep_selections or ())
     return plan

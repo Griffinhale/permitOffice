@@ -103,6 +103,9 @@ copy, a fill drop showed the old fill instead of white, through stacked flips
 and a real district-changing decision, and the copy never blanked. Costs: at
 10% layer transparency the two fills stack, so districts draw slightly
 darker; a converted district may show its old type color during a drop.
+The selection clear now runs after the redraw. Run ahead of it, the clear's
+repaint and the layer's requery landed back to back: zones gone ~1 s at week
+close, points twice on a decision.
 *(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
 reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
 later. Supersedes the earlier district-family remove+add default with a measured

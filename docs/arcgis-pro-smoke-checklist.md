@@ -165,9 +165,9 @@ lands and this check passes live.
 - [ ] (after AR18) With `PERMIT_OFFICE_PERF=1` and `PERMIT_OFFICE_HOLD_DAY`
       set, make a points-only decision whose next case is also a point case.
       Only the points layer blinks; districts and lines stay put. The log shows
-      one `[SELECT] clear kept=[...] cleared=[...]` line that never lists
-      `PermitDistricts` under cleared, then `[REBUILD] targeted=['PermitPoints']`
-      and one `feature-query target='PermitPoints'`. No district white. On a map
+      `[REBUILD] targeted=['PermitPoints']`, one `feature-query target='PermitPoints'`,
+      then one `[SELECT] clear kept=[...] cleared=[...]` line that never lists
+      `PermitDistricts` under cleared. Points drop once. No district white. On a map
       with no `Permit Office Predrawn Points` slot, none is created and the base
       `PermitPoints` stays visible. The next case's targets and proposal point
       are highlighted afterwards.
@@ -175,6 +175,7 @@ lands and this check passes live.
       `PermitDistricts`, with no labels of its own (each district name drawn
       once). Close a week: district interiors never go white; at most they
       show the previous fill for a moment.
+      Zones, lines and points each drop at most once, for well under a second.
 - [ ] (after AR19, Pro 3.7) In `ar_probe.aprx` on `probe_save.gdb`, save,
       then restart Pro. Open the dashboard, close it right away with no
       decisions, then run one
