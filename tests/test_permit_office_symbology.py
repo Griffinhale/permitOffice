@@ -361,10 +361,12 @@ def test_add_outputs_loads_each_layer_from_its_lyrx_and_points_it_at_the_save(mo
 
     assert active_map.added_paths == []
     assert sorted(path.rsplit("/", 1)[-1] for path in active_map.added_layer_files) == [
-        "districts.lyrx", "identity.lyrx", "lines.lyrx", "points.lyrx", "prosperity.lyrx", "zones.lyrx",
+        "districts.lyrx", "districts.lyrx", "identity.lyrx", "lines.lyrx", "points.lyrx", "prosperity.lyrx", "zones.lyrx",
     ]
     by_name = {layer.name: layer for layer in active_map.layers}
-    assert set(by_name) == {"PermitDistricts", "PermitPoints", "PermitLines", "PermitZones", "District Prosperity", "District Identity"}
+    assert set(by_name) == {
+        "PermitDistricts", "PermitPoints", "PermitLines", "PermitZones", "District Prosperity", "District Identity", "District Underlay",
+    }
     districts = by_name["PermitDistricts"]
     assert districts.connectionProperties["dataset"] == "PermitDistricts"
     assert districts.connectionProperties["connection_info"]["database"] == "/saves/game.gdb"
@@ -372,6 +374,47 @@ def test_add_outputs_loads_each_layer_from_its_lyrx_and_points_it_at_the_save(mo
     assert all(layer.symbology.updated_renderer is None for layer in active_map.layers)
     assert not any("unique-value" in text for text in messages.messages)
     assert any("styled districts from districts.lyrx" in text for text in messages.messages)
+
+
+def test_add_outputs_puts_an_unlabeled_district_underlay_below_the_district_fill(monkeypatch, tmp_path):
+    """Verify the district underlay sits last in drawing order, reads the save, and has labels off.
+
+    AR18 run v5: a requeried district fill drops for ~0.2 s and showed white
+    with nothing under it; an untouched copy beneath showed the old fill. The
+    copy's labels doubled every district name, so they are turned off.
+    """
+
+    from toolbox.permit_office_arcgis import geometry, symbology_config
+
+    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path)))
+    active_map = FakeLyrxMap()
+    _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
+    paths = {key: f"/saves/game.gdb/Permit{key.title()}" for key in ("districts", "points", "lines", "zones")}
+
+    geometry.add_outputs_to_map(paths, FakeMessages())
+
+    names = [layer.name for layer in active_map.layers]
+    assert names[-2:] == ["PermitDistricts", "District Underlay"]
+    underlay = active_map.layers[-1]
+    assert underlay.connectionProperties["dataset"] == "PermitDistricts"
+    assert underlay.showLabels is False
+    assert underlay.visible is True
+
+
+def test_remove_outputs_removes_the_district_underlay_with_districts(monkeypatch):
+    """Verify the underlay goes whenever the district layers are rebuilt."""
+
+    from toolbox.permit_office_arcgis import geometry
+
+    layers = [SimpleNamespace(name=name) for name in ("PermitDistricts", "District Underlay", "PermitPoints")]
+    active_map = FakeMap(layers)
+    _patch_split(monkeypatch, "arcpy", SimpleNamespace(mp=SimpleNamespace(ArcGISProject=lambda name: SimpleNamespace(activeMap=active_map))))
+
+    geometry.remove_outputs_from_map(FakeMessages(), layer_names={"PermitPoints"})
+    assert "District Underlay" not in active_map.removed
+
+    geometry.remove_outputs_from_map(FakeMessages(), layer_names={"PermitDistricts"})
+    assert "District Underlay" in active_map.removed
 
 
 def test_ring_slot_styled_from_lyrx_without_update_renderer(monkeypatch, tmp_path):
@@ -523,7 +566,10 @@ def test_one_unpointable_lyrx_layer_does_not_stop_the_other_outputs(monkeypatch,
 
     geometry.add_outputs_to_map(paths, messages)
 
-    assert {layer.name for layer in active_map.layers} == {"PermitDistricts", "PermitLines", "PermitZones", "District Prosperity", "District Identity"}
+    names = [layer.name for layer in active_map.layers]
+    assert set(names) == {"PermitDistricts", "PermitLines", "PermitZones", "District Prosperity", "District Identity", "District Underlay"}
+    # Full ordering is skipped with points missing; the underlay must still sit under the fill.
+    assert names.index("District Underlay") == names.index("PermitDistricts") + 1
     assert len(messages.warnings) == 1
     assert "could not point points.lyrx at /saves/game.gdb/PermitPoints" in messages.warnings[0]
     assert "AttributeError" in messages.warnings[0]

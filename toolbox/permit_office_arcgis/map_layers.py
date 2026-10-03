@@ -18,6 +18,10 @@ from .symbology_config import LAYER_FILE_NAMES, layer_file_path
 # own visual channel without one fill having to encode all three.
 DISTRICT_PROSPERITY = "District Prosperity"
 DISTRICT_IDENTITY = "District Identity"
+# An untouched, unlabeled copy of the district fill drawn beneath it. A requery
+# drops the fill for ~0.2 s; without this the interiors flash white (AR18).
+# Nothing requeries or selects it, so it may show a stale type color briefly.
+DISTRICT_UNDERLAY = "District Underlay"
 PREDRAWN_LAYER_PREFIX = "Permit Office Predrawn"
 PREDRAWN_POINTS_PREFIX = "Permit Office Predrawn Points"
 PREDRAWN_LINES_PREFIX = "Permit Office Predrawn Lines"
@@ -119,7 +123,11 @@ def add_outputs_to_map(paths, messages, layer_names=None):
         wanted = [(DISTRICTS, "districts", "districts"), (POINTS, "points", "points"), (LINES, "lines", "lines"), (ZONES, "zones", "zones")]
         wanted = [w for w in wanted if layer_names is None or w[0] in layer_names]
         if layer_names is None or DISTRICTS in layer_names:
-            wanted += [(DISTRICT_PROSPERITY, "district_prosperity", "districts"), (DISTRICT_IDENTITY, "district_identity", "districts")]
+            wanted += [
+                (DISTRICT_PROSPERITY, "district_prosperity", "districts"),
+                (DISTRICT_IDENTITY, "district_identity", "districts"),
+                (DISTRICT_UNDERLAY, "districts", "districts"),
+            ]
         for name, key, path_key in wanted:
             if name in existing:
                 continue
@@ -130,6 +138,11 @@ def add_outputs_to_map(paths, messages, layer_names=None):
                 _warn(messages, "MAP", f"add {name} failed: {exc}")
                 continue
             lyr.name = name
+            if name == DISTRICT_UNDERLAY:
+                try:
+                    lyr.showLabels = False
+                except Exception as exc:
+                    _warn(messages, "MAP", f"{name} labels stay on: {exc}")
             existing[name] = lyr
             _log(messages, "MAP", f"added {name}")
         _order_output_layers(active_map, existing)
@@ -195,7 +208,7 @@ def remove_outputs_from_map(messages, layer_names=None):
         base_outputs = {DISTRICTS, POINTS, LINES, ZONES}
         # The district overlays are tied to the districts source, so they clear
         # whenever districts (or a full refresh) are being removed.
-        overlay_outputs = {DISTRICT_PROSPERITY, DISTRICT_IDENTITY}
+        overlay_outputs = {DISTRICT_PROSPERITY, DISTRICT_IDENTITY, DISTRICT_UNDERLAY}
         if layer_names is None:
             output_names = base_outputs | overlay_outputs
         else:
@@ -636,13 +649,19 @@ def _place_ring_slots_above_base(active_map):
 
 def _order_output_layers(active_map, existing):
     """Draw district colors as the base, identity/prosperity overlays just above
-    it, and feature lines/points/zones on top."""
-    ordered_names = [LINES, POINTS, ZONES, DISTRICT_IDENTITY, DISTRICT_PROSPERITY, DISTRICTS]
-    if not all(existing.get(name) for name in (LINES, POINTS, ZONES, DISTRICTS)):
-        return
-    present = [existing[name] for name in ordered_names if existing.get(name) is not None]
-    try:
-        for reference_layer, move_layer in zip(present, present[1:]):
-            active_map.moveLayer(reference_layer, move_layer, "AFTER")
-    except Exception:
-        pass
+    it, feature lines/points/zones on top, and the district underlay beneath all."""
+    ordered_names = [LINES, POINTS, ZONES, DISTRICT_IDENTITY, DISTRICT_PROSPERITY, DISTRICTS, DISTRICT_UNDERLAY]
+    if all(existing.get(name) for name in (LINES, POINTS, ZONES, DISTRICTS)):
+        present = [existing[name] for name in ordered_names if existing.get(name) is not None]
+        try:
+            for reference_layer, move_layer in zip(present, present[1:]):
+                active_map.moveLayer(reference_layer, move_layer, "AFTER")
+        except Exception:
+            pass
+    # Above the fill the 90%-opaque underlay would hide the live colors, so it
+    # goes directly beneath PermitDistricts even when the full order is skipped.
+    if existing.get(DISTRICTS) is not None and existing.get(DISTRICT_UNDERLAY) is not None:
+        try:
+            active_map.moveLayer(existing[DISTRICTS], existing[DISTRICT_UNDERLAY], "AFTER")
+        except Exception:
+            pass

@@ -94,6 +94,15 @@ drops too. Wrapping the same calls in `arcpy.PauseDrawing` (run 4) did not help:
 the pause neither holds the old frame nor repaints once; a paused district flip
 still drops the fills for about 0.2 s at block exit, and a paused decision shape
 hid the points for the whole block. PauseDrawing is not used.
+**October 3 follow-up (AR18 runs 8 and v5):** on a map with no slots a district
+decision and a week close showed white interiors for 0.5-0.9 s, because the
+requeried fill is the bottom opaque layer. The game now adds a `District
+Underlay`: the same districts layer file, labels off, drawn directly below
+`PermitDistricts`, never requeried or selected. Recorded with a hand-placed
+copy, a fill drop showed the old fill instead of white, through stacked flips
+and a real district-changing decision, and the copy never blanked. Costs: at
+10% layer transparency the two fills stack, so districts draw slightly
+darker; a converted district may show its old type color during a drop.
 *(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
 reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
 later. Supersedes the earlier district-family remove+add default with a measured

@@ -171,6 +171,10 @@ lands and this check passes live.
       with no `Permit Office Predrawn Points` slot, none is created and the base
       `PermitPoints` stays visible. The next case's targets and proposal point
       are highlighted afterwards.
+- [ ] (after AR18) New Game: Contents lists `District Underlay` directly below
+      `PermitDistricts`, with no labels of its own (each district name drawn
+      once). Close a week: district interiors never go white; at most they
+      show the previous fill for a moment.
 - [ ] (after AR19, Pro 3.7) In `ar_probe.aprx` on `probe_save.gdb`, save,
       then restart Pro. Open the dashboard, close it right away with no
       decisions, then run one
