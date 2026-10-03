@@ -1137,10 +1137,32 @@ def test_district_redraw_keeps_feature_ring_seed_below_query_flip_version(monkey
     geometry._PRO_VERSION_CACHE.clear()
 
 
-def test_feature_only_redraw_still_seeds_ring_for_ringless_layer(monkeypatch):
-    """Verify AR16's feature-only path is unchanged by the district-path base flip."""
+def test_feature_only_redraw_flips_base_layer_when_it_has_no_ring_slot(monkeypatch):
+    """Verify a points/lines-only redraw on Pro 3.7+ requeries the base layer instead of seeding a ring.
+
+    AR18 run 7: the first points-only decision on a ringless map seeded
+    'Permit Office Predrawn Points 0' (add slot, hide base, RefreshLayer) and
+    the points dropped twice with stray symbols between.
+    """
 
     fake, _slot, lines, calls = _district_flip_map_with_base_lines()
+    _patch_split(monkeypatch, "arcpy", fake)
+    _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
+    messages = CapturingMessages()
+
+    assert geometry.apply_ring_redraw(_paths(), messages, layer_names={geometry.LINES}) is True
+
+    assert calls == []
+    assert lines.definitionQuery == "(1=1) AND 271828=271828"
+    assert lines.visible is True
+    assert any("feature-query target='PermitLines'" in text for text in messages.messages)
+    geometry._PRO_VERSION_CACHE.clear()
+
+
+def test_feature_only_redraw_keeps_ring_seed_below_query_flip_version(monkeypatch):
+    """Verify Pro builds below 3.7 still seed the feature ring on a feature-only redraw."""
+
+    fake, _slot, lines, calls = _district_flip_map_with_base_lines("3.6")
     _patch_split(monkeypatch, "arcpy", fake)
     _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda *args: calls.append(("ring", args[2])) or True)
 

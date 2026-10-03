@@ -257,6 +257,11 @@ fallback above it. On 3.7+ the first step is a query flip on the visible slot
 (see the ADR-4 follow-up). From October 1, a feature layer redrawn as part of a
 district redraw is requeried in place when it has no slot yet, instead of
 seeding a slot.
+From October 3 the same holds for feature-only redraws: on 3.7+ a points,
+lines or zones layer with no visible slot requeries its visible base layer
+instead of seeding one. The seed added a slot, hid the base and called
+`RefreshLayer`, and a recorded points-only decision showed the points drop
+twice with stray symbols in between (AR18 run 7).
 
 ### ADR-17 - The desk matches the ArcGIS Pro light theme
 **Decision:** the Tk desk uses Pro's light theme. `Palette` in `desk_view.py`
