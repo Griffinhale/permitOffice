@@ -197,3 +197,6 @@ balance tuning toward a fair PASS.
   the office clock on that day (0 = Monday). The clock runs until mid-way
   through that day, then stops; the banner shows `HELD`. No later day ticks or
   Friday deadline fire. End Week still advances by hand.
+- Probe runs: set `PERMIT_OFFICE_LOG_FILE=<path>` before launching Pro to append
+  every tagged message (`PERF`, `REDRAW`, `SELECT`, warnings) to that file with
+  a UTC timestamp. Pro can offload GP messages out of reach; the file stays.
