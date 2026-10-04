@@ -44,6 +44,8 @@ class DeskCallbacks:
     end_game: Callable[[], None] = lambda: None
     cancel_queue_autoclose: Callable[[], None] = lambda: None
     pause_queue_autoclose: Callable[[], None] = lambda: None
+    choose_mandate: Callable[[str], None] = lambda _key: None
+    start_initiative: Callable[..., None] = lambda _kind, _target=None: None
 
 
 @dataclass(frozen=True)
@@ -263,10 +265,13 @@ class DeskViewModel:
     goal_title: str = ""
     goal_progress: str = ""
     goal_met: bool = False
-    goal_offer: tuple[tuple[str, str], ...] = ()
+    goal_offer: tuple[tuple[str, str, str, str], ...] = ()
     ladder_rung: str = ""
     next_checkpoint: int = 0
     outcome: str = ""
+    initiative_open: bool = False
+    initiative_note: str = ""
+    earmark_types: tuple[str, ...] = ()
 
 
 # What week close does to a case nobody decided, by template expiration policy
@@ -384,7 +389,25 @@ def build_desk_model(
         ladder_rung=rules.AUDIT_RUNGS[max(0, min(len(rules.AUDIT_RUNGS) - 1, int(state.audit_rung or 0)))],
         next_checkpoint=next((week for week in rules.AUDIT_WEEKS if week >= state.turn), 0) if state.status != "complete" else 0,
         outcome=str(getattr(state, "outcome", "") or ""),
+        **_initiative_facts(state, districts),
     )
+
+
+def _initiative_facts(state, districts) -> dict:
+    """Return whether this week's initiative can start, why not, and the types to earmark."""
+
+    profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
+    types = tuple(sorted({getattr(profile, "district_type", "") for profile in profiles} - {""}))
+    cheapest = min(rules.EARMARK_COST, rules.CIVIC_ACTION_COST, rules.MARKET_PUSH_COST)
+    if rules.initiative_used_this_week(state):
+        note = "Filed this week. One initiative a week."
+    elif int(state.ap or 0) < rules.INITIATIVE_AP:
+        note = f"Needs {rules.INITIATIVE_AP} AP."
+    elif int(state.money or 0) < cheapest:
+        note = f"Needs ${cheapest}."
+    else:
+        note = ""
+    return {"initiative_open": not note and state.status != "complete", "initiative_note": note, "earmark_types": types}
 
 
 def _goal_facts(state, districts, active_features) -> dict:
@@ -392,11 +415,15 @@ def _goal_facts(state, districts, active_features) -> dict:
 
     mandate = getattr(state, "mandate", {}) or {}
     chosen = str(mandate.get("chosen") or "")
-    offer = tuple((key, rules.mandate_title(key)) for key in mandate.get("offer") or ())
+    district_map = districts if isinstance(districts, dict) else {profile.cell_id: profile for profile in districts or ()}
+    features = _feature_snapshots(active_features)
+    offer = tuple(
+        (key, rules.mandate_title(key), rules.mandate_brief(key), rules.mandate_status(key, state, district_map, features)[1])
+        for key in mandate.get("offer") or ()
+    )
     if not chosen:
         return {"goal_offer": offer}
-    district_map = districts if isinstance(districts, dict) else {profile.cell_id: profile for profile in districts or ()}
-    met, progress = rules.mandate_status(chosen, state, district_map, _feature_snapshots(active_features))
+    met, progress = rules.mandate_status(chosen, state, district_map, features)
     return {"goal_title": rules.mandate_title(chosen), "goal_progress": progress, "goal_met": met, "goal_offer": offer}
 
 
@@ -453,8 +480,8 @@ def _resolve_desk_tab(selected_desk_tab, report_tabs):
 
     if selected_desk_tab == "reports":
         return "reports"
-    if selected_desk_tab == "applications":
-        return "applications"
+    if selected_desk_tab in ("applications", "city"):
+        return selected_desk_tab
     return "reports" if report_tabs else "applications"
 
 

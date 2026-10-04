@@ -2738,7 +2738,7 @@ def test_model_carries_the_goal_and_the_ladder_line():
 
     unpicked = build_desk_model(state, districts, [])
     assert unpicked.goal_title == ""
-    assert [title for _key, title in unpicked.goal_offer] == ["Public confidence", "Quiet streets", "Even-handed city"]
+    assert [card[1] for card in unpicked.goal_offer] == ["Public confidence", "Quiet streets", "Even-handed city"]
 
     state.mandate = {**goal, "chosen": "public_confidence"}
     model = build_desk_model(state, districts, [])
@@ -2766,3 +2766,31 @@ def test_district_type_rows_count_districts_and_mark_earmarks():
 
     assert rows["Mercantile"].count == 9 and rows["Civic"].earmarked_until == 5
     assert rows["Mercantile"].earmarked_until == 0
+
+
+def test_goal_offer_cards_carry_brief_and_progress_and_the_city_tab_resolves():
+    """Verify the goal picker has what its cards show, and 'city' is a desk tab."""
+
+    _item, districts = _vendor_case()
+    state = rules.CityState(trust=41, mandate={"offer": ["public_confidence"], "chosen": "", "baseline": {"type_counts": {}, "critical_gaps": 0}})
+
+    model = build_desk_model(state, districts, [], selected_desk_tab="city")
+
+    key, title, brief, progress = model.goal_offer[0]
+    assert (key, title) == ("public_confidence", "Public confidence")
+    assert "55" in brief and "41 of 55" in progress
+    assert model.selected_desk_tab == "city"
+
+
+def test_model_says_whether_this_weeks_initiative_is_open():
+    """Verify the initiative card knows the slot, AP and money state, and the district types to earmark."""
+
+    _item, districts = _vendor_case()
+    open_model = build_desk_model(rules.CityState(turn=2), districts, [])
+    used = build_desk_model(rules.CityState(turn=2, initiatives={"week": 2}), districts, [])
+    broke = build_desk_model(rules.CityState(turn=2, ap=0), districts, [])
+
+    assert (open_model.initiative_open, open_model.initiative_note) == (True, "")
+    assert used.initiative_open is False and "this week" in used.initiative_note
+    assert broke.initiative_open is False and "AP" in broke.initiative_note
+    assert open_model.earmark_types == ("mercantile",)
