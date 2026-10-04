@@ -196,6 +196,9 @@ def advance_turn_result(
     money_before_recurring = state.money
     permit_spend = int(state.stakeholder_memory.pop(TURN_PERMIT_SPEND_KEY, 0) or 0)
     ignored_grievance_floors: dict[str, dict[str, int]] = {}
+    # The week ends on End Week (no office clock), so open cases build their
+    # full week of district pressure here, as if Friday had come.
+    advance_daily_pressure(state, items, districts, feature_list, PRESSURE_DAY_MAX)
     weekly_pressure = {
         str(cid): max(0, min(PRESSURE_DAY_MAX, int(value or 0)))
         for cid, value in (getattr(state, "daily_pressure", {}) or {}).items()
@@ -209,8 +212,7 @@ def advance_turn_result(
             item.stakeholder = item.stakeholder or template.stakeholder
             item_pressure = max((weekly_pressure.get(cid, 0) for cid in item.target_cell_ids), default=0)
             extra_heat = (1 if item_pressure >= 2 else 0) + (1 if item_pressure >= PRESSURE_DAY_MAX else 0)
-            if extra_heat and _adjust_heat(state, item.stakeholder, extra_heat):
-                heated += 1
+            case_heated = bool(extra_heat and _adjust_heat(state, item.stakeholder, extra_heat))
             if districts:
                 for cid in item.target_cell_ids:
                     if cid in districts:
@@ -226,7 +228,7 @@ def advance_turn_result(
                             local_grievances += 1
             heat_before_resolution = state.stakeholder_heat.get(item.stakeholder, 0)
             expiration = resolve_unattended_item(state, item, districts or {}, seed=2026)
-            if state.stakeholder_heat.get(item.stakeholder, 0) != heat_before_resolution:
+            if case_heated or state.stakeholder_heat.get(item.stakeholder, 0) != heat_before_resolution:
                 heated += 1
             if item.status == "carried":
                 carried += 1

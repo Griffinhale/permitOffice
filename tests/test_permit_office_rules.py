@@ -612,7 +612,8 @@ def test_pending_momentum_followup_appears_as_different_next_docket_item():
     assert "Follow-up from unattended city momentum" in docket[0].preview_text
 
 
-def test_city_momentum_week_close_applies_one_ignore_reaction():
+def test_city_momentum_week_close_applies_a_full_week_of_ignore_reactions():
+    """Verify an ignored case reacts once, plus once more for its full week of target pressure (D8)."""
     profile = rules.DistrictProfile(
         "D0000",
         "Rezoning Row",
@@ -642,7 +643,7 @@ def test_city_momentum_week_close_applies_one_ignore_reaction():
     assert item.status == "expired"
     assert profile.buyout_pressure == 1
     assert profile.identity_state == "vulnerable"
-    assert profile.dissatisfaction["developers"] == 1
+    assert profile.dissatisfaction["developers"] == 2
 
 
 def test_week_close_can_start_buyout_transition_from_unattended_pressure():
@@ -2002,7 +2003,7 @@ def test_advance_turn_applies_population_drift_and_unresolved_local_grievance():
     assert state.turn == 3
     assert state.ap == 3
     assert profile.population > 1200
-    assert profile.dissatisfaction["families"] == 1
+    assert profile.dissatisfaction["families"] == 2
     assert "Local grievance files updated" in report
     assert "Population drift" in report
 
@@ -2875,3 +2876,16 @@ def test_week_five_close_returns_the_mid_season_audit():
     assert short == max(0, rules.PASS_SCORE - audit.score)
     assert criticals == sum(1 for finding in audit.findings if finding.severity == "critical")
     assert "Audit snapshot" in result.report
+
+
+def test_week_close_applies_a_full_week_of_pressure_from_open_cases():
+    """Verify ignored cases build their week of district pressure at close, now that no clock ticks it (owner D8)."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
+    case = rules.DocketItem("T03-01", "street_vendor_compact", "Street Vendor Compact", "POINT", 3, target_cell_ids=["D0000"])
+    state = rules.CityState(turn=3)
+
+    result = rules.advance_turn_result(state, [case], districts, [], {})
+
+    assert "Stakeholder heat added to 1 unresolved case(s)." in result.report
+    assert state.week_day == 0 and state.daily_pressure == {}
