@@ -84,7 +84,12 @@ Public audit backbone (0–100 scale, mid-band ≈ 45):
 | **Friction** | visible civic friction | incidents, unresolved dockets, failed approvals | raises failure chance, population loss, audit findings |
 | **Trust** | civic trust, cohesion | parks, education, public art, reserves | lightly dampens grievance drift |
 | **Exposure** | safety/infra/environmental exposure | hazards, unsafe work, degraded features | raises failure chance, hazard pressure, incidents |
-| **Services** | local service capacity | service/network/utility features | reduces service gaps and dissatisfaction |
+| **Services** | local service capacity (district only) | service/network/utility features | reduces service gaps and dissatisfaction |
+
+The city holds the first four as running totals in `PermitGameState`, moved by
+the averaged deltas of each decision, flat deny/defer deltas, feature failures
+and new incidents. They are not recomputed from districts. Services exists only
+per district.
 
 **Dissatisfaction** is a group-specific grievance band (0–4), local until band 4
 opens a civic incident (which adds citywide friction *once*). Display-state
@@ -116,51 +121,97 @@ stays hidden; legibility comes from names, colors, the news ticker, and reports.
 
 ## The Turn Loop
 
-Each "turn" is one office week (the persisted field is still `turn`). Target
-season is **12 weeks**, **2 AP/week**, ordinary permit denials cost 0 AP, week 6
-files the mid-season audit, week 12 files the final audit.
+Written from the code on 2026-10-03 (rules in `toolbox/permit_office/`, the
+controller in `dashboard.py`). Each turn is one office week; the persisted field
+is still `turn`.
 
-The shared command flow for every action (`dashboard.py`): insert a command row ->
-read game rows (`store.py`) -> resolve via `rules` against current state -> write
-authoritative results to the GDB once -> build a redraw plan from the actual
-`DecisionResult` (`redraw_plan.py`) -> refresh/rehydrate affected display-ring
-layers (`map_redraw.py`, `map_layers.py`) -> file a report -> reload the desk.
-All synchronous, on the Tk thread (see `decisions.md`).
+**Season.** 12 weeks. A new game starts at week 1 with 2 AP, $60, activity 50,
+friction 20, trust 35, exposure 25. AP refills to 2 at every week close and
+does not carry over. When week 5 closes (the turn becomes 6) the week report
+adds an audit snapshot grade; nothing else changes. When week 12 closes the
+full week-close simulation runs, the game is marked `complete`, the final audit
+is filed, no new docket is generated and the clock stops. End Week after that
+only repeats the final grade.
 
-**Launch / resume / new game.** The `.pyt` resolves the workspace, runs
-`ensure_schema`, adds output layers, and opens the controller. Saved districts+
-state rows are resumed (docket regenerated if missing); otherwise the dashboard
-opens on a start screen. New Game runs `clear_game_rows`, `create_district_board`,
-`seed_city_features`, `write_state`, `generate_docket_rows`, then re-adds layers.
+**Office clock.** The week runs 150 seconds of real time, five 30-second days
+(Mon intake to Fri close). The day names are flavor; every day runs the same
+rule. On entering a new day, `advance_daily_pressure` adds +1 (capped at 4) to
+a district's pressure for each open case that targets it, for an incident or a
+high grievance, service gap, hazard or displacement, and for each feature on
+it that is due for maintenance or degraded. The district layer redraws on
+Wednesday and Friday. Pressure only matters at week close (below), and resets
+then. When the 150 seconds run out, the week closes by itself on the same path
+as End Week. The clock does not pause during a command. `PERMIT_OFFICE_HOLD_DAY`
+pins it for probe runs.
 
-**Select.** Selecting a docket row calls `select_case_context` — ensures a
-proposal exists, selects target districts, selects the proposal/subject feature.
-`Toggle Exhibit` deletes/recreates only the selected proposal; `Retarget Map`
-replaces the proposal from the current map selection.
+**Docket.** Up to four cases a week, filled in this order: project steps that
+are due, carried cases, pending momentum follow-ups, one maintenance order, one
+civic incident, one stakeholder-heat follow-up, then a weighted draw from the
+twelve ordinary templates. The draw is weighted by district type, dominant
+citizen groups, population and district stats, so the same seed gives the same
+docket. The docket table is replaced every week; only `carried` cases come
+back. A case awaits a decision while it is `open`, `inspected` or `carried`
+(`OPEN_DOCKET_STATUSES`); any other status is filed and the rules refuse a
+second decision on it.
 
-**Inspect.** Reads state/districts/features; `resolve_decision(..., "inspect")`
-spends AP and enriches the `DocketItem` with risk band + evidence. No geometry
-changes.
+**Actions.** Every template costs 1 AP to inspect, issue, or issue with
+conditions. Issuing also costs the template's money ($3-24), and conditions add
+the mitigation cost ($3-10).
 
-**Issue / Add Conditions (approve).** Ensures a proposed exhibit, computes
-spillover via an in-memory geometry buffer (except maintenance), reads state/districts/features/
-projects, resolves effects (targets, spillover, mitigation, failure risk,
-population, incidents, projects), writes everything, activates the proposed
-exhibit into its support layer, and does a targeted layer rebuild for
-`PermitDistricts` + the changed support layer.
+- *Select* runs `select_case_context`: it makes sure the case has a proposed
+  exhibit and selects its target districts and features on the map. Toggle
+  Exhibit hides or shows the proposal; Retarget Map rebuilds it from the
+  current map selection. Neither costs AP.
+- *Inspect* (1 AP) reveals the risk band and evidence, and opens violations
+  with deadlines on medium or high risk. An inspected high-risk case is more
+  likely to fail on approval than an uninspected one.
+- *Issue / Add Conditions* needs at least one target and the AP and money. It
+  applies target and spillover deltas, adjusted for land-use fit, rolls failure
+  (conditions lower the chance and soften the deltas), then applies population,
+  housing, hazard, project and buyout effects. It activates the exhibit on the
+  map.
+- *Deny* an ordinary permit costs 0 AP and $0: friction +1, activity -1,
+  stakeholder heat, project delay. *Defer* on an enforcement, maintenance or
+  incident case costs 1 AP.
 
-**Deny.** Same resolver path; records disposition, friction, heat, and project
-delay without approval benefits. Proposed rows are marked denied/deferred.
+Points need exactly one target district, lines two, polygons one or more.
+Maintenance cases skip spillover.
 
-**End Week.** Resolves unresolved items by template expiration policy; advances
-feature lifecycle, economy, networks, hazards, housing, population; resolves
-buyout transitions; increments the turn (week 6/12 audits); regenerates the
-docket via `generate_docket_rows`; rebuilds all output layers.
+**Week close** (End Week, the Friday deadline, or the queue auto-close two
+seconds after the last open case is filed):
 
-Edge cases: points need exactly 1 target district, lines exactly 2, polygons ≥1.
-Maintenance items reference an existing active feature and skip spillover. Failed
-approvals can create failed-feature state + audit risk. Unresolved items create
-future pressure rather than vanishing.
+1. Overdue violations add heat and priority.
+2. Each case still open or inspected adds heat from its targets' daily
+   pressure and a grievance reaction, then follows its template's expiration
+   policy: mandatory follow-ups are carried, missed windows expire, momentum
+   cases expire and raise buyout pressure, some queue an enforcement or
+   incident follow-up.
+3. Feature lifecycle: expiry, decay, maintenance due, degraded, failed.
+4. Economy: district and feature revenue minus upkeep. Money can go negative.
+5. Networks and hazards (when there are features or hazards), housing,
+   population drift, grievance floors, new incidents.
+6. Contested buyouts resolve, then a new buyout round picks targets.
+7. Turn +1, AP refill, audit grade, new docket, map redraw, week report.
+
+**Audit grade.** Score = activity + trust - friction - exposure + money/3 +
+last net (clamped to ±10) minus finding penalties (negative or low money, high
+friction or exposure, service gaps, incidents, hazards, displacement, failed or
+worn features, overdue violations). PASS needs 70+, money of zero or more and no
+critical finding; CONDITIONAL needs 45+ and at most one critical; anything else
+is FAIL. A new game grades CONDITIONAL (score 60). The grade is recomputed at
+every week close, and the dashboard recomputes it after each write.
+
+**Command flow.** Every action runs on the Tk thread: insert a command row,
+read game rows (`store.py`), resolve through `rules`, write the results to the
+geodatabase once, plan the redraw from the actual `DecisionResult`
+(`redraw_plan.py`), redraw only the changed layers (`map_redraw.py`,
+`map_layers.py`), file a report, reload the desk (see `decisions.md`).
+
+**Launch, resume, new game.** The `.pyt` resolves the workspace, runs
+`ensure_schema`, adds output layers and opens the controller. A saved board is
+resumed (its docket regenerated if missing); otherwise the dashboard opens on a
+start screen. New Game clears the game rows, builds the board, seeds city
+features, writes the state, generates the docket and re-adds the layers.
 
 ## Status
 
