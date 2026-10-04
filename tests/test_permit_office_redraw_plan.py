@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import sys
+
+import pytest
+
+sys.modules.setdefault(
+    "arcpy",
+    SimpleNamespace(
+        AddMessage=lambda text: None,
+        AddWarning=lambda text: None,
+        AddError=lambda text: None,
+    ),
+)
 
 from toolbox import arcpy_permit_office_rules as rules
-from toolbox.permit_office_arcgis import redraw_plan
+from toolbox.permit_office_arcgis import map_layers, redraw_plan
 
 
 def test_hydrated_redraw_plan_uses_actual_result():
@@ -118,3 +130,149 @@ def test_selection_layers_for_item_keeps_districts_for_an_unresolved_case_withou
     assert redraw_plan.selection_layers_for_item(open_case) == frozenset({"PermitDistricts", "PermitPoints"})
     assert redraw_plan.selection_layers_for_item(done_case) == frozenset({"PermitPoints"})
     assert redraw_plan.selection_layers_for_item(odd_case) == frozenset({"PermitDistricts"})
+
+
+class _RecordingLayer:
+    """Fake map layer that logs every read of its source and every write."""
+
+    def __init__(self, events, name, source, visible=True, query=""):
+        self._events = events
+        self.name = name
+        self._source = source
+        self._visible = visible
+        self._query = query
+
+    @property
+    def dataSource(self):
+        self._events.append(("source", self.name))
+        return self._source
+
+    @property
+    def visible(self):
+        return self._visible
+
+    @visible.setter
+    def visible(self, value):
+        self._events.append(("visible", self.name, value))
+        self._visible = value
+
+    @property
+    def definitionQuery(self):
+        return self._query
+
+    @definitionQuery.setter
+    def definitionQuery(self, value):
+        self._events.append(("query", self.name, value))
+        self._query = value
+
+
+def _week_close_map(monkeypatch, *, lines_visible=True):
+    """Install a Pro 3.7 map: district slot, points ring slot, ringless lines and zones."""
+
+    events = []
+    layers = [
+        _RecordingLayer(events, redraw_plan.LINES, "lines", visible=lines_visible),
+        _RecordingLayer(events, redraw_plan.POINTS, "points", visible=False),
+        _RecordingLayer(events, "Permit Office Predrawn Points 0", "points", query="1=1"),
+        _RecordingLayer(events, redraw_plan.ZONES, "zones"),
+        _RecordingLayer(events, "Permit Office Predrawn 0", "districts", query="1=1"),
+        _RecordingLayer(events, redraw_plan.DISTRICTS, "districts", visible=False),
+    ]
+
+    def list_layers():
+        events.append(("listLayers",))
+        return list(layers)
+
+    def current_project(_name):
+        events.append(("project",))
+        return SimpleNamespace(activeMap=active_map)
+
+    active_map = SimpleNamespace(listLayers=list_layers)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=current_project),
+        RefreshLayer=lambda name: events.append(("refresh", name)),
+        GetInstallInfo=lambda: {"Version": "3.7"},
+        AddMessage=lambda text: None,
+        AddWarning=lambda text: None,
+    )
+    monkeypatch.setattr(map_layers, "arcpy", fake)
+    monkeypatch.setitem(map_layers._PRO_VERSION_CACHE, "version", (3, 7))
+    return events
+
+
+_FEATURE_TARGETS = {
+    redraw_plan.LINES,
+    redraw_plan.ZONES,
+    "Permit Office Predrawn Points 0",
+}
+
+
+def _feature_toggle_indexes(events):
+    return [i for i, event in enumerate(events) if event[0] == "query" and event[1] in _FEATURE_TARGETS]
+
+
+def test_week_close_resolves_every_feature_layer_before_toggling_them_back_to_back(monkeypatch):
+    """AR21: the three feature requeries run together so their drops overlap."""
+
+    events = _week_close_map(monkeypatch)
+    rehydrated = []
+    monkeypatch.setattr(map_layers, "_rehydrate_feature_display_ring", lambda paths, messages, name: rehydrated.append(name) or True)
+    scope = redraw_plan._week_close_redraw_layers([SimpleNamespace(geometry_type=kind) for kind in ("POINT", "LINE", "POLYGON")])
+
+    handled = map_layers.apply_ring_redraw(
+        {"districts": "districts", "points": "points", "lines": "lines", "zones": "zones"},
+        None,
+        layer_names=set(scope),
+        remove_scope=set(scope),
+    )
+
+    assert handled is True
+    assert rehydrated == []
+    toggles = _feature_toggle_indexes(events)
+    assert sorted(events[i][1] for i in toggles) == sorted(_FEATURE_TARGETS)
+    assert toggles == list(range(toggles[0], toggles[0] + len(toggles)))
+    feature_resolution = [
+        i for i, event in enumerate(events)
+        if event[0] in ("project", "listLayers") or (event[0] == "source" and event[1] in _FEATURE_TARGETS)
+    ]
+    assert feature_resolution and max(feature_resolution) < toggles[0]
+
+
+def test_week_close_rehydrates_an_unresolved_feature_layer_after_the_batched_toggles(monkeypatch):
+    """A layer with no visible slot or base keeps the ring seed, after the overlap."""
+
+    events = _week_close_map(monkeypatch, lines_visible=False)
+    monkeypatch.setattr(
+        map_layers,
+        "_rehydrate_feature_display_ring",
+        lambda paths, messages, name: events.append(("rehydrate", name)) or True,
+    )
+
+    map_layers.apply_ring_redraw(
+        {"districts": "districts", "points": "points", "lines": "lines", "zones": "zones"},
+        None,
+        layer_names=set(redraw_plan.WEEK_CLOSE_READD_LAYERS),
+        remove_scope=set(redraw_plan.WEEK_CLOSE_READD_LAYERS),
+    )
+
+    toggles = _feature_toggle_indexes(events)
+    assert sorted(events[i][1] for i in toggles) == sorted(_FEATURE_TARGETS - {redraw_plan.LINES})
+    assert toggles == list(range(toggles[0], toggles[0] + len(toggles)))
+    assert events.index(("rehydrate", redraw_plan.LINES)) > toggles[-1]
+
+
+def test_decision_requery_toggles_only_its_feature_layer_once(monkeypatch):
+    """Decision redraws carry one feature layer, so batching leaves them as landed."""
+
+    events = _week_close_map(monkeypatch)
+    monkeypatch.setattr(map_layers, "_rehydrate_feature_display_ring", lambda *args: pytest.fail("no rehydrate"))
+    plan = redraw_plan.hydrate_decision_redraw_plan(rules.DecisionResult(True, "approve", "CASE-1", "approved"), feature_layer_key="points")
+
+    map_layers.apply_ring_redraw(
+        {"districts": "districts", "points": "points", "lines": "lines", "zones": "zones"},
+        None,
+        layer_names=redraw_plan.layer_names_for_plan(plan),
+        remove_scope=set(plan.remove_readd_names),
+    )
+
+    assert [events[i][1] for i in _feature_toggle_indexes(events)] == ["Permit Office Predrawn Points 0"]

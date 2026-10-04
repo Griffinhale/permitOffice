@@ -172,6 +172,12 @@ lands and this check passes live.
       once). Close a week: district interiors never go white; at most they
       show the previous fill for a moment.
       Zones, lines and points each drop at most once, for well under a second.
+- [ ] (after AR21, Pro 3.7+) With `PERMIT_OFFICE_PERF=1`, close a week whose
+      new docket has point, line and zone cases. The log shows one
+      `feature-query` line per feature layer, all after `district-flip` with no
+      ring seed or `RefreshLayer` between them. On the recording, lines, points
+      and zones drop together, each once, and the near-empty map lasts no
+      longer than AR18 run11 D3's (about 1 s); district interiors never go white.
 - [ ] (after AR19, Pro 3.7) In `ar_probe.aprx` on `probe_save.gdb`, save,
       then restart Pro. Open the dashboard, close it right away with no
       decisions, then run one

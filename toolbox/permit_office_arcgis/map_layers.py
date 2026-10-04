@@ -309,6 +309,9 @@ def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None, phas
     on Pro 3.7+ instead of seeding a ring: the seed adds a slot, hides the base
     and calls RefreshLayer, which AR18 run 7 recorded as a double points drop
     with stray symbols. Below 3.7 the ring seed is unchanged.
+
+    Every query toggle runs back to back once all layers are resolved, so at
+    week close the lines, points and zones requeries overlap (AR21).
     """
 
     phase_marker = phase_marker or (lambda _name: None)
@@ -317,13 +320,10 @@ def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None, phas
         return
     readd_scope = feature_scope & set(remove_scope or ())
     fallback_readd = set()
-    for layer_name in sorted(readd_scope):
-        if _refresh_visible_feature_display_ring(paths, messages, layer_name):
-            phase_marker(f"feature_{layer_name}_ring_refresh")
-            continue
-        if _flip_visible_base_feature_layer(paths, messages, layer_name):
-            phase_marker(f"feature_{layer_name}_base_query")
-            continue
+    toggled = _toggle_feature_queries_together(paths, messages, readd_scope)
+    for layer_name, path in toggled:
+        phase_marker(f"feature_{layer_name}_{path}")
+    for layer_name in sorted(readd_scope - {name for name, _path in toggled}):
         if not _rehydrate_feature_display_ring(paths, messages, layer_name):
             fallback_readd.add(layer_name)
         phase_marker(f"feature_{layer_name}_ring_rehydrate")
@@ -358,53 +358,74 @@ def _rehydrate_feature_display_ring(paths, messages, layer_name):
         )
         ring.prepare_and_swap(paths[path_key])
         _place_ring_slots_above_base(active_map)
-        _hide_base_feature_layer(active_map, layer_name)
+        _hide_base_feature_layer(active_map.listLayers(), layer_name)
         return True
     except Exception as exc:
         _warn(messages, "REDRAW", f"feature-ring {layer_name} failed: {exc}")
         return False
 
 
-def _refresh_visible_feature_display_ring(paths, messages, layer_name):
+def _feature_requery_target(layers, paths, layer_name):
+    """Return the visible layer a query toggle should requery, or None.
+
+    A visible ring slot reading this save wins, then a visible base layer
+    reading it. None sends the layer to the ring rehydrate.
+    """
+
     prefix = _feature_ring_prefixes().get(layer_name)
     path_key = _feature_path_keys().get(layer_name)
-    if not prefix or not path_key or not _query_flip_supported():
-        return False
-    active_map = ensure_active_map(messages)
-    if active_map is None:
-        return False
-    visible = None
-    for layer in active_map.listLayers():
+    if not prefix or not path_key:
+        return None
+    for layer in layers:
         name = getattr(layer, "name", "")
         suffix = name.removeprefix(prefix + " ")
         if name.startswith(prefix + " ") and suffix.isdigit() and bool(getattr(layer, "visible", False)):
-            if not _same_source(layer, paths[path_key]):
-                return False
-            visible = layer
+            if _same_source(layer, paths[path_key]):
+                return layer
             break
-    if visible is None:
-        return False
-    _hide_base_feature_layer(active_map, layer_name)
-    return _toggle_feature_query(visible, messages, layer_name)
+    base = next((layer for layer in layers if getattr(layer, "name", "") == layer_name), None)
+    if base is not None and bool(getattr(base, "visible", False)) and _same_source(base, paths[path_key]):
+        return base
+    return None
 
 
-def _flip_visible_base_feature_layer(paths, messages, layer_name):
-    """Requery a visible base feature layer in place when it has no ring yet."""
+def _toggle_feature_queries_together(paths, messages, layer_names):
+    """Requery in-scope feature layers with their query toggles back to back.
 
-    path_key = _feature_path_keys().get(layer_name)
-    if not path_key or not _query_flip_supported():
-        return False
+    Resolving a layer (active map, layer list, source check) cost ~0.2 s per
+    layer, so toggling each right after its own lookup staggered the drops
+    (AR18 run11 D3). All lookups and base hides run first. Returns
+    (layer_name, path) for each toggled layer; the rest need a rehydrate.
+    """
+
+    if not layer_names or not _query_flip_supported():
+        return []
     active_map = ensure_active_map(messages)
     if active_map is None:
-        return False
-    base = next((layer for layer in active_map.listLayers() if getattr(layer, "name", "") == layer_name), None)
-    if base is None or not bool(getattr(base, "visible", False)) or not _same_source(base, paths[path_key]):
-        return False
-    return _toggle_feature_query(base, messages, layer_name)
+        return []
+    layers = list(active_map.listLayers())
+    targets = []
+    for layer_name in sorted(layer_names):
+        target = _feature_requery_target(layers, paths, layer_name)
+        if target is None:
+            continue
+        on_ring = getattr(target, "name", "") != layer_name
+        if on_ring:
+            _hide_base_feature_layer(layers, layer_name)
+        targets.append((layer_name, target, "ring_refresh" if on_ring else "base_query"))
+    errors = [_flip_feature_query(target) for _layer_name, target, _path in targets]
+    toggled = []
+    for (layer_name, target, path), error in zip(targets, errors):
+        if error is None:
+            _log(messages, "REDRAW", f"feature-query target={target.name!r}")
+            toggled.append((layer_name, path))
+        else:
+            _warn(messages, "REDRAW", f"feature-query {layer_name} failed: {error}")
+    return toggled
 
 
-def _toggle_feature_query(layer, messages, layer_name):
-    """Toggle a no-op marker on a layer's query so Pro requeries just that layer."""
+def _flip_feature_query(layer):
+    """Toggle a no-op marker on a layer's query; return the error, or None."""
 
     try:
         # RefreshLayer invalidates every visible layer in the containing view.
@@ -415,11 +436,20 @@ def _toggle_feature_query(layer, messages, layer_name):
             layer.definitionQuery = current[1:-len(marker)-1]
         else:
             layer.definitionQuery = f"({current or '1=1'}){marker}"
-        _log(messages, "REDRAW", f"feature-query target={layer.name!r}")
-        return True
+        return None
     except Exception as exc:
-        _warn(messages, "REDRAW", f"feature-ring refresh {layer_name} failed: {exc}")
+        return exc
+
+
+def _toggle_feature_query(layer, messages, layer_name):
+    """Toggle a no-op marker on a layer's query so Pro requeries just that layer."""
+
+    error = _flip_feature_query(layer)
+    if error is not None:
+        _warn(messages, "REDRAW", f"feature-query {layer_name} failed: {error}")
         return False
+    _log(messages, "REDRAW", f"feature-query target={layer.name!r}")
+    return True
 
 
 def _feature_ring_prefixes():
@@ -446,8 +476,8 @@ def _feature_layer_keys():
     }
 
 
-def _hide_base_feature_layer(active_map, layer_name):
-    for layer in active_map.listLayers():
+def _hide_base_feature_layer(layers, layer_name):
+    for layer in layers:
         if getattr(layer, "name", "") == layer_name:
             try:
                 layer.visible = False

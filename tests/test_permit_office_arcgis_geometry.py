@@ -535,12 +535,15 @@ def test_feature_display_ring_refreshes_visible_slot_without_rehydrate(monkeypat
     _patch_split(monkeypatch, "arcpy", fake)
     _patch_split(monkeypatch, "_query_flip_supported", lambda: True)
 
-    handled = geometry._refresh_visible_feature_display_ring(_paths(), CapturingMessages(), geometry.POINTS)
+    _patch_split(monkeypatch, "_rehydrate_feature_display_ring", lambda *args: calls.append(("rehydrate", args[2])) or True)
 
-    assert handled is True
+    def redraw_points():
+        geometry._refresh_feature_scope(_paths(), CapturingMessages(), layer_names={geometry.POINTS}, remove_scope={geometry.POINTS})
+
+    redraw_points()
     assert calls == []
     assert visible.definitionQuery == "(status = 'proposed' OR status = 'active') AND 271828=271828"
-    assert geometry._refresh_visible_feature_display_ring(_paths(), CapturingMessages(), geometry.POINTS)
+    redraw_points()
     assert visible.definitionQuery == "status = 'proposed' OR status = 'active'"
     assert base_points.visible is False
 
