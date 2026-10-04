@@ -1028,7 +1028,7 @@ def test_selected_case_action_cards_attach_to_brief_with_costs():
     assert "1 AP" in texts
     assert "1 AP / $6" in texts
     assert "1 AP / $10; conditions +$4" in texts
-    assert "0 AP / $0; may return as follow-up" in texts
+    assert "1 AP / $0; may return as follow-up" in texts
     assert "City" in texts
     assert "Local" in texts
     assert any("Service" in str(text) for text in texts)
@@ -2962,3 +2962,22 @@ def test_approved_cases_leave_the_inbox_and_clear_the_queue():
 
     other.status = "denied"
     assert build_desk_model(rules.CityState(), districts, [item, other]).queue_cleared is True
+
+
+def test_defer_lane_shows_the_ap_the_rules_charge():
+    """Verify enforcement, maintenance, and incident defers show 1 AP and disable at 0 AP, like the rules."""
+
+    _item, districts = _vendor_case()
+    for template_id, geometry in (
+        ("unpermitted_followthrough", "POINT"),
+        ("feature_maintenance_order", "POINT"),
+        ("civic_incident_response", "POLYGON"),
+    ):
+        case = rules.DocketItem("T09", template_id, rules.TEMPLATES[template_id].title, geometry, 1, target_cell_ids=["D0000"])
+        deny = {lane.action_id: lane for lane in build_desk_model(rules.CityState(ap=0), districts, [case], "T09").action_lanes}["deny"]
+        assert deny.cost.startswith("1 AP"), template_id
+        assert deny.enabled is False, template_id
+
+    plain = rules.DocketItem("T10", "street_vendor_compact", "Street Vendor Compact", "POINT", 1, target_cell_ids=["D0000"])
+    deny = {lane.action_id: lane for lane in build_desk_model(rules.CityState(ap=0), districts, [plain], "T10").action_lanes}["deny"]
+    assert deny.cost.startswith("0 AP") and deny.enabled

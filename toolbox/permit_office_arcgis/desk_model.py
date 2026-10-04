@@ -658,7 +658,8 @@ def _action_lanes(state, districts, item) -> tuple[ActionLane, ...]:
     issue_label, mitigate_label, deny_label = _action_lane_labels(template)
     issue_money = template.money_cost
     mitigated_money = template.money_cost + template.mitigation_cost
-    deny_ap = template.ap_cost if template.is_incident else 0
+    # Ordinary denials are free; deferring an incident, enforcement, or maintenance order spends AP.
+    deny_ap = template.ap_cost if (template.is_incident or template.is_enforcement) else 0
     issue_cost = f"{template.ap_cost} AP / ${issue_money}"
     mitigated_cost = f"{template.ap_cost} AP / ${mitigated_money}; conditions +${template.mitigation_cost}"
     deny_cost = f"{deny_ap} AP / $0; may return as follow-up" if deny_ap else "0 AP / $0; may return as follow-up"
