@@ -178,7 +178,7 @@ premature splits or comment-stripping when logic genuinely warrants the length.
 
 ### ADR-13 — Seeded proposals, not Feature Set drawing
 **Decision:** proposed geometry is generated from filed targets and replaced via
-`Retarget Map` from the current district selection; no interactive Feature Set
+`Retarget from map` from the current district selection; no interactive Feature Set
 drawing. **Why:** keeps the map the *input* device and the dashboard the
 controller, with deterministic, reproducible exhibits. **Rejected:** freehand
 Feature Set drawing — non-deterministic and off the command flow.

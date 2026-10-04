@@ -62,7 +62,7 @@ DocketItem(
     turn=1,
     status="open",                 # open | inspected | active | denied | deferred | carried | ...
     inspected=False,
-    target_cell_ids=["D0101", "D0102"],   # set by selection / Retarget Map
+    target_cell_ids=["D0101", "D0102"],   # set by selection / Retarget from map
     preview_text="...",            # copied from template, refined with a target census note
     risk_band="unknown",           # -> low/medium/high after Inspect
     carryover="expire_or_return",

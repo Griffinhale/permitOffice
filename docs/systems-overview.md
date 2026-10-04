@@ -175,8 +175,8 @@ conditions. Issuing also costs the template's money ($3-24), and conditions add
 the mitigation cost ($3-10).
 
 - *Select* runs `select_case_context`: it makes sure the case has a proposed
-  exhibit and selects its target districts and features on the map. Toggle
-  Exhibit hides or shows the proposal; Retarget Map rebuilds it from the
+  exhibit and selects its target districts and features on the map. Show
+  exhibit hides or shows the proposal; Retarget from map rebuilds it from the
   current map selection. Neither costs AP.
 - *Inspect* (1 AP) reveals the risk band and evidence, and opens violations
   with deadlines on medium or high risk. An inspected high-risk case is more

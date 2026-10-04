@@ -711,6 +711,12 @@ class PermitDeskView:
         body_lines = []
         for fact in facts:
             body_lines += [(line, Palette.INK, "normal") for line in self._fit_lines_px(fact, Type.BODY, "normal", inner_w, 2)]
+        if case.preview:
+            body_lines += [(line, Palette.MUTED, "normal") for line in self._fit_lines_px(case.preview, Type.BODY, "normal", inner_w, 3)]
+        if case.economy:
+            budget = "Budget: no recurring revenue or upkeep" if case.economy == "no recurring budget" else f"Budget: {case.economy}"
+            tone = Palette.GOOD if "net +" in case.economy else Palette.BAD if "net -" in case.economy else Palette.MUTED
+            body_lines.append((self._fit_px(budget, Type.BODY, "bold", inner_w), tone, "bold"))
         body_lines += [(line, Palette.WATCH if not inspected else Palette.ACCENT, "bold") for line in self._fit_lines_px(note, Type.BODY, "bold", inner_w, 2)]
         if row is not None:
             body_lines.append((f"If ignored: {row.if_ignored}", Palette.MUTED, "normal"))

@@ -54,10 +54,11 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 - [ ] Feature layers render by `display_state`; proposed-feature exhibits stay
       visible when toggled on and hide when toggled off.
 
-## 5. Daily-pressure channel
-- [ ] Advance through a work-week's days. Daily pressure writes `display_state`
-      to districts; confirm the chosen daily overlay reads as intended (or note
-      it as a #9 follow-up if no dedicated daily channel renders yet).
+## 5. Week-close pressure and the audit ladder
+- [ ] Leave a case open and End Week: the week report names heat added to the
+      unresolved case and the grievance update for its targets.
+- [ ] Close week 4: the week report carries a checkpoint audit and the
+      patience ladder moves (FAIL up, PASS down, CONDITIONAL holds).
 
 ## 6. District identity / buyouts (#6) legibility
 - [ ] Play several weeks. When a low-prosperity district is contested/converted,
@@ -67,21 +68,24 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       docket starts surfacing new-type-flavored proposals over time.
 
 ## 7. Audit-grade cache (item B)
-- [ ] Make a decision: the City Pulse **Audit** row updates mid-week to reflect
-      the new grade (cache invalidates on decision/turn writes).
+- [ ] Make a decision: the header AUDIT line updates mid-week to reflect the
+      new grade (cache invalidates on decision/turn writes).
 - [ ] Select different docket rows / retarget from the map without deciding: the
       Audit grade stays put and the desk still feels responsive (selection-only
       reloads reuse the cached grade instead of recomputing the scorecard).
 
 ## 8. Legacy .gdb migration
 - [ ] Open an older save (pre-rename `.gdb` if available). It loads without error;
-      legacy city-health columns backfill (see `migrate_legacy_city_health_fields`)
-      and no new persisted fields are required (this round added none).
+      legacy city-health columns backfill (see `migrate_legacy_city_health_fields`).
+      The new state keys (`mandate`, `initiatives`, `audit_rung`, `outcome`) are
+      key/value rows, so an old save loads with no goal filed and the desk shows
+      no goal cards (start a New Game to draw them).
 
 ## 9. End-of-game flow (#7)
-- [ ] Close week 12. The inline final-audit receipt auto-shows with
-      PASS/CONDITIONAL/FAIL flavor; the week label reads `12/12 CLOSED`. Repeated
-      End Week after close is idempotent (no duplicate receipts).
+- [ ] Close week 12. The final-audit report auto-shows with PASS/CONDITIONAL/FAIL
+      flavor, the week report says Season won or lost and lists achievements,
+      and the week label reads `12/12 CLOSED`. Repeated End Week after close is
+      idempotent (no duplicate receipts).
 
 ## 10. Pacing and redraw budget
 - [ ] Start a game with `PERMIT_OFFICE_PERF=1`. Confirm the banner has no
@@ -178,34 +182,27 @@ lands and this check passes live.
       style from the shipped `.lyrx` files: base type, prosperity, and identity
       look right, with no default single-symbol layer.
 
-## 13. Dashboard look (UI7) *
+## 13. Dashboard look (narrow pane) *
 Linux previews use substitute fonts and Tk 9; only Pro (Tk 8.6, Segoe UI,
-Windows DPI) proves the look. Run each item at the default desk size
-(1180 x 1040 client) and at the minimum size (1180 x 860), on `ar_probe.aprx`
-or the `fresh.gdb` test project, never a real save. Screenshot both tabs at
-both sizes and note the Windows display scale.
-- [ ] Header: week, AP and $ values are readable on the light title row
-      (no green-on-green), and values never run into their labels.
-- [ ] Map key: no label overlaps its sublabel or the next row at either size;
-      when the rail is short, rows or sublabels drop instead of overlapping.
-- [ ] Status ticker: scrolling text never shows outside its strip or under the
-      STATUS label. Open the menu and the help card and wait 10+ seconds each:
-      the ticker stays under them and no menu row is covered.
-- [ ] Decision brief: description and inspection note visible above Budget;
-      all six stamp cards keep labels, hotkey badges and costs separate and
-      inside their cards; long text ends in an ellipsis, not past an edge.
-- [ ] Report detail: a week report and a decision report show headed sections
-      (City effects, Local changes, Economy, Docket...) with no `...` cut-off;
-      long reports scroll by mouse wheel; metric values stay separate.
-- [ ] District table: shows district names, not `D0000` ids; targets and
-      changed districts come first; rows fill the box and scroll when there
-      are more than fit; column lines stop at the last row.
-- [ ] District groups: a state word in its tone color, no `?` glyphs and no
-      invented trend lines.
-- [ ] Menu and help card: every row and button tints light blue on hover.
-- [ ] Geoprocessing messages: no Python error or traceback for the whole run.
-
----
-**On any failure:** capture the Geoprocessing message log + a screenshot, note the
-exact step, and file it. Items 2 (grievance), 1 (workspace), 3 (repaint), and 7
-(grade cache) cover changes made this session and are the highest-priority checks.
+Windows DPI) proves the look. Run each item at the default pane size
+(480 x 820) and at the minimum (400 x 560), on a throwaway workspace, never a
+real save. Screenshot each tab at both sizes and note the Windows display scale.
+- [ ] New Game: the Desk tab shows three goal cards; clicking one (or 1-3)
+      files it and the header GOAL line shows its progress.
+- [ ] Header: week, AP, money and net, goal, next checkpoint audit with points
+      to PASS, and the patience ladder are readable and never overlap.
+- [ ] The window resizes freely between the two sizes; at the minimum the tab
+      body scrolls with the mouse wheel and nothing draws over the header or
+      footer.
+- [ ] Desk tab: open cases list what happens if ignored; filed cases sit below;
+      the brief's four buttons show hotkeys and costs inside their boxes.
+- [ ] Initiative card: pick a district type and Earmark; Civic action and
+      Market push act on the districts selected on the map; after one, the card
+      says it is filed for the week.
+- [ ] End Week stays in the footer at 0 AP and shows the close forecast; after
+      week 12 the footer offers New Game and the Desk tab names the result.
+- [ ] Reports tab: a week report and a decision report show headed sections
+      with no `...` cut-off. City tab: stats show their change since the
+      week began; district types mark an active earmark.
+- [ ] Status ticker: scrolling text never shows outside its strip. Open the
+      menu and the help card and wait 10+ seconds: the ticker stays under them.

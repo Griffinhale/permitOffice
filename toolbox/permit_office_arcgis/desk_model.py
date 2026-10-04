@@ -71,49 +71,6 @@ class CaseField:
 
 
 @dataclass(frozen=True)
-class ImpactBucket:
-    """One compact permit-impact summary bucket."""
-
-    label: str
-    value: str
-    tone: str = "neutral"
-
-
-@dataclass(frozen=True)
-class DistrictGridCell:
-    """One cell in the selected-case district mini-grid."""
-
-    cell_id: str
-    label: str
-    affected: bool = False
-    swatch: str = ""
-
-
-@dataclass(frozen=True)
-class TrendCard:
-    """One compact trend card for cultures, outcomes, or pulse rows."""
-
-    label: str
-    detail: str
-    trend: str = "unknown"
-    swatch: str = ""
-    points: tuple[int, ...] = ()
-    tone: str = "neutral"
-
-
-@dataclass(frozen=True)
-class CaseMapSymbol:
-    """One live useful symbol row for the selected case map key."""
-
-    shape: str
-    label: str
-    detail: str
-    swatch: str
-    state: str
-    tone: str = "neutral"
-
-
-@dataclass(frozen=True)
 class CaseSummary:
     """Structured permit-packet content for the selected case."""
 
@@ -122,16 +79,12 @@ class CaseSummary:
     status: str = ""
     category: str = ""
     fields: tuple[CaseField, ...] = ()
-    districts: str = "(seeded exhibit; use Retarget Map to revise)"
+    districts: str = "(seeded exhibit; use Retarget from map to revise)"
     preview: str = "Select a docket item from the in tray."
     inspection: str = "No inspection addendum filed."
     action_note: str = ""
     economy: str = ""
     risk_band: str = "unknown"
-    impact_buckets: tuple[ImpactBucket, ...] = ()
-    district_grid: tuple[DistrictGridCell, ...] = ()
-    culture_cards: tuple[TrendCard, ...] = ()
-    outcome_cards: tuple[TrendCard, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -191,19 +144,6 @@ class ActionLane:
 
 
 @dataclass(frozen=True)
-class MapLegendRow:
-    """One row in the public map key rail."""
-
-    group: str
-    label: str
-    detail: str
-    swatch: str
-    tone: str = "neutral"
-    shape: str = "zone"
-    state: str = ""
-
-
-@dataclass(frozen=True)
 class DistrictTypeRow:
     """One district type on the City tab: how many districts it holds, and any earmark."""
 
@@ -211,20 +151,6 @@ class DistrictTypeRow:
     count: int
     swatch: str = ""
     earmarked_until: int = 0
-
-
-@dataclass(frozen=True)
-class DistrictTableRow:
-    """One district state row for the live bottom attribute table."""
-
-    district: str
-    name: str
-    district_type: str
-    prosperity: str
-    pressure: str
-    community: str
-    selected: bool = False
-    changed: bool = False
 
 
 @dataclass(frozen=True)
@@ -244,14 +170,10 @@ class DeskViewModel:
     show_start_help: bool = False
     selected_desk_tab: str = "applications"
     action_lanes: tuple[ActionLane, ...] = ()
-    queue_cleared: bool = False
     auto_close_active: bool = False
     auto_close_seconds: int = 0
     game_active: bool = True
-    map_legend_rows: tuple[MapLegendRow, ...] = ()
     district_type_rows: tuple[DistrictTypeRow, ...] = ()
-    district_table_rows: tuple[DistrictTableRow, ...] = ()
-    case_map_symbols: tuple[CaseMapSymbol, ...] = ()
     filed_rows: tuple[DocketRow, ...] = ()
     close_forecast: str = ""
     audit_grade: str = ""
@@ -348,33 +270,26 @@ def build_desk_model(
         )
     exhibit_visible = bool(proposal_visible_by_item.get(selected_id))
     ticker_items = _ticker_items(state, districts, active_features, active_items, report_tabs)
-    map_legend_rows = _map_legend_rows(districts, active_items, selected_id)
-    case_map_symbols = _case_map_symbols(selected, active_features)
     district_type_rows = _district_type_rows(districts, state)
     goal = _goal_facts(state, districts, active_features)
-    district_table_rows = _district_table_rows(districts, selected, state)
     return DeskViewModel(
-        docket_rows,
-        selected_id,
-        case,
-        ledger_rows,
-        status,
-        exhibit_visible,
-        receipt,
-        report_tabs,
-        selected_report_id,
-        ticker_items,
-        bool(show_start_help),
-        _resolve_desk_tab(selected_desk_tab, report_tabs),
-        action_lanes,
-        not bool(active_items),
-        bool(auto_close_active),
-        int(auto_close_seconds or 0),
-        bool(game_active),
-        map_legend_rows,
-        district_type_rows,
-        district_table_rows,
-        case_map_symbols,
+        docket_rows=docket_rows,
+        selected_item_id=selected_id,
+        case=case,
+        ledger_rows=ledger_rows,
+        status_text=status,
+        exhibit_visible=exhibit_visible,
+        receipt=receipt,
+        report_tabs=report_tabs,
+        selected_report_id=selected_report_id,
+        ticker_items=ticker_items,
+        show_start_help=bool(show_start_help),
+        selected_desk_tab=_resolve_desk_tab(selected_desk_tab, report_tabs),
+        action_lanes=action_lanes,
+        auto_close_active=bool(auto_close_active),
+        auto_close_seconds=int(auto_close_seconds or 0),
+        game_active=bool(game_active),
+        district_type_rows=district_type_rows,
         filed_rows=filed_rows,
         close_forecast=_close_forecast(active_items),
         audit_grade=audit.grade,
@@ -532,136 +447,6 @@ def _trend_from_delta(delta: int | None) -> str:
     return "flat"
 
 
-def _spark_points(value: int, trend: str) -> tuple[int, ...]:
-    """Return compact six-point sparkline values around a current value."""
-
-    current = max(0, min(100, int(value or 0)))
-    if trend == "up":
-        return tuple(max(0, min(100, current + offset)) for offset in (-9, -6, -7, -3, -2, 0))
-    if trend == "down":
-        return tuple(max(0, min(100, current + offset)) for offset in (8, 5, 6, 3, 1, 0))
-    if trend == "flat":
-        return tuple(max(0, min(100, current + offset)) for offset in (0, 1, 0, -1, 0, 0))
-    return ()
-
-
-def _district_grid_cells(districts, item) -> tuple[DistrictGridCell, ...]:
-    """Build a stable district mini-grid with selected targets marked."""
-
-    profiles = sorted(
-        list(districts.values() if isinstance(districts, dict) else (districts or ())),
-        key=lambda profile: getattr(profile, "cell_id", ""),
-    )
-    targets = set(getattr(item, "target_cell_ids", ()) or ())
-    cells = []
-    for profile in profiles[:12]:
-        cell_id = getattr(profile, "cell_id", "") or ""
-        label = cell_id[1:] if cell_id.startswith("D") else cell_id
-        symbol = DISTRICT_TYPE_SYMBOLS.get(getattr(profile, "district_type", "") or "")
-        cells.append(DistrictGridCell(cell_id, label[-2:] or label, cell_id in targets, _symbol_hex(symbol)))
-    if not cells and targets:
-        for cell_id in sorted(targets)[:12]:
-            label = cell_id[1:] if cell_id.startswith("D") else cell_id
-            cells.append(DistrictGridCell(cell_id, label[-2:] or label, True, ""))
-    return tuple(cells)
-
-
-def _culture_cards(districts, item) -> tuple[TrendCard, ...]:
-    """Build affected-culture cards capped to the useful selected-case set."""
-
-    district_map = districts if isinstance(districts, dict) else {getattr(profile, "cell_id", ""): profile for profile in districts or ()}
-    targets = [district_map[cid] for cid in getattr(item, "target_cell_ids", ()) or () if cid in district_map]
-    scores: dict[str, int] = {}
-    swatches: dict[str, str] = {}
-    for profile in targets:
-        symbol = DISTRICT_TYPE_SYMBOLS.get(getattr(profile, "district_type", "") or "")
-        for group, weight in (getattr(profile, "population_mix", {}) or {}).items():
-            scores[group] = scores.get(group, 0) + int(weight or 0)
-            swatches.setdefault(group, _symbol_hex(symbol))
-        for group, value in (getattr(profile, "dissatisfaction", {}) or {}).items():
-            scores[group] = scores.get(group, 0) + int(value or 0)
-            swatches.setdefault(group, _symbol_hex(symbol))
-    cards = []
-    for group, score in sorted(scores.items(), key=lambda row: (-row[1], row[0]))[:4]:
-        trend = "down" if score >= 4 else "unknown" if score == 0 else "flat"
-        cards.append(
-            TrendCard(
-                _display(group),
-                f"signal {score}",
-                trend,
-                swatches.get(group, ""),
-                _spark_points(score * 12, trend),
-                "watch" if trend == "down" else "neutral",
-            )
-        )
-    return tuple(cards)
-
-
-def _outcome_cards(item, template) -> tuple[TrendCard, ...]:
-    """Build concise known/unknown outcome cards for the case evidence row."""
-
-    inspected = bool(getattr(item, "inspected", False))
-    cards = []
-    if template.failure_mode:
-        cards.append(
-            TrendCard(
-                _display(template.failure_mode),
-                "known risk" if inspected else "inspection pending",
-                "down" if inspected else "unknown",
-                "",
-                (),
-                "bad" if inspected else "watch",
-            )
-        )
-    if template.pressure_category:
-        cards.append(TrendCard(_display(template.pressure_category), "pressure track", "unknown", "", (), "watch"))
-    cards.append(
-        TrendCard(
-            "Follow-up order",
-            "possible return" if not inspected else "filed evidence",
-            "unknown" if not inspected else "flat",
-            "",
-            (),
-            "watch",
-        )
-    )
-    return tuple(cards[:3])
-
-
-def _case_map_symbols(item, active_features=None) -> tuple[CaseMapSymbol, ...]:
-    """Build selected-case map-symbol rows from current case and active features."""
-
-    if not item:
-        return ()
-    geometry = str(getattr(item, "geometry_type", "") or "").upper()
-    shape = "line" if geometry == "LINE" else "point" if geometry == "POINT" else "zone"
-    rows = [CaseMapSymbol(shape, "Proposed feature", "selected case exhibit", "#9f7028", "ON", "watch")]
-    target_count = len(getattr(item, "target_cell_ids", ()) or ())
-    rows.append(
-        CaseMapSymbol(
-            "zone",
-            "Selected target",
-            f"{target_count} district(s)",
-            "#2f6488",
-            "ON" if target_count else "0",
-            "good" if target_count else "watch",
-        )
-    )
-    related = [feature for feature in active_features or () if getattr(feature, "item_id", "") == getattr(item, "item_id", "")]
-    if related:
-        rows.append(
-            CaseMapSymbol(
-                shape,
-                "Filed feature",
-                "active map feature",
-                "#2f6b53",
-                str(min(len(related), 4)) if len(related) < 5 else "4+",
-                "neutral",
-            )
-        )
-    return tuple(rows)
-
-
 def _report_status(report):
     """Classify filed-report text for compact tab styling."""
 
@@ -710,9 +495,9 @@ def _case_summary(state, districts, item) -> CaseSummary:
     )
     action_note = _action_note(template)
     economy = _recurring_bucket_value(template)
-    districts_text = ", ".join(item.target_cell_ids) if item.target_cell_ids else "(seeded exhibit; use Retarget Map to revise)"
+    target_names = [getattr(districts.get(cid), "name", "") or cid for cid in item.target_cell_ids]
+    districts_text = ", ".join(target_names) if target_names else "(seeded exhibit; use Retarget from map to revise)"
     inspection = _inspection_summary(item)
-    impact_buckets = _impact_buckets(state, districts, item, template)
     return CaseSummary(
         title=item.title,
         item_id=item.item_id,
@@ -725,46 +510,6 @@ def _case_summary(state, districts, item) -> CaseSummary:
         action_note=action_note,
         economy=economy,
         risk_band=item.risk_band or "unknown",
-        impact_buckets=impact_buckets,
-        district_grid=_district_grid_cells(districts, item),
-        culture_cards=_culture_cards(districts, item),
-        outcome_cards=_outcome_cards(item, template),
-    )
-
-
-def _impact_buckets(state, districts, item, template) -> tuple[ImpactBucket, ...]:
-    """Build concise impact buckets for the selected case."""
-
-    targets = [districts[cid] for cid in item.target_cell_ids if cid in districts]
-    inspection = (item.case_json or {}).get("inspection") if isinstance(item.case_json, dict) else None
-    total_money = template.money_cost + template.mitigation_cost
-    cost_tone = "bad" if state.ap < template.ap_cost or state.money < template.money_cost else "watch" if state.money < total_money else "neutral"
-    cost = _cost_bucket_value(template)
-    city = _city_forecast_bucket(template, targets, mitigated=False)
-    city_tone = _delta_tone(template.base_effects | template.spillover_effects)
-    local = _local_bucket_value(item, template, targets)
-    local_tone = _local_bucket_tone(item, template, targets)
-    services = _services_bucket_value(template, targets)
-    services_tone = _services_bucket_tone(targets)
-    recurring = _recurring_bucket_value(template)
-    recurring_tone = _recurring_tone(template)
-
-    if inspection:
-        people, people_tone = _inspected_people_bucket(template, targets)
-        followup, followup_tone = _inspection_followup_bucket(inspection, item)
-    else:
-        people = _qualitative_people_bucket(template)
-        people_tone = "watch" if template.concerned_groups else "neutral"
-        followup = _qualitative_followup_bucket(template)
-        followup_tone = "watch" if template.failure_mode else "neutral"
-
-    return (
-        ImpactBucket("Cost", cost, cost_tone),
-        ImpactBucket("City", city, city_tone),
-        ImpactBucket("Local", local, local_tone),
-        ImpactBucket("People", people, people_tone),
-        ImpactBucket("Services", services, services_tone),
-        ImpactBucket("Budget", f"{recurring}; {followup}", _worst_tone(recurring_tone, followup_tone)),
     )
 
 
@@ -902,12 +647,6 @@ def _deny_forecast(template) -> str:
     return f"{threat} may rise; applicant heat may return"
 
 
-def _cost_bucket_value(template) -> str:
-    """Format direct decision costs for all stamp choices."""
-
-    return f"Issue {template.ap_cost}AP/${template.money_cost}; conditions +${template.mitigation_cost}; deny 0AP"
-
-
 def _city_forecast_bucket(template, targets, mitigated: bool) -> str:
     """Forecast likely immediate metric effects before a decision is filed."""
 
@@ -947,19 +686,6 @@ def _recurring_bucket_value(template) -> str:
     return "no recurring budget"
 
 
-def _recurring_tone(template) -> str:
-    """Return dashboard tone for recurring budget forecast."""
-
-    archetype = rules.feature_archetype_for_template(template)
-    operating = rules.operating_rule_for_feature(archetype.archetype_id)
-    net = operating.revenue_per_turn - operating.upkeep_per_turn
-    if net > 0:
-        return "good"
-    if net < 0:
-        return "watch"
-    return "neutral"
-
-
 def _local_bucket_value(item, template, targets) -> str:
     """Format selected target context without long prose."""
 
@@ -972,21 +698,6 @@ def _local_bucket_value(item, template, targets) -> str:
     local_effect = _city_forecast_bucket(template, targets, mitigated=False)
     causes = _pressure_cause_summary(targets) if targets else "cause pending"
     return f"{len(item.target_cell_ids)} district(s); {type_text}; {fit}; {causes}; {local_effect}"
-
-
-def _local_bucket_tone(item, template, targets) -> str:
-    """Return a tone for target fit and local adjusted effects."""
-
-    if not item.target_cell_ids:
-        return "watch"
-    archetype = rules.feature_archetype_for_template(template)
-    if any(
-        profile.district_type in template.bad_fit_types
-        or profile.district_type in archetype.conflict_district_types
-        for profile in targets
-    ):
-        return "watch"
-    return _delta_tone(template.base_effects)
 
 
 def _land_use_fit_text(template, archetype, targets) -> str:
@@ -1011,86 +722,6 @@ def _land_use_fit_text(template, archetype, targets) -> str:
     if good:
         return f"{good} fit"
     return "neutral fit"
-
-
-def _services_bucket_value(template, targets) -> str:
-    """Format the most relevant service, network, hazard, or housing pressure."""
-
-    archetype = rules.feature_archetype_for_template(template)
-    service = archetype.service_type or archetype.network_type
-    service_text = _service_gap_summary(targets, service)
-    if service_text != "no service gap":
-        return service_text
-    hazard_text = _hazard_summary(targets)
-    if hazard_text != "no active hazards":
-        return hazard_text
-    housing_text = _housing_pressure_summary(targets)
-    if housing_text != "housing steady":
-        return housing_text
-    return "services steady"
-
-
-def _services_bucket_tone(targets) -> str:
-    """Return a tone for local service/hazard/housing pressure."""
-
-    worst_gap = max((gap for profile in targets for gap in (profile.service_gap or {}).values()), default=0)
-    worst_hazard = max((band for profile in targets for band in (profile.hazards or {}).values()), default=0)
-    housing_pressure = any(_profile_housing_pressure(profile) for profile in targets)
-    if worst_gap >= 40 or worst_hazard >= 3:
-        return "bad"
-    if worst_gap >= 25 or worst_hazard or housing_pressure:
-        return "watch"
-    return "neutral"
-
-
-def _qualitative_people_bucket(template) -> str:
-    """Format pre-inspection people impact qualitatively."""
-
-    supporters = _join_labels(template.supporter_groups[:2])
-    objectors = _join_labels(template.concerned_groups[:2])
-    if supporters != "none" and objectors != "none":
-        return f"{supporters} support; {objectors} object"
-    if supporters != "none":
-        return f"{supporters} likely support"
-    if objectors != "none":
-        return f"{objectors} may object"
-    return "public comment pending"
-
-
-def _qualitative_followup_bucket(template) -> str:
-    """Format pre-inspection follow-up qualitatively."""
-
-    if template.failure_mode:
-        return f"inspect for {template.failure_mode}"
-    return "routine filing path"
-
-
-def _inspected_people_bucket(template, targets) -> tuple[str, str]:
-    """Format inspected supporter, objector, and grievance context."""
-
-    supporter = _strongest_group(targets, template.supporter_groups)
-    objector = _strongest_group(targets, template.concerned_groups)
-    grievance_group, grievance_band = _top_grievance(targets)
-    parts = []
-    if supporter:
-        parts.append(f"{_group_label(supporter)} support")
-    if objector:
-        parts.append(f"{_group_label(objector)} object")
-    if grievance_band:
-        parts.append(f"{_group_label(grievance_group)} {rules.GRIEVANCE_BAND_LABELS[grievance_band]}")
-    tone = "bad" if grievance_band >= rules.DISSATISFACTION_INCIDENT_THRESHOLD else "watch" if grievance_band >= rules.DISSATISFACTION_AGGRIEVED_THRESHOLD or objector else "neutral"
-    return "; ".join(parts) if parts else "population evidence filed", tone
-
-
-def _inspection_followup_bucket(inspection, item) -> tuple[str, str]:
-    """Format inspected risk, evidence, and violations."""
-
-    evidence = inspection.get("evidence") or []
-    violations = inspection.get("violations") or []
-    risk = str(inspection.get("risk_band") or item.risk_band or "unknown").lower()
-    warnings = sum(1 for record in evidence if isinstance(record, dict) and record.get("severity") in ("warning", "critical"))
-    value = f"{risk} risk; {warnings}/{len(evidence)} flagged evidence; {len(violations)} violation(s)"
-    return value, _risk_tone(risk)
 
 
 def _format_effects(effects) -> str:
@@ -1118,55 +749,6 @@ def _delta_tone(effects) -> str:
     if any(value for value in effects.values()):
         return "watch"
     return "neutral"
-
-
-def _risk_tone(risk) -> str:
-    """Return the dashboard tone for an inspection risk band."""
-
-    if risk == "high":
-        return "bad"
-    if risk == "medium":
-        return "watch"
-    if risk == "low":
-        return "good"
-    return "neutral"
-
-
-def _strongest_group(profiles, groups) -> str:
-    """Return the strongest configured group across target profiles."""
-
-    scores = []
-    for group in groups:
-        score = sum(profile.population_mix.get(group, 0) for profile in profiles)
-        if score > 0:
-            scores.append((score, group))
-    return sorted(scores, key=lambda row: (-row[0], row[1]))[0][1] if scores else ""
-
-
-def _top_grievance(profiles) -> tuple[str, int]:
-    """Return the highest dissatisfaction band across target profiles."""
-
-    totals = {group: 0 for group in rules.CITIZEN_GROUPS}
-    for profile in profiles:
-        for group, band in (profile.dissatisfaction or {}).items():
-            if group in totals:
-                totals[group] += int(band or 0)
-    return sorted(totals.items(), key=lambda row: (-row[1], row[0]))[0]
-
-
-def _join_labels(groups) -> str:
-    """Join group labels for a compact bucket value."""
-
-    labels = [_group_label(group) for group in groups if group]
-    if not labels:
-        return "none"
-    return "/".join(labels[:2])
-
-
-def _group_label(group) -> str:
-    """Return a display label for a citizen or stakeholder group id."""
-
-    return rules.GROUP_LABELS.get(group, str(group).replace("_", " "))
 
 
 def _service_gap_summary(profiles, preferred_service: str = "") -> str:
@@ -1202,32 +784,6 @@ def _hazard_summary(profiles) -> str:
     return f"{hazard.replace('_', ' ')} band {worst[hazard]} x{counts[hazard]}"
 
 
-def _housing_pressure_summary(profiles) -> str:
-    """Summarize housing capacity, vacancy, affordability, or displacement pressure."""
-
-    pressure = [_profile_housing_pressure(profile) for profile in profiles]
-    pressure = [text for text in pressure if text]
-    if not pressure:
-        return "housing steady"
-    return pressure[0]
-
-
-def _profile_housing_pressure(profile) -> str:
-    """Return one compact housing warning for a profile, if any."""
-
-    if profile.displacement:
-        group, band = sorted(profile.displacement.items(), key=lambda row: (-int(row[1] or 0), row[0]))[0]
-        if int(band or 0) > 0:
-            return f"{profile.cell_id} displacement: {_group_label(group)} {band}"
-    if profile.housing_capacity and profile.population > profile.housing_capacity:
-        return f"{profile.cell_id} over capacity by {profile.population - profile.housing_capacity}"
-    if profile.affordability and profile.affordability < 35:
-        return f"{profile.cell_id} affordability {profile.affordability}"
-    if profile.vacancy_rate and profile.vacancy_rate < 3:
-        return f"{profile.cell_id} vacancy {profile.vacancy_rate}%"
-    return ""
-
-
 def _maintenance_summary(features) -> str:
     """Summarize active feature maintenance backlog."""
 
@@ -1241,13 +797,6 @@ def _maintenance_summary(features) -> str:
         return "none"
     lowest = min(int(getattr(feature, "condition", 100) or 100) for feature in candidates)
     return f"{len(candidates)} due; lowest condition {lowest}"
-
-
-def _worst_tone(*tones) -> str:
-    """Return the most urgent tone from a small set."""
-
-    priority = {"bad": 3, "watch": 2, "good": 1, "neutral": 0}
-    return max((tone or "neutral" for tone in tones), key=lambda tone: priority.get(tone, 0))
 
 
 THREAT_TRACKS = ("Public Anger", "Legal Exposure", "Service Failure", "Speculation Pressure")
@@ -1414,148 +963,11 @@ def _ticker_items(state, districts, active_features=None, docket=None, report_ta
     return tuple(items[:4])
 
 
-def _map_legend_rows(districts, docket=None, selected_item_id="") -> tuple[MapLegendRow, ...]:
-    """Build public map-key rows for the Applications right rail."""
-
-    rows: list[MapLegendRow] = []
-    profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
-    district_type_keys = _ordered_values((getattr(profile, "district_type", "") or "district" for profile in profiles), DISTRICT_TYPE_SYMBOLS)
-    for key in district_type_keys[:6] or ["residential"]:
-        label = DISTRICT_TYPE_SYMBOLS.get(key, ([216, 225, 222, 100], _display(key)))[1]
-        rows.append(MapLegendRow("PermitDistricts", label, "base district fill", _symbol_hex(DISTRICT_TYPE_SYMBOLS.get(key)), "neutral"))
-
-    display_keys = _ordered_values((getattr(profile, "display_state", "") or "stable" for profile in profiles), DISPLAY_STATE_SYMBOLS)
-    for key in display_keys[:5] or ["stable"]:
-        label = DISPLAY_STATE_SYMBOLS.get(key, ([157, 175, 170, 100], _display(key)))[1]
-        rows.append(MapLegendRow("District display", label, "district pressure overlay", _symbol_hex(DISPLAY_STATE_SYMBOLS.get(key)), "watch" if key != "stable" else "neutral"))
-
-    prosperity_keys = _ordered_values((getattr(profile, "prosperity_band", "") or "stable" for profile in profiles), PROSPERITY_BAND_SYMBOLS)
-    for key in prosperity_keys[:4] or ["stable"]:
-        label = PROSPERITY_BAND_SYMBOLS.get(key, ([157, 175, 170, 100], _display(key)))[1]
-        rows.append(MapLegendRow("Prosperity", label, "district prosperity outline", _symbol_hex(PROSPERITY_BAND_SYMBOLS.get(key)), "good" if key == "thriving" else "neutral"))
-
-    identity_keys = _ordered_values((getattr(profile, "identity_state", "") or "stable" for profile in profiles), IDENTITY_STATE_SYMBOLS)
-    for key in identity_keys[:4] or ["stable"]:
-        label = IDENTITY_STATE_SYMBOLS.get(key, ([157, 175, 170, 100], _display(key)))[1]
-        rows.append(MapLegendRow("Community", label, "identity overlay", _symbol_hex(IDENTITY_STATE_SYMBOLS.get(key)), "watch" if key != "stable" else "neutral"))
-
-    rows.extend(_feature_legend_rows("PermitPoints", ("expired", "maintained", "maintenance_due", "proposed", "responded", "special_interest")))
-    rows.extend(_feature_legend_rows("PermitLines", ("active", "road")))
-    rows.extend(_feature_legend_rows("PermitZones", ("active", "campus", "civic", "commerce", "housing", "industry", "park")))
-
-    selected = next((item for item in docket or () if getattr(item, "item_id", "") == selected_item_id), None)
-    target_count = len(getattr(selected, "target_cell_ids", ()) or ()) if selected else 0
-    rows.append(MapLegendRow("Selection", "Selected target", f"{target_count} district(s)", "#2f6488", "good" if target_count else "watch"))
-    filed = _filed_state_label(getattr(selected, "status", "") if selected else "")
-    rows.append(MapLegendRow("Selection", "Filed state", filed, "#2f6b53" if filed != "not filed" else "#9dafaa", "neutral"))
-    return tuple(rows)
-
-
-def _feature_legend_rows(group, keys):
-    """Return Contents-style display_state rows for a feature layer."""
-
-    rows = []
-    for key in keys:
-        symbol = DISPLAY_STATE_SYMBOLS.get(key)
-        if not symbol:
-            continue
-        rows.append(MapLegendRow(group, symbol[1], "feature display state", _symbol_hex(symbol), "neutral"))
-    return rows
-
-
-def _ordered_values(values, symbols):
-    """Return unique values in symbol order with observed values first."""
-
-    seen = []
-    for value in values:
-        key = str(value or "").lower()
-        if key and key not in seen:
-            seen.append(key)
-    ordered = [key for key in symbols if key in seen]
-    ordered.extend(key for key in seen if key not in ordered)
-    return ordered
-
-
 def _symbol_hex(symbol):
     """Convert a symbology config RGBA tuple to a Tk color."""
 
     rgba = symbol[0] if symbol else [216, 225, 222, 100]
     return "#{:02x}{:02x}{:02x}".format(int(rgba[0]), int(rgba[1]), int(rgba[2]))
-
-
-def _district_table_rows(districts, selected, state=None) -> tuple[DistrictTableRow, ...]:
-    """Build the live-attribute table rows: case targets, then changed districts, then the rest.
-
-    "Changed this week" uses what the model holds: this week's daily pressure,
-    or a display, identity, or incident state other than the resting one.
-    """
-
-    profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
-    selected_targets = set(getattr(selected, "target_cell_ids", ()) or ())
-    pressure = dict(getattr(state, "daily_pressure", None) or {})
-    rows: list[DistrictTableRow] = []
-    for profile in sorted(profiles, key=lambda p: getattr(p, "cell_id", "")):
-        cell_id = getattr(profile, "cell_id", "") or ""
-        display_state = getattr(profile, "display_state", "") or "stable"
-        identity_state = getattr(profile, "identity_state", "") or "stable"
-        changed = (
-            int(pressure.get(cell_id, 0) or 0) > 0
-            or display_state != "stable"
-            or identity_state != "stable"
-            or (getattr(profile, "incident_state", "") or "none") != "none"
-        )
-        rows.append(
-            DistrictTableRow(
-                cell_id,
-                getattr(profile, "name", "") or cell_id,
-                _display(getattr(profile, "district_type", "") or "district"),
-                _display(getattr(profile, "prosperity_band", "") or "stable"),
-                _display(display_state),
-                _display(identity_state),
-                cell_id in selected_targets,
-                changed,
-            )
-        )
-    return tuple(sorted(rows, key=lambda row: (not row.selected, not row.changed)))
-
-
-def _permit_state_label(status) -> str:
-    """Return public permit-state copy for a docket status."""
-
-    value = str(status or "").lower()
-    if value in ("open", "carried"):
-        return "Open filing"
-    if value == "inspected":
-        return "Inspection filed"
-    if value in ("active", "approved"):
-        return "Approved"
-    if value in ("denied", "deferred"):
-        return "Denied"
-    return _display(value or "filed")
-
-
-def _filed_state_label(status) -> str:
-    """Return compact selected-case filed-state copy."""
-
-    value = str(status or "").lower()
-    if value in ("active", "approved"):
-        return "approved"
-    if value in ("denied", "deferred"):
-        return "denied"
-    if value == "inspected":
-        return "inspection filed"
-    return "not filed"
-
-
-def _permit_state_swatch(label) -> str:
-    """Return a restrained swatch for a public permit-state label."""
-
-    return {
-        "Open filing": "#2f6488",
-        "Inspection filed": "#9f7028",
-        "Approved": "#2f6b53",
-        "Denied": "#b5423f",
-    }.get(label, "#5d6e69")
 
 
 def _inspection_summary(item) -> str:

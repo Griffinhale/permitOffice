@@ -49,63 +49,6 @@ def _vendor_case():
     return item, {profile.cell_id: profile}
 
 
-def test_uninspected_case_uses_qualitative_impact_buckets():
-    """Verify uninspected cases show qualitative impact buckets."""
-
-    item, districts = _vendor_case()
-
-    model = build_desk_model(
-        rules.CityState(ap=3, money=60),
-        districts,
-        [item],
-        item.item_id,
-        proposal_visible_by_item={item.item_id: True},
-    )
-    buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
-
-    assert list(buckets) == ["Cost", "City", "Local", "People", "Services", "Budget"]
-    assert model.exhibit_visible is True
-    assert "Issue 1AP/$12" in buckets["Cost"].value
-    assert "conditions +$6" in buckets["Cost"].value
-    assert "deny 0AP" in buckets["Cost"].value
-    assert "activity" in buckets["City"].value
-    assert "district(s)" in buckets["Local"].value
-    assert "fit" in buckets["Local"].value
-    assert "grievance" in buckets["Local"].value
-    assert "vendors" in buckets["People"].value
-    assert "homeowners" in buckets["People"].value
-    assert "gap" in buckets["Services"].value
-    assert "rev $4/week" in buckets["Budget"].value
-    assert "upkeep $1/week" in buckets["Budget"].value
-    assert "inspect for unlicensed spillover" in buckets["Budget"].value
-    assert "evidence" not in buckets["Budget"].value
-
-
-def test_inspected_case_buckets_surface_evidence_and_population_context():
-    """Verify inspected cases surface evidence and population context."""
-
-    item, districts = _vendor_case()
-    item.inspected = True
-    item.risk_band = "high"
-    item.case_json = {
-        "inspection": {
-            "risk_band": "high",
-            "evidence": [{"severity": "warning"}, {"severity": "critical"}],
-            "violations": [{"code": "public_nuisance"}],
-        }
-    }
-
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-    buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
-
-    assert "high risk; 2/2 flagged evidence; 1 violation(s)" in buckets["Budget"].value
-    assert "rev $4/week" in buckets["Budget"].value
-    assert "upkeep $1/week" in buckets["Budget"].value
-    assert "net +$3" in buckets["Budget"].value
-    assert buckets["Budget"].tone == "bad"
-    assert "homeowners aggrieved" in buckets["People"].value
-
-
 def test_heat_ticker_explains_future_followup_pressure():
     """Verify stakeholder heat is framed as future docket pressure."""
 
@@ -348,20 +291,6 @@ def test_build_desk_model_adds_decision_lanes_for_selected_case():
     assert "0 AP" in lanes["deny"].cost
 
 
-def test_case_summary_exposes_evidence_grid_cultures_and_outcomes():
-    """Verify selected cases expose presentation-ready evidence widgets."""
-
-    item, districts = _vendor_case()
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-
-    assert model.case.district_grid
-    assert any(cell.cell_id == "D0000" and cell.affected for cell in model.case.district_grid)
-    assert model.case.culture_cards
-    assert all(card.trend in {"up", "down", "flat", "unknown"} for card in model.case.culture_cards)
-    assert model.case.outcome_cards
-    assert any(card.trend == "unknown" for card in model.case.outcome_cards)
-
-
 def test_action_lanes_include_hotkeys_and_tooltip_copy():
     """Verify action cards carry command clarity without view inference."""
 
@@ -374,19 +303,6 @@ def test_action_lanes_include_hotkeys_and_tooltip_copy():
     assert lanes["deny"].hotkey == "D"
     assert lanes["approve"].tooltip
     assert lanes["approve"].disabled_reason == "Needs 1 AP"
-
-
-def test_visible_map_symbols_are_filtered_to_selected_case_context():
-    """Verify case map symbols expose shape, swatch, and live state."""
-
-    item, districts = _vendor_case()
-    item.geometry_type = "POLYGON"
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-
-    rows = model.case_map_symbols
-    assert rows
-    assert {row.shape for row in rows} <= {"point", "line", "zone"}
-    assert any(row.state in {"ON", "0", "1", "2", "3", "4+"} for row in rows)
 
 
 def test_action_lanes_name_primary_threat_for_deny_and_issue():
@@ -496,58 +412,6 @@ def test_maintenance_case_uses_repair_action_family():
     assert "Service Failure" in lanes["approve_mitigated"].city_effect
     assert lanes["deny"].label == "Defer"
     assert "Service Failure rises if maintenance is deferred" in lanes["deny"].city_effect
-
-
-def test_build_desk_model_marks_queue_cleared_when_no_active_items():
-    """Verify empty active dockets expose the queue-cleared state."""
-
-    model = build_desk_model(
-        rules.CityState(),
-        {},
-        [rules.DocketItem("done", "street_vendor_compact", "Done", "POINT", 1, status="approved")],
-    )
-
-    assert model.queue_cleared is True
-    assert model.action_lanes == ()
-
-
-def test_build_desk_model_exposes_map_key_legend_rows():
-    """Verify the view model carries Contents-style map-key concepts."""
-
-    item, districts = _vendor_case()
-    districts["D0000"].display_state = "grievance"
-
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-
-    legend = {(row.group, row.label): row for row in model.map_legend_rows}
-    assert ("PermitDistricts", "Mercantile") in legend
-    assert ("District display", "Local Grievance") in legend
-    assert ("PermitPoints", "Proposed") in legend
-    assert ("PermitLines", "Road") in legend
-    assert ("PermitZones", "Commerce") in legend
-    assert ("Selection", "Selected target") in legend
-    assert ("Selection", "Filed state") in legend
-
-
-def test_build_desk_model_exposes_district_attribute_rows():
-    """Verify the wireframe bottom table has district state to render."""
-
-    item, districts = _vendor_case()
-    profile = districts["D0000"]
-    profile.prosperity_band = "thriving"
-    profile.identity_state = "converted"
-    profile.display_state = "service_gap"
-
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-
-    row = model.district_table_rows[0]
-    assert row.district == "D0000"
-    assert row.name
-    assert row.district_type == "Mercantile"
-    assert row.prosperity == "Thriving"
-    assert row.community == "Converted"
-    assert row.pressure == "Service Gap"
-    assert row.selected is True
 
 
 def test_status_strip_marquee_draws_wire_text_at_scrolled_position():
@@ -706,27 +570,6 @@ def test_report_sections_use_district_names_not_ids():
     assert any("Glass Market: Contested Edge" in line for line in lines)
     assert not any("D0003" in line for line in lines)
     assert "Economy" in [heading for heading, _lines in sections]
-
-
-def test_district_table_orders_targets_then_changed_districts():
-    """Verify targets come first, then districts that changed this week, then the rest."""
-
-    state = rules.CityState()
-    state.daily_pressure = {"D0401": 2}
-    districts_seed = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
-    for profile in districts_seed.values():
-        profile.display_state = "stable"
-        profile.identity_state = "stable"
-        profile.incident_state = "none"
-    districts_seed["D0302"].display_state = "service_gap"
-    item = rules.DocketItem("T01", "street_vendor_compact", "Street Vendor Compact", "POINT", 1, target_cell_ids=["D0203"])
-
-    model = build_desk_model(state, districts_seed, [item], item.item_id)
-
-    order = [row.district for row in model.district_table_rows]
-    assert order[0] == "D0203"
-    assert set(order[1:3]) == {"D0302", "D0401"}
-    assert order[3:] == sorted(order[3:])
 
 
 class _FakeCanvas:
@@ -1229,7 +1072,7 @@ def test_approved_cases_leave_the_inbox_and_clear_the_queue():
     assert model.selected_item_id == "T02"
 
     other.status = "denied"
-    assert build_desk_model(rules.CityState(), districts, [item, other]).queue_cleared is True
+    assert build_desk_model(rules.CityState(), districts, [item, other]).docket_rows == ()
 
 
 def test_defer_lane_shows_the_ap_the_rules_charge():
@@ -1615,3 +1458,15 @@ def test_help_card_explains_the_season_and_the_keys():
     body = " ".join(str(text) for text in _text_values(canvas))
     for phrase in ("Goal", "Audits", "Cases", "Initiative", "Keys", "week 12", "W end week"):
         assert phrase in body
+
+
+def test_case_brief_shows_the_case_description_and_its_budget():
+    """Verify the brief keeps the facts a decision needs: what the case is and what it costs each week."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(_goal_state(), districts, [item], item.item_id)
+    _view, _callbacks, canvas = _pane(model, height=1200)
+
+    body = " ".join(str(text) for text in _text_values(canvas))
+    assert model.case.preview.split()[0] in body
+    assert "Budget:" in body
