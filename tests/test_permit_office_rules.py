@@ -1064,6 +1064,22 @@ def test_docket_weights_reflect_district_population_distribution():
     assert dense_mercantile > sparse_mercantile
 
 
+def test_probe_seed_2028_opens_with_line_point_and_polygon_cases():
+    """Pin the week-1 docket live probes use: a fresh seed-2028 board has every geometry type."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2028)}
+
+    items = rules.generate_docket(turn=1, seed=2028, state=rules.CityState(), districts=districts)
+
+    assert [(item.item_id, item.geometry_type) for item in items] == [
+        ("T01-01-utility_expansion_trench", "LINE"),
+        ("T01-02-natural_reserve_conversion", "POLYGON"),
+        ("T01-03-business_license_fee_sweep", "POINT"),
+        ("T01-04-mixed_use_rezoning", "POLYGON"),
+    ]
+    assert not hasattr(rules, "DEMO_SEQUENCE")
+
+
 def test_twelve_week_docket_generation_keeps_three_or_four_items_available():
     state = rules.CityState()
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}

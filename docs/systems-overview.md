@@ -186,8 +186,10 @@ balance tuning toward a fair PASS.
 
 - Pure rules + adapter shims: `python3 -m pytest -q` (install
   `requirements-dev.txt`, or `uv run pytest -q`, if `pytest` is missing).
-- Seed `2026` is locked as the 12-week balance route via pure-Python regression.
-- Live ArcGIS run: launch the GP tool, New Game with seed `2026`, then walk
+- No seed is locked as a 12-week balance route yet; balance tuning is open.
+- Live ArcGIS run: launch the GP tool, New Game with seed `2028` (its week 1
+  docket has a line, a point and two polygon cases, pinned by
+  `test_probe_seed_2028_opens_with_line_point_and_polygon_cases`), then walk
   point/line/polygon approvals, inspect, deny, toggle exhibit, retarget, and End
   Week through week 12 — confirming exhibits draw, metrics/`display_state` update,
   reports file, and buyout/identity stays legible from map + text.

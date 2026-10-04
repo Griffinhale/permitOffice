@@ -670,12 +670,3 @@ DEMO_TEMPLATE_IDS = (
     "public_art_museum_grant",
     "compliance_settlement_drive",
 )
-
-DEMO_SEQUENCE = {
-    1: ("connector_corridor", "procession_route", "street_vendor_compact"),
-    2: ("utility_expansion_trench", "business_license_fee_sweep", "contractor_renovation_waiver"),
-    3: ("natural_reserve_conversion", "mixed_use_rezoning", "fire_budget_escalation"),
-    4: ("child_development_park_annex", "street_vendor_compact", "utility_expansion_trench"),
-    5: ("connector_corridor", "compliance_settlement_drive", "mixed_use_rezoning"),
-    6: ("natural_reserve_conversion", "fire_budget_escalation", "public_art_museum_grant"),
-}

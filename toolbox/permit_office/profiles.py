@@ -104,26 +104,13 @@ def generate_docket(
         if followup and len(items) < count:
             items.append(followup)
 
-    # Fill remaining docket slots with the deterministic demo sequence after
+    # Fill remaining docket slots with the weighted template draw after
     # mandatory follow-up work has been given priority.
     for template_id in chosen:
         if len(items) >= count:
             break
         items.append(_make_docket_item(turn, len(items) + 1, template_id))
     return items
-
-
-def _scenario_ordered_templates(turn: int, scenario: ScenarioRule) -> list[str]:
-    """Merge scenario-priority templates ahead of the base demo sequence."""
-
-    chosen: list[str] = []
-    for template_id in scenario.docket_priority:
-        if template_id in TEMPLATES and template_id not in chosen:
-            chosen.append(template_id)
-    for template_id in DEMO_SEQUENCE.get(turn, ()):
-        if template_id not in chosen:
-            chosen.append(template_id)
-    return chosen
 
 
 TYPE_CATEGORY_WEIGHTS = {
