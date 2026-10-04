@@ -852,18 +852,28 @@ class DashboardController:
                 self._command_busy = False
                 self.reload()
 
-    def start_initiative(self, kind, target):
-        """File this week's player initiative (Earmark first) and persist the result."""
+    def start_initiative(self, kind, target=None):
+        """File this week's player initiative and persist the result.
 
-        command_id = command_insert(self.paths, kind, "", [target] if target else [])
+        Earmark takes a district type; Civic action and Market push use the
+        given districts, or the current map selection when none are given.
+        """
+
+        if kind != "earmark" and not target:
+            target = selected_cell_ids(self.district_layer)
+        command_targets = [target] if isinstance(target, str) else list(target or [])
+        command_id = command_insert(self.paths, kind, "", command_targets)
         try:
             self._command_busy = True
             state = read_state(self.paths)
             districts = read_districts(self.paths)
-            result = rules.start_initiative(state, districts, kind, target)
+            result = rules.start_initiative(state, districts, kind, target, seed=self.seed)
             if result.ok:
                 write_state(self.paths, state)
                 self._grade_dirty = True
+                if result.affected_cell_ids:
+                    write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
+                    rebuild_output_layers(self.paths, self.messages, layer_names={DISTRICTS}, dirty_scope=DIRTY_DISTRICTS)
             command_finish(self.paths, command_id, result.command_status, result.report)
             self.status_var.set(result.report)
         except Exception as exc:

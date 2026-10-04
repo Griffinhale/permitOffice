@@ -3057,3 +3057,50 @@ def test_earmark_weights_the_draw_and_heats_rival_types():
     state = rules.CityState(turn=2)
     rules.start_initiative(state, districts, "earmark", "natural")
     assert sum(state.stakeholder_heat.values()) >= 2
+
+
+def test_civic_action_lowers_the_worst_grievance_and_raises_trust():
+    """Verify Civic action eases the worst-off group in each target and lifts trust (D6)."""
+
+    districts = _board()
+    target = next(cid for cid, profile in sorted(districts.items()) if max(profile.dissatisfaction.values() or [0]) >= 1)
+    group, band = rules.helpers._top_dissatisfaction(districts[target])
+    trust_before = districts[target].trust
+    state = rules.CityState(turn=2)
+
+    result = rules.start_initiative(state, districts, "civic_action", [target])
+
+    assert result.ok and result.affected_cell_ids == [target]
+    assert districts[target].dissatisfaction[group] == band - 1
+    assert districts[target].trust == trust_before + rules.CIVIC_ACTION_TRUST
+    assert (state.ap, state.money, state.trust) == (1, 60 - rules.CIVIC_ACTION_COST, 36)
+
+
+def test_market_push_raises_activity_with_displacement_and_buyout_risk():
+    """Verify Market push lifts activity, raises prices, and sometimes draws speculators (D6)."""
+
+    pressured = 0
+    for seed in range(2026, 2046):
+        districts = _board()
+        target = sorted(districts)[3]
+        before = (districts[target].activity, districts[target].affordability, districts[target].buyout_pressure)
+        state = rules.CityState(turn=2)
+        result = rules.start_initiative(state, districts, "market_push", [target], seed=seed)
+        after = districts[target]
+        assert result.ok
+        assert after.activity == min(100, before[0] + rules.MARKET_PUSH_ACTIVITY)
+        assert after.affordability == before[1] - rules.MARKET_PUSH_AFFORDABILITY
+        pressured += after.buyout_pressure > before[2]
+        assert state.money == 60 - rules.MARKET_PUSH_COST and state.activity == 51
+    assert 0 < pressured < 20
+
+
+def test_district_initiatives_need_a_target_and_share_the_weekly_slot():
+    """Verify Civic action and Market push need one or two districts and use the one weekly slot."""
+
+    districts = _board()
+    state = rules.CityState(turn=2)
+    assert rules.start_initiative(state, districts, "civic_action", []).ok is False
+    assert rules.start_initiative(state, districts, "civic_action", sorted(districts)[:3]).ok is False
+    assert rules.start_initiative(state, districts, "market_push", sorted(districts)[:1]).ok is True
+    assert rules.start_initiative(state, districts, "civic_action", sorted(districts)[:1]).ok is False

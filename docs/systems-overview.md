@@ -196,6 +196,12 @@ weeks: its ledger gets capital and appetite, its districts lead and always bid
 in buyouts while the earmark runs, templates that suit it weigh three times as
 much in the draw, and the stakeholders of the two largest rival types gain 1
 heat.
+*Civic action* (1 AP, $12, one or two selected districts) eases the worst-off
+group's grievance by one band in each target, adds 4 district trust and 1 city
+trust. *Market push* (1 AP, $8) adds 6 activity and takes 5 affordability in
+each target (so displacement can rise), adds 1 city activity, and has a 35%
+chance per target of drawing speculators (+1 buyout pressure). The numbers are
+first guesses.
 
 Points need exactly one target district, lines two, polygons one or more.
 Maintenance cases skip spillover.

@@ -2503,3 +2503,27 @@ def test_controller_files_one_initiative_a_week(monkeypatch):
     assert rules.active_earmarks(saved[-1]) == {"civic": 5}
     assert len(saved) == 2
     assert "one initiative" in controller.status_text.lower()
+
+
+def test_district_initiative_uses_the_map_selection_and_redraws_districts(monkeypatch):
+    """Verify Civic action reads the selected districts, writes them, and redraws only the district layer."""
+
+    board = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2034)}
+    calls = []
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda **kwargs: None
+    monkeypatch.setattr(dashboard, "selected_cell_ids", lambda layer: ["D0101"])
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: rules.CityState(turn=2))
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: board)
+    monkeypatch.setattr(dashboard, "write_state", lambda paths, state: calls.append("state"))
+    monkeypatch.setattr(dashboard, "write_district_updates", lambda paths, districts, report, affected: calls.append(("districts", list(affected))))
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda paths, messages, **kwargs: calls.append(("redraw", sorted(kwargs["layer_names"]))))
+    monkeypatch.setattr(dashboard, "command_insert", lambda *args, **kwargs: "cmd")
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: None)
+
+    controller.start_initiative("civic_action")
+
+    assert calls == ["state", ("districts", ["D0101"]), ("redraw", [dashboard.DISTRICTS])]
+    assert controller.status_text.startswith("Civic action funded")
