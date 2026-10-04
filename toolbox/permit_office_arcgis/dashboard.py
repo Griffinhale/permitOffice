@@ -1010,13 +1010,11 @@ class DashboardController:
         if not item_id and getattr(self, "view", None):
             item_id = self.view.selected_item_id()
         docket = read_docket(self.paths)
-        for item in docket:
+        open_items = [item for item in docket if item.status in rules.OPEN_DOCKET_STATUSES]
+        for item in open_items:
             if item.item_id == item_id:
                 return item
-        for item in docket:
-            if item.status in ("open", "inspected", "active", "carried"):
-                return item
-        return None
+        return open_items[0] if open_items else None
 
     def refresh_detail(self):
         self.reload()
@@ -1274,7 +1272,7 @@ class DashboardController:
         """Return the next open application after a decision, or None when the queue is empty."""
 
         docket = read_docket(self.paths)
-        active = [item for item in docket if item.status in ("open", "inspected", "active", "carried")]
+        active = [item for item in docket if item.status in rules.OPEN_DOCKET_STATUSES]
         return next((item for item in active if item.item_id != resolved_item_id), active[0] if active else None)
 
     def _advance_triage_selection(self, resolved_item_id, next_item=_NEXT_UNREAD):

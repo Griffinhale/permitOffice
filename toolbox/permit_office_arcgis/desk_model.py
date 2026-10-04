@@ -20,7 +20,7 @@ from .symbology_config import (
 )
 
 
-ACTIVE_STATUSES = frozenset(("open", "inspected", "active", "carried"))
+ACTIVE_STATUSES = frozenset(rules.OPEN_DOCKET_STATUSES)
 HEADLINE_METRICS = (("Week", "WEEK"), ("AP", "AP"), ("Money", "$"))
 
 

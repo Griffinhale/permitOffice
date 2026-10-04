@@ -39,6 +39,8 @@ def resolve_decision(
     """Apply a docket action to city state, district profiles, and case records."""
 
     action_key = action.lower().strip()
+    if item.status not in OPEN_DOCKET_STATUSES:
+        return _blocked(action, item.item_id, f"{item.title} is already filed ({item.status}).")
     # Keep spillovers distinct so target approval math is not double-counted.
     targets = _unique_known(target_cell_ids, districts)
     spillovers = [cid for cid in _unique_known(spillover_cell_ids, districts) if cid not in targets]

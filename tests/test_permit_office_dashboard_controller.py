@@ -2681,3 +2681,16 @@ def test_clear_base_selections_keeps_named_layers_and_logs_them(monkeypatch):
     assert len(select_lines) == 1
     assert "kept=['PermitDistricts', 'PermitPoints']" in select_lines[0]
     assert "cleared=['PermitLines']" in select_lines[0]
+
+
+def test_triage_skips_filed_cases_and_arms_autoclose_when_only_filed_cases_remain(monkeypatch):
+    """Verify approved (active) cases no longer count as open work after a decision."""
+
+    approved = rules.DocketItem("T01", "street_vendor_compact", "Street Vendor Compact", "POINT", 1, status="active")
+    resolved = rules.DocketItem("T02", "street_vendor_compact", "Fee Sweep", "POINT", 1, status="denied")
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [approved, resolved])
+
+    assert controller._next_triage_item("T02") is None
+    controller.selected_item_id = "T01"
+    assert controller.active_item() is None

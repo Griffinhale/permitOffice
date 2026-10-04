@@ -2776,3 +2776,22 @@ def test_active_permit_office_files_stay_under_line_budget():
     }
 
     assert oversized == {}
+
+
+def test_a_filed_case_cannot_be_decided_again():
+    """Verify an approved case rejects a second decision instead of charging and applying it twice."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2028)}
+    state = rules.CityState()
+    item = rules.generate_docket(turn=1, seed=2028, state=state, districts=districts)[2]
+    item.target_cell_ids = ["D0101"]
+    assert rules.resolve_decision(state, item, districts, "approve", item.target_cell_ids, seed=2028).ok
+    ap, money = state.ap, state.money
+
+    for action in ("approve", "inspect", "deny"):
+        result = rules.resolve_decision(state, item, districts, action, item.target_cell_ids, seed=2028)
+        assert result.ok is False
+        assert "already" in result.report
+
+    assert (state.ap, state.money, item.status) == (ap, money, "active")
+    assert "active" not in rules.OPEN_DOCKET_STATUSES

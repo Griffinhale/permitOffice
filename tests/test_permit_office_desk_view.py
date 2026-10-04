@@ -2947,3 +2947,18 @@ def test_start_help_card_only_answers_the_help_key():
     _key(view, "?")
 
     assert [name for name, _args in callbacks.calls] == ["show_help"]
+
+
+def test_approved_cases_leave_the_inbox_and_clear_the_queue():
+    """Verify an approved (active) case is filed: off the inbox, and the last decision clears the queue."""
+
+    item, districts = _vendor_case()
+    item.status = "active"
+    other = rules.DocketItem("T02", "street_vendor_compact", "Business License Fee Sweep", "POINT", 1)
+
+    model = build_desk_model(rules.CityState(), districts, [item, other], item.item_id)
+    assert [row.item_id for row in model.docket_rows] == ["T02"]
+    assert model.selected_item_id == "T02"
+
+    other.status = "denied"
+    assert build_desk_model(rules.CityState(), districts, [item, other]).queue_cleared is True

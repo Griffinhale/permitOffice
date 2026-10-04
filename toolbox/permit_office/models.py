@@ -337,6 +337,10 @@ class CityState:
     daily_pressure: dict[str, int] = field(default_factory=dict)
 
 
+# Docket statuses that still await a decision; every other status is filed.
+OPEN_DOCKET_STATUSES = ("open", "inspected", "carried")
+
+
 @dataclass
 class DocketItem:
     """Runtime docket case shown to the player for action."""
