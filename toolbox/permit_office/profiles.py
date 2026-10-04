@@ -414,7 +414,9 @@ def _heat_followup_item(turn: int, state: CityState, idx: int = 1) -> DocketItem
     hot = []
     for stakeholder, heat in state.stakeholder_heat.items():
         profile = _stakeholder_profile(stakeholder)
-        if heat >= profile.escalation_threshold and turn >= state.stakeholder_memory.get(stakeholder, 0):
+        last_issued = state.stakeholder_memory.get(heat_followup_memory_key(stakeholder))
+        cooled = last_issued is None or turn > int(last_issued) + profile.cooldown_turns
+        if heat >= profile.escalation_threshold and cooled:
             hot.append((stakeholder, heat, _stakeholder_escalation_score(stakeholder, heat)))
     if not hot:
         return None

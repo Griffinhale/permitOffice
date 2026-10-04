@@ -51,6 +51,26 @@ def district_prosperity_band(profile: DistrictProfile) -> str:
 
 
 
+def heat_followup_memory_key(stakeholder: str) -> str:
+    """Return the stakeholder_memory key holding the turn a heat follow-up was last issued."""
+
+    return f"followup:{stakeholder}"
+
+
+def record_heat_followups(state: CityState, items: Iterable[DocketItem]) -> None:
+    """Remember the turn of each closing week's heat follow-up so the cooldown can hold.
+
+    Recorded at week close rather than when the docket is generated, so a
+    docket regenerated within the same week still offers the same follow-up.
+    """
+
+    for item in items:
+        if item.origin_item_id != "stakeholder_heat" or not item.stakeholder:
+            continue
+        key = heat_followup_memory_key(item.stakeholder)
+        state.stakeholder_memory[key] = max(int(state.stakeholder_memory.get(key, 0) or 0), int(item.turn))
+
+
 def _stakeholder_profile(stakeholder: str) -> StakeholderProfile:
     """Return a configured or synthetic profile for stakeholder heat math."""
     if stakeholder in STAKEHOLDERS:

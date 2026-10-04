@@ -2795,3 +2795,29 @@ def test_a_filed_case_cannot_be_decided_again():
 
     assert (state.ap, state.money, item.status) == (ap, money, "active")
     assert "active" not in rules.OPEN_DOCKET_STATUSES
+
+
+def _heat_followups(items):
+    """Return newly issued stakeholder-heat follow-ups from a docket."""
+
+    return [item for item in items if item.origin_item_id == "stakeholder_heat" and item.status == "open"]
+
+
+def test_heat_followup_waits_out_its_cooldown():
+    """Verify a hot stakeholder files one follow-up, skips cooldown_turns weeks, then may file again."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
+    state = rules.CityState(turn=3, stakeholder_heat={"fire_department": 9})
+    cooldown = rules.helpers._stakeholder_profile("fire_department").cooldown_turns
+
+    week3 = rules.generate_docket(3, state=state, districts=districts)
+    issued = _heat_followups(week3)
+    assert [item.stakeholder for item in issued] == ["fire_department"]
+
+    issued[0].status = "enforced"
+    rules.advance_turn_result(state, week3, districts, [], {})
+    state.stakeholder_heat["fire_department"] = 9
+
+    for turn in range(4, 4 + cooldown):
+        assert _heat_followups(rules.generate_docket(turn, state=state, districts=districts)) == []
+    assert len(_heat_followups(rules.generate_docket(4 + cooldown, state=state, districts=districts))) == 1

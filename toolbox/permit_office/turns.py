@@ -184,6 +184,7 @@ def advance_turn_result(
         return TurnAdvanceResult(report, audit=audit)
 
     items = list(open_items)
+    record_heat_followups(state, items)
     feature_list = list(features or ())
     carried = 0
     expired = 0
