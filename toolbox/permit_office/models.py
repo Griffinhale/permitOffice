@@ -521,13 +521,3 @@ class ThreatTrack:
     tone: str
     reasons: tuple[str, ...] = ()
 
-
-@dataclass(frozen=True)
-class OfficeStandingSummary:
-    """Institutional legitimacy gauge and report-ready movement reason."""
-
-    value: int
-    label: str
-    tone: str
-    movement: str = "held"
-    reason: str = "Standing held because permit conditions stayed within the office mandate."

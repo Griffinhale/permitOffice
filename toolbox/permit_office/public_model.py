@@ -14,7 +14,6 @@ from .models import (
     DISSATISFACTION_AGGRIEVED_THRESHOLD,
     DistrictProfile,
     FeatureInstance,
-    OfficeStandingSummary,
     ThreatTrack,
 )
 
@@ -72,38 +71,6 @@ def derive_threat_tracks(
     return tuple(tracks)
 
 
-def office_standing_index(state, threats: Iterable[ThreatTrack] | None = None) -> int:
-    """Fold Activity, Trust, Friction, and Exposure into a legitimacy score."""
-
-    score = (
-        int(getattr(state, "activity", 0) or 0)
-        + int(getattr(state, "trust", 0) or 0)
-        + (100 - int(getattr(state, "friction", 0) or 0))
-        + (100 - int(getattr(state, "exposure", 0) or 0))
-    ) / 4
-    if threats:
-        threat_penalty = max((track.score for track in threats), default=0)
-        if threat_penalty >= 80:
-            score -= 4
-    return max(0, min(100, round(score)))
-
-
-def office_standing_summary(
-    state,
-    previous_state=None,
-    threats: Iterable[ThreatTrack] | None = None,
-) -> OfficeStandingSummary:
-    """Return Office Standing with movement and a concise institutional reason."""
-
-    current_threats = tuple(threats or derive_threat_tracks(state))
-    value = office_standing_index(state, current_threats)
-    label, tone = _standing_descriptor(value)
-    prior_value = office_standing_index(previous_state) if previous_state is not None else value
-    movement = "improved" if value > prior_value else "slipped" if value < prior_value else "held"
-    reason = _standing_reason(state, previous_state, current_threats, movement)
-    return OfficeStandingSummary(value, label, tone, movement, reason)
-
-
 def derive_district_tags(profile: DistrictProfile) -> tuple[str, ...]:
     """Return compact map/report tags for hidden district causes."""
 
@@ -123,19 +90,10 @@ def derive_district_tags(profile: DistrictProfile) -> tuple[str, ...]:
     return tuple(tags[:3])
 
 
-def standing_report_sentence(
-    current_state,
-    previous_state,
-    districts=None,
-    active_features=None,
-    docket=None,
-) -> str:
-    """Format the weekly Office Standing sentence."""
+def threat_report_sentence(state, districts=None, active_features=None, docket=None) -> str:
+    """Format the weekly lead-threat finding for the week report."""
 
-    threats = derive_threat_tracks(current_state, districts, active_features, docket)
-    summary = office_standing_summary(current_state, previous_state=previous_state, threats=threats)
-    threat_text = _lead_threat_text(threats)
-    return f" Office Standing {summary.value} {summary.label}. Standing {summary.movement} because {summary.reason}. {threat_text}"
+    return f" {_lead_threat_text(derive_threat_tracks(state, districts, active_features, docket))}"
 
 
 def district_tag_report_sentence(districts) -> str:
@@ -173,35 +131,6 @@ def _add_profile_reasons(buckets: dict[str, list[tuple[int, str]]], profile: Dis
     buyout = int(getattr(profile, "buyout_pressure", 0) or 0)
     if buyout > 0 or getattr(profile, "identity_state", "stable") in ("vulnerable", "contested"):
         buckets["Speculation Pressure"].append((max(10, buyout * 10), f"buyout pressure {buyout}"))
-
-
-def _standing_descriptor(value: int) -> tuple[str, str]:
-    if value >= 65:
-        return "Strong", "good"
-    if value >= 45:
-        return "Authorized", "watch"
-    if value >= 30:
-        return "Strained", "watch"
-    return "Failing", "bad"
-
-
-def _standing_reason(state, previous_state, threats: tuple[ThreatTrack, ...], movement: str) -> str:
-    review_threat = next((track for track in threats if track.score >= 70 and track.label in ("Legal Exposure", "Service Failure")), None)
-    if review_threat:
-        return f"{review_threat.label} crossed a threshold"
-    if previous_state is not None:
-        if int(getattr(state, "exposure", 0) or 0) < int(getattr(previous_state, "exposure", 0) or 0):
-            return "inspections reduced legal uncertainty"
-        if int(getattr(state, "friction", 0) or 0) > int(getattr(previous_state, "friction", 0) or 0):
-            return "unresolved public anger became visible"
-        if int(getattr(state, "trust", 0) or 0) > int(getattr(previous_state, "trust", 0) or 0):
-            return "filed decisions strengthened public trust"
-    lead = max(threats, key=lambda track: track.score, default=ThreatTrack("Threats", 0, "neutral"))
-    if movement == "improved":
-        return "the office reduced visible uncertainty"
-    if movement == "slipped" and lead.score:
-        return f"{lead.label} increased pressure on the office mandate"
-    return "permit conditions stayed within the office mandate"
 
 
 def _lead_threat_text(threats: tuple[ThreatTrack, ...]) -> str:

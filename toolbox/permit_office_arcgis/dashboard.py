@@ -102,7 +102,6 @@ def _pure_startup_precompute(state, districts, items, active_features, saved_gam
         "",
         {},
         active_features=active_features,
-        audit_grade="PASS",
         game_active=saved_game,
     )
     return "dashboard-model"
@@ -554,7 +553,6 @@ class DashboardController:
             selected_desk_tab=self.selected_desk_tab,
             auto_close_active=self._queue_autoclose_active,
             auto_close_seconds=self._queue_autoclose_seconds,
-            audit_grade=audit.grade,
             game_active=saved_game,
             audit=audit,
             week_start=self._week_start if saved_game else None,

@@ -158,32 +158,6 @@ def test_ticker_surfaces_contested_buyout_for_legibility():
     assert any(line.startswith("WIRE: boundary desk") and "Cinder Yard" in line for line in model.ticker_items)
 
 
-def test_ledger_rows_surface_non_money_city_health():
-    """Verify desk ledger rows expose non-money city systems."""
-
-    item, districts = _vendor_case()
-    profile = districts["D0000"]
-    profile.service_gap["child_services"] = 21
-    profile.hazards = {"noise": 2}
-    profile.affordability = 28
-
-    model = build_desk_model(
-        rules.CityState(last_revenue=4, last_upkeep=7, last_net=-3, maintenance_backlog=2),
-        districts,
-        [item],
-        item.item_id,
-    )
-    ledger = {row.label: row for row in model.ledger_rows}
-
-    assert ledger["Audit"].value == "FAIL"
-    assert ledger["Economy"].value == "rev $4; up $7; net -3"
-    assert "grievance" in ledger["Pressure"].value
-    assert "worst mobility" in ledger["Services"].value
-    assert ledger["Hazards"].value == "noise band 2 x1"
-    assert ledger["Housing"].value == "D0000 affordability 28"
-    assert ledger["Maintenance"].value == "2 active"
-
-
 def test_ledger_rows_use_renamed_city_health_vitals():
     """Verify the desk model surfaces renamed city-health vitals."""
 
@@ -283,41 +257,6 @@ def test_top_header_renders_only_title_core_metrics_and_global_menu():
     assert len(menu_targets) == 1
     _kind, _ident, bbox = menu_targets[0]
     assert bbox[1] < 64
-
-
-def test_ledger_rows_include_top_threat_track_summary():
-    """Verify the ledger exposes threat tracks as the public pressure language."""
-
-    item, districts = _vendor_case()
-    profile = districts["D0000"]
-    profile.service_gap["utilities"] = 42
-    state = rules.CityState(exposure=68)
-
-    model = build_desk_model(state, districts, [item], item.item_id)
-    ledger = {row.label: row for row in model.ledger_rows}
-
-    assert [row.label for row in model.ledger_rows[:6]] == ["Office Standing", "Week", "AP", "Money", "Audit", "Threats"]
-    assert "Threats" in ledger
-    assert ledger["Threats"].value.startswith("Legal Exposure:")
-    assert "city exposure 68" in ledger["Threats"].value
-
-
-def test_ledger_derives_maintenance_from_active_features_when_available():
-    """Verify feature rows override the compatibility backlog count."""
-
-    item, districts = _vendor_case()
-    feature = rules.FeatureInstance("F-market", "vendor_market", status="degraded", condition=22)
-
-    model = build_desk_model(
-        rules.CityState(maintenance_backlog=4),
-        districts,
-        [item],
-        item.item_id,
-        active_features=[feature],
-    )
-    ledger = {row.label: row for row in model.ledger_rows}
-
-    assert ledger["Maintenance"].value == "1 due; lowest condition 22"
 
 
 def test_threat_track_summaries_group_existing_pressure_causes():
@@ -636,59 +575,6 @@ def test_build_desk_model_exposes_map_key_legend_rows():
     assert ("Selection", "Filed state") in legend
 
 
-def test_build_desk_model_tracks_district_group_health_from_profiles():
-    """Verify group tracker combines prosperity, pressure, and local heat."""
-
-    item, districts = _vendor_case()
-    residential = rules.DistrictProfile(
-        "D0001",
-        "Old Annex",
-        900,
-        activity=32,
-        friction=70,
-        trust=18,
-        exposure=65,
-        services=25,
-        district_type="residential",
-        population_mix={"renters": 3, "families": 2},
-        dissatisfaction={"renters": 4, "families": 3},
-        display_state="grievance",
-    )
-    districts[residential.cell_id] = rules.normalize_profile(residential)
-
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-
-    rows = {row.label: row for row in model.district_group_rows}
-    assert "Residential" in rows
-    assert rows["Residential"].state in {"Critical", "Strained"}
-    assert "heat" in rows["Residential"].detail
-    assert "pressure" in rows["Residential"].detail
-
-
-def test_build_desk_model_keeps_all_district_groups_visible_to_rail():
-    """Verify the city pulse receives every district type represented on the map."""
-
-    item, districts = _vendor_case()
-    for idx, district_type in enumerate(("residential", "industrial", "civic", "academic", "natural", "housing")):
-        profile = rules.DistrictProfile(
-            f"D10{idx}",
-            f"{district_type.title()} District",
-            700 + idx,
-            activity=42 - idx,
-            friction=22 + idx,
-            trust=38,
-            exposure=24,
-            services=44,
-            district_type=district_type,
-        )
-        districts[profile.cell_id] = rules.normalize_profile(profile)
-
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-
-    labels = {row.label for row in model.district_group_rows}
-    assert labels >= {"Mercantile", "Residential", "Industrial", "Civic", "Academic", "Natural", "Housing"}
-
-
 def test_build_desk_model_exposes_district_attribute_rows():
     """Verify the wireframe bottom table has district state to render."""
 
@@ -923,30 +809,6 @@ def test_filed_reports_workspace_uses_history_list_and_detail_panel():
     assert "Week one report." in texts
     report_targets = [(ident, bbox) for kind, ident, bbox, _callback in view._click_targets if kind == "report"]
     assert [ident for ident, _bbox in report_targets] == ["week-1", "decision-1"]
-
-
-def test_city_pulse_draws_standing_stat_grid_wire_and_district_groups():
-    """Verify right rail uses standing, stats, and group graphs without ticker duplication."""
-
-    item, districts = _vendor_case()
-    model = build_desk_model(rules.CityState(activity=55, trust=42, friction=35, exposure=28), districts, [item], item.item_id)
-    view, _callbacks = _view_for_drawing(model)
-    canvas = _FakeCanvas()
-
-    view._draw_ledger_rail(canvas, (0, 0, 290, 720))
-
-    texts = _text_values(canvas)
-    assert "OFFICE STANDING" in texts
-    assert "DISTRICT GROUPS" in texts
-    assert "MAP STATE" not in texts
-    assert "PermitDistricts" not in texts
-    assert "district_type" not in texts
-    assert "District display" not in texts
-    assert "display_state" not in texts
-    assert "WIRE" not in texts
-    assert "WIRE QUEUE" not in texts
-    assert "Latest city signals driving current risk." not in texts
-    assert {"ACTIVITY", "TRUST", "FRICTION", "EXPOSURE"} <= set(texts)
 
 
 def test_selected_case_actions_are_nearby_cards_without_global_toolbar_targets():
@@ -1522,24 +1384,6 @@ def test_district_table_scrolls_when_rows_overflow():
     assert last_name in _text_values(canvas)
 
 
-def test_district_groups_draw_no_placeholder_glyphs():
-    """Verify District Groups draws each state word and no '?' or made-up trend line."""
-
-    model, _districts = _full_city_model()
-    view, _callbacks = _view_for_drawing(model)
-    canvas = _FakeCanvas()
-
-    view._draw_ledger_rail(canvas, (0, 0, 300, 900))
-
-    texts = _text_values(canvas)
-    assert "?" not in texts
-    for row in model.district_group_rows:
-        assert row.points == ()
-        assert row.state in texts
-    group_area = next(args for kind, args, _kw in canvas.created if kind == "group-swatch")
-    assert not any(kind == "sparkline" and args[1] >= group_area[1] - 12 for kind, args, _kw in canvas.created)
-
-
 def test_every_panel_draws_a_pane_header():
     """Verify each desk panel draws the same Pro-style pane header (title left, context right)."""
 
@@ -1996,7 +1840,7 @@ def test_draw_lookups_rebuild_only_on_model_swap():
     view._ensure_lookups()
     first_ledger = view._ledger_by_label
     first_lanes = view._lane_by_action
-    assert first_ledger["Audit"].label == "Audit"
+    assert first_ledger["Heat"].label == "Heat"
     assert {lane.action_id for lane in model.action_lanes} == set(first_lanes)
 
     view._ensure_lookups()
@@ -2404,33 +2248,6 @@ def test_command_tile_text_and_impact_panels_stay_inside_cards():
         assert x + kwargs["width"] <= card[2] - 6
 
 
-def test_office_standing_rail_keeps_threat_tracks_in_wire_ticker_not_pulse():
-    """Verify City Pulse focuses on standing/stats while threats live in WIRE."""
-
-    item, districts = _vendor_case()
-    districts["D0000"].service_gap["utilities"] = 42
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-    view, _callbacks = _view_for_drawing(model)
-    canvas = _FakeCanvas()
-
-    view._draw_ledger_rail(canvas, (0, 0, 260, 620))
-
-    texts = _text_values(canvas)
-    assert "City pulse" in texts
-    assert "OFFICE STANDING" in texts
-    assert "THREATS" not in texts
-    assert not any("Service Failure" in str(text) for text in texts)
-    assert any(text.startswith("WIRE:") and "Service Failure" in text and "utilities gap 42" in text for text in model.ticker_items)
-    assert "ACTIVITY" in texts
-    assert "TRUST" in texts
-    assert "FRICTION" in texts
-    assert "EXPOSURE" in texts
-    assert "PRESSURE" not in texts
-    assert "SERVICES" not in texts
-    assert "HOUSING" not in texts
-    assert "MAINTENANCE" not in texts
-
-
 def test_ledger_rows_include_trend_points_for_core_pulse_stats():
     """Verify pulse stats carry static sparkline data for the view."""
 
@@ -2455,35 +2272,6 @@ def test_city_pulse_draws_sparklines_and_group_swatches():
 
     assert any(kind == "sparkline" for kind, _args, _kwargs in canvas.created)
     assert any(kind == "group-swatch" for kind, _args, _kwargs in canvas.created)
-
-
-def test_city_pulse_fits_every_represented_group_at_dashboard_height():
-    """Verify district group cards compress instead of clipping represented groups."""
-
-    item, districts = _vendor_case()
-    for idx, district_type in enumerate(("residential", "industrial", "civic", "academic", "natural", "housing")):
-        profile = rules.DistrictProfile(
-            f"D30{idx}",
-            f"{district_type.title()} District",
-            800,
-            activity=44,
-            friction=22 + idx,
-            trust=40,
-            exposure=25,
-            services=43,
-            district_type=district_type,
-        )
-        districts[profile.cell_id] = rules.normalize_profile(profile)
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-    view, _callbacks = _view_for_drawing(model)
-    canvas = _FakeCanvas()
-
-    view._draw_ledger_rail(canvas, (0, 0, 300, 620))
-
-    swatches = [args for kind, args, _kwargs in canvas.created if kind == "group-swatch"]
-    assert len(swatches) == len(model.district_group_rows)
-    assert all(swatches[idx][1] >= swatches[idx - 1][3] for idx in range(1, len(swatches)))
-    assert swatches[-1][3] <= 606
 
 
 def test_city_pulse_focuses_on_graphs_not_map_state_key():
@@ -2640,82 +2428,7 @@ def test_build_desk_model_does_not_mutate_districts_argument():
     )
 
     assert districts == before
-    assert "Audit" in {row.label for row in model.ledger_rows}
-
-
-def test_city_health_index_folds_core_metrics():
-    """Verify the compatibility wrapper preserves the City Health formula."""
-
-    from toolbox.permit_office_arcgis.desk_model import _city_health_index
-
-    # Activity/Trust positive, Friction/Exposure negative: (80 + 60 + (100-10) + (100-20)) / 4 = 77.5 -> 78
-    healthy = rules.CityState(activity=80, trust=60, friction=10, exposure=20)
-    assert _city_health_index(healthy) == 78
-    # A struggling city reads lower.
-    failing = rules.CityState(activity=20, trust=15, friction=70, exposure=65)
-    assert _city_health_index(failing) < _city_health_index(healthy)
-    assert 0 <= _city_health_index(failing) <= 100
-
-
-def test_office_standing_index_reuses_city_vital_formula():
-    """Verify Office Standing preserves the existing City Health formula."""
-
-    from toolbox.permit_office_arcgis.desk_model import _office_standing_index
-
-    strong = rules.CityState(activity=80, trust=60, friction=10, exposure=20)
-    assert _office_standing_index(strong) == 78
-
-    failing = rules.CityState(activity=20, trust=15, friction=70, exposure=65)
-    assert _office_standing_index(failing) == 25
-    assert 0 <= _office_standing_index(failing) <= 100
-
-
-def test_ledger_surfaces_office_standing_headline():
-    """Verify the ledger leads with Office Standing instead of City Health."""
-
-    item, districts = _vendor_case()
-    model = build_desk_model(
-        rules.CityState(activity=70, trust=55, friction=15, exposure=20),
-        districts,
-        [item],
-        item.item_id,
-    )
-    ledger = {row.label: row for row in model.ledger_rows}
-
-    assert "Office Standing" in ledger
-    assert ledger["Office Standing"].meter is not None
-    assert ledger["Office Standing"].value == "72 Strong"
-    assert "Health" not in ledger
-
-
-def test_ledger_surfaces_office_standing_headline_and_heat():
-    """Verify the ledger leads with Office Standing and keeps Heat visible."""
-
-    item, districts = _vendor_case()
-    model = build_desk_model(rules.CityState(activity=70, trust=55, friction=15, exposure=20), districts, [item], item.item_id)
-    ledger = {row.label: row for row in model.ledger_rows}
-
-    assert "Office Standing" in ledger
-    assert ledger["Office Standing"].meter is not None
-    assert "Heat" in ledger
-
-
-def test_city_health_rail_draws_office_standing_without_wire_headline():
-    """Verify the pulse rail renders Office Standing without duplicating the ticker."""
-
-    item, districts = _vendor_case()
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-    view, _callbacks = _view_for_drawing(model)
-    canvas = _FakeCanvas()
-
-    view._draw_ledger_rail(canvas, (0, 0, 260, 620))
-
-    texts = _text_values(canvas)
-    assert "OFFICE STANDING" in texts
-    assert "THREATS" not in texts
-    assert any(text.startswith("WIRE:") for text in model.ticker_items)
-    assert "HEAT" not in texts
-    assert "CITY HEALTH" not in texts
+    assert "Services" in {row.label for row in model.ledger_rows}
 
 
 def test_selected_case_renders_economy_and_action_note():
@@ -3014,3 +2727,42 @@ def test_city_trends_are_deltas_since_week_start_or_unknown():
     assert [with_start[name].trend for name in ("Activity", "Friction", "Trust", "Exposure")] == ["up", "down", "flat", "up"]
     assert all(without[name].trend == "unknown" for name in ("Activity", "Friction", "Trust", "Exposure"))
     assert all(row.points == () for row in (*with_start.values(), *without.values()))
+
+
+def test_model_carries_the_goal_and_the_ladder_line():
+    """Verify the header facts for the new loop: filed goal progress, offer, ladder rung, next checkpoint (D5, D9, D10)."""
+
+    _item, districts = _vendor_case()
+    goal = {"offer": ["public_confidence", "quiet_streets", "even_handed"], "chosen": "", "baseline": {"type_counts": {"mercantile": 1}, "critical_gaps": 0}}
+    state = rules.CityState(turn=5, trust=40, audit_rung=1, mandate=dict(goal))
+
+    unpicked = build_desk_model(state, districts, [])
+    assert unpicked.goal_title == ""
+    assert [title for _key, title in unpicked.goal_offer] == ["Public confidence", "Quiet streets", "Even-handed city"]
+
+    state.mandate = {**goal, "chosen": "public_confidence"}
+    model = build_desk_model(state, districts, [])
+    assert (model.goal_title, model.goal_met) == ("Public confidence", False)
+    assert "40 of 55" in model.goal_progress
+    assert (model.ladder_rung, model.next_checkpoint) == ("warning", 8)
+
+
+def test_ledger_keeps_only_the_approved_meters():
+    """Verify Office Standing and the folded meters are gone from the desk (D10)."""
+
+    _item, districts = _vendor_case()
+    labels = {row.label for row in build_desk_model(rules.CityState(), districts, []).ledger_rows}
+
+    assert labels == {"Week", "AP", "Money", "Heat", "Activity", "Friction", "Trust", "Exposure", "Economy", "Services", "Incidents"}
+
+
+def test_district_type_rows_count_districts_and_mark_earmarks():
+    """Verify the City tab's district types show counts and which type is earmarked."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2034)}
+    state = rules.CityState(turn=2, initiatives={"week": 2, "earmarks": {"civic": 5}})
+
+    rows = {row.label: row for row in build_desk_model(state, districts, []).district_type_rows}
+
+    assert rows["Mercantile"].count == 9 and rows["Civic"].earmarked_until == 5
+    assert rows["Mercantile"].earmarked_until == 0

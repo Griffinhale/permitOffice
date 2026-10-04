@@ -12,7 +12,7 @@ from .mandates import mandate_status, mandate_title, season_achievements
 from .initiatives import expire_initiatives
 from .buyouts import resolve_buyout_round, resolve_contested_transitions
 from .type_pressure import read_type_ledger, write_type_ledger
-from .public_model import district_tag_report_sentence, snapshot_city_state, standing_report_sentence
+from .public_model import district_tag_report_sentence, snapshot_city_state, threat_report_sentence
 from .systems import (
     _advance_feature_lifecycle,
     _apply_recurring_economy,
@@ -313,7 +313,7 @@ def advance_turn_result(
     population_text = f" Population drift {population_delta:+d}." if population_delta else ""
     incident_text = f" New civic incident file(s): {new_incidents}." if new_incidents else ""
     system_text = f" {' '.join(system_notes)}" if system_notes else ""
-    standing_text = standing_report_sentence(state, previous_state, districts, feature_list, items)
+    standing_text = threat_report_sentence(state, districts, feature_list, items)
     tag_text = district_tag_report_sentence(districts)
     audit_text = (
         f" Final audit: {audit.grade}.{ladder_text}{season_text}"

@@ -118,7 +118,6 @@ def final_audit():
         report_tabs=(tab,),
         selected_report_id="scorecard-1",
         selected_desk_tab="reports",
-        audit_grade=grade,
     )
 
 

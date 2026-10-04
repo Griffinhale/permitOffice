@@ -1142,7 +1142,7 @@ def test_completed_game_reloads_inline_final_audit_receipt(monkeypatch):
     assert controller.view.model.report_tabs[-1].kind == "scorecard"
     rows_by_label = {row.label: row for row in controller.view.model.ledger_rows}
     assert rows_by_label["Week"].value == "12/12 CLOSED"
-    assert rows_by_label["Office Standing"].label == "Office Standing"
+    assert "Office Standing" not in rows_by_label
 
 
 def test_queue_autoclose_final_week_records_same_inline_final_audit_receipt(monkeypatch):
@@ -1789,39 +1789,6 @@ def _raise_scorecard(*_args, **_kwargs):
     """Stand-in scorecard that fails if the cached-grade path calls it."""
 
     raise AssertionError("rules.scorecard should not be called when audit_grade is provided")
-
-
-def test_build_desk_model_uses_provided_audit_grade_without_scorecard(monkeypatch):
-    """Verify a provided audit grade skips the scorecard recompute entirely."""
-
-    item = rules.DocketItem("CASE-grade", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
-    districts = {"D0000": _profile("D0000")}
-    monkeypatch.setattr(desk_model.rules, "scorecard", _raise_scorecard)
-
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id, audit_grade="CONDITIONAL")
-
-    audit_row = next(row for row in model.ledger_rows if row.label == "Audit")
-    assert audit_row.value == desk_model._short_audit_grade("CONDITIONAL")
-
-
-def test_build_desk_model_without_audit_grade_computes_the_audit(monkeypatch):
-    """Verify the default path computes the audit once when no cached result is passed."""
-
-    item = rules.DocketItem("CASE-grade", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
-    districts = {"D0000": _profile("D0000")}
-    calls = []
-
-    def fake_audit(state, districts_arg, features_arg, docket_arg):
-        calls.append(True)
-        return rules.AuditResult("PASS", 72, (), "Audit PASS.")
-
-    monkeypatch.setattr(desk_model.rules, "generate_audit_result", fake_audit)
-
-    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
-
-    assert calls == [True]
-    audit_row = next(row for row in model.ledger_rows if row.label == "Audit")
-    assert audit_row.value == desk_model._short_audit_grade("PASS")
 
 
 def test_selection_only_reload_reuses_cached_audit_grade(monkeypatch):

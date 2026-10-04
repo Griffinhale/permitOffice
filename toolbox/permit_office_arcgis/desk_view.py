@@ -1357,18 +1357,20 @@ class PermitDeskView:
         if pulse:
             y = self._draw_pulse_grid(c, inner_x0, inner_x1, y, pulse) + 18
 
-        if self.model.district_group_rows and y < y1 - 70:
-            c.create_text(inner_x0, y, text="DISTRICT GROUPS", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
+        type_rows = tuple(self.model.district_type_rows)
+        if type_rows and y < y1 - 70:
+            c.create_text(inner_x0, y, text="DISTRICT TYPES", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
             y += 18
-            group_rows = tuple(self.model.district_group_rows)
-            available = max(0, y1 - 14 - y)
-            row_gap = 6
-            content_h = 5 + self._line_h(Type.SMALL, "bold") + self._line_h(Type.SMALL) + 6
-            row_h = max(30, min(content_h, (available - row_gap * max(0, len(group_rows) - 1)) // max(1, len(group_rows))))
-            for row in group_rows:
+            row_h = self._line_h(Type.SMALL, "bold") + 8
+            for row in type_rows:
                 if y + row_h > y1 - 14:
                     break
-                y = self._draw_group_row(c, inner_x0, inner_x1, y, row, row_h=row_h) + row_gap
+                _record_box(c, "group-swatch", (inner_x0 + 2, y + 4, inner_x0 + 12, y + 14))
+                c.create_rectangle(inner_x0 + 2, y + 4, inner_x0 + 12, y + 14, fill=row.swatch or Palette.BORDER, outline=Palette.BORDER)
+                c.create_text(inner_x0 + 20, y + 2, text=row.label, anchor="nw", fill=Palette.INK, font=self._font(Type.SMALL, "bold"))
+                note = f"{row.count}  earmarked to week {row.earmarked_until}" if row.earmarked_until else str(row.count)
+                c.create_text(inner_x1, y + 2, text=note, anchor="ne", fill=Palette.ACCENT if row.earmarked_until else Palette.MUTED, font=self._font(Type.SMALL, "bold"))
+                y += row_h
 
     def _draw_pulse_grid(self, c, x0, x1, y, rows):
         """Draw Activity/Trust/Friction/Exposure as a compact 2x2 grid."""
@@ -1389,27 +1391,6 @@ class PermitDeskView:
             if (row.trend or "").lower() in ("up", "down", "flat"):  # unknown before a week-start snapshot: draw nothing
                 c.create_text(cx1 - 8, cy0 + 54, text=row.trend, anchor="ne", fill=tone, font=self._font(Type.SMALL, "bold"))
         return y + (cell_h * 2) + gap
-
-    def _draw_group_row(self, c, x0, x1, y, row, row_h=46):
-        """Draw one district group: swatch, name, state word, detail, and a trend only when known."""
-
-        tone = _tone_color(row.tone)
-        c.create_rectangle(x0, y, x1, y + row_h, fill=Palette.SUBTLE, outline=Palette.BORDER)
-        _record_box(c, "group-swatch", (x0 + 8, y + 10, x0 + 18, y + 20))
-        c.create_rectangle(x0 + 8, y + 10, x0 + 18, y + 20, fill=row.swatch or Palette.BORDER, outline=Palette.BORDER)
-        state_w = self._text_w(row.state, Type.SMALL, "bold") or 56
-        label_w = x1 - x0 - 26 - state_w - Space.M
-        c.create_text(x0 + 26, y + 5, text=self._fit_px(row.label, Type.SMALL, "bold", label_w), anchor="nw", fill=Palette.INK, font=self._font(Type.SMALL, "bold"))
-        c.create_text(x1 - 8, y + 5, text=row.state, anchor="ne", fill=tone, font=self._font(Type.SMALL, "bold"))
-        detail_y = y + 5 + self._line_h(Type.SMALL, "bold")
-        detail_w = x1 - x0 - 34
-        known_trend = (row.trend or "").lower() in ("up", "down", "flat")
-        if len(tuple(row.points or ())) >= 2 and known_trend:
-            self._draw_sparkline(c, x1 - 96, detail_y + 2, x1 - 22, min(y + row_h - 6, detail_y + 14), row.points, tone)
-            detail_w -= 100
-        if detail_y + self._line_h(Type.SMALL) <= y + row_h:
-            c.create_text(x0 + 26, detail_y, text=self._fit_px(row.detail, Type.SMALL, "normal", detail_w), anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL))
-        return y + row_h
 
     def _draw_sparkline(self, c, x0, y0, x1, y1, points, color):
         """Draw a compact static sparkline from 0-100 point values."""

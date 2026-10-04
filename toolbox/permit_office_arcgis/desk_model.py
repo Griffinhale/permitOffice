@@ -202,17 +202,13 @@ class MapLegendRow:
 
 
 @dataclass(frozen=True)
-class DistrictGroupRow:
-    """Aggregated district-division health for the city pulse rail."""
+class DistrictTypeRow:
+    """One district type on the City tab: how many districts it holds, and any earmark."""
 
     label: str
-    state: str
-    detail: str
-    tone: str = "neutral"
-    meter: int = 0
+    count: int
     swatch: str = ""
-    trend: str = "unknown"
-    points: tuple[int, ...] = ()
+    earmarked_until: int = 0
 
 
 @dataclass(frozen=True)
@@ -251,7 +247,7 @@ class DeskViewModel:
     auto_close_seconds: int = 0
     game_active: bool = True
     map_legend_rows: tuple[MapLegendRow, ...] = ()
-    district_group_rows: tuple[DistrictGroupRow, ...] = ()
+    district_type_rows: tuple[DistrictTypeRow, ...] = ()
     district_table_rows: tuple[DistrictTableRow, ...] = ()
     case_map_symbols: tuple[CaseMapSymbol, ...] = ()
     filed_rows: tuple[DocketRow, ...] = ()
@@ -264,6 +260,13 @@ class DeskViewModel:
     money_net: int = 0
     week_label: str = ""
     ap_label: str = ""
+    goal_title: str = ""
+    goal_progress: str = ""
+    goal_met: bool = False
+    goal_offer: tuple[tuple[str, str], ...] = ()
+    ladder_rung: str = ""
+    next_checkpoint: int = 0
+    outcome: str = ""
 
 
 # What week close does to a case nobody decided, by template expiration policy
@@ -291,16 +294,13 @@ def build_desk_model(
     selected_desk_tab="applications",
     auto_close_active=False,
     auto_close_seconds=0,
-    audit_grade=None,
     game_active=True,
     audit=None,
     week_start=None,
 ) -> DeskViewModel:
     """Format gameplay state into a presentation-only desk model.
 
-    `audit_grade`, when provided, is a controller-cached grade that lets the
-    ledger skip the scorecard recompute on selection-only redraws; None keeps
-    the original recompute-via-scorecard behavior. `audit` is the cached
+    `audit` is the cached
     AuditResult for the header (recomputed from copies when None), and
     `week_start` the controller's week-start stat snapshot for real trends.
     """
@@ -329,12 +329,10 @@ def build_desk_model(
     )
     if audit is None:
         audit = rules.generate_audit_result(state, deepcopy(districts), _feature_snapshots(active_features), deepcopy(list(items or ())))
-    if audit_grade is None:
-        audit_grade = audit.grade
     points_short, criticals = rules.pass_gap(audit)
     case = _case_summary(state, districts, selected)
     action_lanes = _action_lanes(state, districts, selected) if selected else ()
-    ledger_rows = _ledger_rows(state, districts, active_features, active_items, audit_grade=audit_grade, week_start=week_start)
+    ledger_rows = _ledger_rows(state, districts, active_features, active_items, week_start=week_start)
     status = status_text or "No report yet. Select a docket row; use Retarget Map when changing targets."
     report_tabs = tuple(report_tabs or _legacy_report_tabs(receipt))
     selected_report_id = _resolve_selected_report_id(report_tabs, selected_report_id)
@@ -347,7 +345,8 @@ def build_desk_model(
     ticker_items = _ticker_items(state, districts, active_features, active_items, report_tabs)
     map_legend_rows = _map_legend_rows(districts, active_items, selected_id)
     case_map_symbols = _case_map_symbols(selected, active_features)
-    district_group_rows = _district_group_rows(districts)
+    district_type_rows = _district_type_rows(districts, state)
+    goal = _goal_facts(state, districts, active_features)
     district_table_rows = _district_table_rows(districts, selected, state)
     return DeskViewModel(
         docket_rows,
@@ -368,7 +367,7 @@ def build_desk_model(
         int(auto_close_seconds or 0),
         bool(game_active),
         map_legend_rows,
-        district_group_rows,
+        district_type_rows,
         district_table_rows,
         case_map_symbols,
         filed_rows=filed_rows,
@@ -381,6 +380,38 @@ def build_desk_model(
         money_net=int(state.last_net),
         week_label=f"{state.turn}/{state.max_turns}",
         ap_label=f"{state.ap}/{state.max_ap}",
+        **goal,
+        ladder_rung=rules.AUDIT_RUNGS[max(0, min(len(rules.AUDIT_RUNGS) - 1, int(state.audit_rung or 0)))],
+        next_checkpoint=next((week for week in rules.AUDIT_WEEKS if week >= state.turn), 0) if state.status != "complete" else 0,
+        outcome=str(getattr(state, "outcome", "") or ""),
+    )
+
+
+def _goal_facts(state, districts, active_features) -> dict:
+    """Return the season goal fields: the filed mandate's progress, or the open offer."""
+
+    mandate = getattr(state, "mandate", {}) or {}
+    chosen = str(mandate.get("chosen") or "")
+    offer = tuple((key, rules.mandate_title(key)) for key in mandate.get("offer") or ())
+    if not chosen:
+        return {"goal_offer": offer}
+    district_map = districts if isinstance(districts, dict) else {profile.cell_id: profile for profile in districts or ()}
+    met, progress = rules.mandate_status(chosen, state, district_map, _feature_snapshots(active_features))
+    return {"goal_title": rules.mandate_title(chosen), "goal_progress": progress, "goal_met": met, "goal_offer": offer}
+
+
+def _district_type_rows(districts, state) -> tuple[DistrictTypeRow, ...]:
+    """Count districts per type, largest first, marking earmarked types."""
+
+    profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
+    counts: dict[str, int] = {}
+    for profile in profiles:
+        dtype = getattr(profile, "district_type", "") or "district"
+        counts[dtype] = counts.get(dtype, 0) + 1
+    earmarks = rules.active_earmarks(state)
+    return tuple(
+        DistrictTypeRow(_display(dtype), count, _symbol_hex(DISTRICT_TYPE_SYMBOLS.get(dtype)), earmarks.get(dtype, 0))
+        for dtype, count in sorted(counts.items(), key=lambda row: (-row[1], row[0]))
     )
 
 
@@ -1192,41 +1223,6 @@ def _worst_tone(*tones) -> str:
     return max((tone or "neutral" for tone in tones), key=lambda tone: priority.get(tone, 0))
 
 
-def _office_standing_index(state) -> int:
-    """Fold the four core metrics into one 0-100 office legitimacy signal.
-
-    Activity and Trust read positive; Friction and Exposure read negative. This
-    preserves the prior City Health formula while changing the player-facing
-    framing from generic wellness to the office's mandate to keep issuing permits.
-    """
-
-    return rules.office_standing_index(state)
-
-
-def _office_standing_descriptor(value: int) -> tuple[str, str]:
-    """Return a (word, tone) summary for Office Standing."""
-
-    if value >= 65:
-        return "Strong", "good"
-    if value >= 45:
-        return "Authorized", "watch"
-    if value >= 30:
-        return "Strained", "watch"
-    return "Failing", "bad"
-
-
-def _city_health_index(state) -> int:
-    """Compatibility wrapper for older tests and callers."""
-
-    return _office_standing_index(state)
-
-
-def _city_health_descriptor(value: int) -> tuple[str, str]:
-    """Compatibility wrapper for older tests and callers."""
-
-    return _office_standing_descriptor(value)
-
-
 THREAT_TRACKS = ("Public Anger", "Legal Exposure", "Service Failure", "Speculation Pressure")
 
 
@@ -1255,60 +1251,24 @@ def _stat_row(label, value, tone, week_start) -> LedgerRow:
     return LedgerRow(label, str(value), tone, value, trend)
 
 
-def _ledger_rows(state, districts, active_features=None, docket=None, audit_grade=None, week_start=None) -> tuple[LedgerRow, ...]:
-    """Build the city ledger rows shown in the dashboard sidebar.
+def _ledger_rows(state, districts, active_features=None, docket=None, week_start=None) -> tuple[LedgerRow, ...]:
+    """Build the meter rows the desk shows (owner D10): resources, heat, the four stats, and city services."""
 
-    When `audit_grade` is provided the caller has a cached grade, so the
-    scorecard recompute (and its two load-bearing deepcopies) is skipped.
-    When it is None we recompute via `rules.scorecard`, copying districts and
-    the docket so `generate_audit_result`'s in-place normalize cannot mutate the
-    districts this function reads afterward.
-    """
-
-    standing = _office_standing_index(state)
-    standing_word, standing_tone = _office_standing_descriptor(standing)
     heat = rules.heat_summary(state)
-    # NOTE: the deepcopy on the None path is load-bearing. `scorecard` ->
-    # `generate_audit_result` calls `normalize_profile` in place, which re-derives
-    # service_gap / displacement / etc. On normalized inputs that is idempotent,
-    # but the ledger summaries below read the same `districts`, so mutating them
-    # here would change Services/Housing/Pressure for any caller passing
-    # semi-normalized state. The controller passes a cached `audit_grade` to skip
-    # this recompute on selection-only reloads; the None path keeps the safe copy.
-    if audit_grade is None:
-        audit_grade, _audit_report = rules.scorecard(state, deepcopy(districts), _feature_snapshots(active_features), deepcopy(docket or ()))
-    population = rules.population_city_summary(districts)
     incidents = rules.incident_summary(districts)
     service_summary = _city_service_summary(districts)
-    hazard_summary = _hazard_summary(districts.values() if isinstance(districts, dict) else districts)
-    housing_summary = _housing_pressure_summary(districts.values() if isinstance(districts, dict) else districts)
-    maintenance = _maintenance_summary(active_features) if active_features is not None else _maintenance_count_from_state(state)
-    pressure = _pressure_cause_summary(districts)
-    threat_rows = _threat_track_summaries(state, districts, active_features, docket or ())
-    headline_threat = threat_rows[0]
-    threat_value = headline_threat.value if headline_threat.label == "Threats" else f"{headline_threat.label}: {headline_threat.value}"
-    threat_tone = headline_threat.tone
-    threat_meter = headline_threat.meter
     week_value = f"{state.turn}/{state.max_turns} CLOSED" if state.status == "complete" or state.turn > state.max_turns else f"{state.turn}/{state.max_turns}"
     return (
-        LedgerRow("Office Standing", f"{standing} {standing_word}", standing_tone, standing),
         LedgerRow("Week", week_value, "neutral", _meter(state.turn, state.max_turns)),
         LedgerRow("AP", f"{state.ap}/{state.max_ap}", "good" if state.ap else "watch", _meter(state.ap, state.max_ap)),
         LedgerRow("Money", f"${state.money}", "good" if state.money >= 20 else "watch"),
-        LedgerRow("Audit", _short_audit_grade(audit_grade), "bad" if audit_grade == "FAIL" else "watch" if audit_grade == "CONDITIONAL" else "good"),
-        LedgerRow("Threats", threat_value, threat_tone, threat_meter),
         LedgerRow("Heat", heat, "bad" if heat != "none" else "neutral"),
-        LedgerRow("Pressure", pressure, "watch" if pressure != "stable" else "neutral"),
         _stat_row("Activity", state.activity, "good", week_start),
         _stat_row("Friction", state.friction, "bad" if state.friction >= 50 else "watch", week_start),
         _stat_row("Trust", state.trust, "good", week_start),
         _stat_row("Exposure", state.exposure, "bad" if state.exposure >= 50 else "watch", week_start),
         LedgerRow("Economy", f"rev ${state.last_revenue}; up ${state.last_upkeep}; net {state.last_net:+d}", "watch" if state.last_net < 0 else "good" if state.last_net > 0 else "neutral"),
         LedgerRow("Services", service_summary, "bad" if "critical" in service_summary else "watch" if service_summary != "none" else "neutral"),
-        LedgerRow("Hazards", hazard_summary, "watch" if hazard_summary != "no active hazards" else "neutral"),
-        LedgerRow("Housing", housing_summary, "watch" if housing_summary != "housing steady" else "neutral"),
-        LedgerRow("Maintenance", maintenance, "watch" if maintenance != "none" else "neutral"),
-        LedgerRow("Population", population, "neutral"),
         LedgerRow("Incidents", incidents, "bad" if incidents != "none" else "neutral"),
     )
 
@@ -1337,12 +1297,6 @@ def _pressure_cause_summary(districts) -> str:
     if not counts:
         return "stable"
     return ", ".join(f"{cause.replace('_', ' ')} x{count}" for cause, count in sorted(counts.items(), key=lambda row: (-row[1], row[0]))[:3])
-
-
-def _short_audit_grade(grade: str) -> str:
-    """Return a compact audit grade for the top banner."""
-
-    return "COND" if grade == "CONDITIONAL" else grade or "NA"
 
 
 def _feature_snapshots(features) -> list:
@@ -1500,53 +1454,6 @@ def _symbol_hex(symbol):
 
     rgba = symbol[0] if symbol else [216, 225, 222, 100]
     return "#{:02x}{:02x}{:02x}".format(int(rgba[0]), int(rgba[1]), int(rgba[2]))
-
-
-def _district_group_rows(districts) -> tuple[DistrictGroupRow, ...]:
-    """Aggregate district health by district type for the city pulse rail."""
-
-    profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
-    groups: dict[str, list] = {}
-    for profile in profiles:
-        key = getattr(profile, "district_type", "") or "district"
-        groups.setdefault(key, []).append(profile)
-    rows: list[DistrictGroupRow] = []
-    for district_type, group_profiles in sorted(groups.items()):
-        count = max(1, len(group_profiles))
-        prosperity = sum(
-            int(getattr(profile, "activity", 0) or 0)
-            + int(getattr(profile, "trust", 0) or 0)
-            + int(getattr(profile, "services", 0) or 0)
-            - int(getattr(profile, "friction", 0) or 0)
-            - int(getattr(profile, "exposure", 0) or 0)
-            for profile in group_profiles
-        ) / count
-        heat = max((max((getattr(profile, "dissatisfaction", {}) or {}).values() or [0]) for profile in group_profiles), default=0)
-        pressure = sum(1 for profile in group_profiles if (getattr(profile, "display_state", "") or "stable") != "stable")
-        pressure += sum(1 for profile in group_profiles if getattr(profile, "identity_state", "stable") in ("vulnerable", "contested"))
-        pressure += sum(1 for profile in group_profiles if int(getattr(profile, "buyout_pressure", 0) or 0) > 0)
-        score = int(max(0, min(100, 50 + (prosperity / 4) - (heat * 8) - (pressure * 6))))
-        if score < 30 or heat >= 4:
-            state, tone = "Critical", "bad"
-        elif score < 46 or heat >= 3 or pressure >= 2:
-            state, tone = "Strained", "watch"
-        elif score < 62 or pressure:
-            state, tone = "Warming", "watch"
-        else:
-            state, tone = "Stable", "good"
-        symbol = DISTRICT_TYPE_SYMBOLS.get(district_type)
-        # No week-over-week district history is kept, so groups carry no trend.
-        rows.append(
-            DistrictGroupRow(
-                _display(district_type),
-                state,
-                f"{count} district(s), heat {heat}, pressure {pressure}",
-                tone,
-                score,
-                _symbol_hex(symbol),
-            )
-        )
-    return tuple(sorted(rows, key=lambda row: (row.meter, row.label)))
 
 
 def _district_table_rows(districts, selected, state=None) -> tuple[DistrictTableRow, ...]:

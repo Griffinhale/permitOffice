@@ -2395,19 +2395,6 @@ def test_pure_threat_tracks_translate_internal_pressure_fields():
     assert "buyout pressure 4" in by_label["Speculation Pressure"].reasons
 
 
-def test_office_standing_summary_explains_threat_threshold_review():
-    """Verify Office Standing is a legitimacy gauge with report-ready reasons."""
-
-    calm = rules.CityState(activity=60, trust=50, friction=20, exposure=20)
-    risky = rules.CityState(activity=60, trust=50, friction=20, exposure=72)
-    summary = rules.office_standing_summary(risky, previous_state=calm)
-
-    assert summary.value == 54
-    assert summary.label == "Authorized"
-    assert summary.movement == "slipped"
-    assert "Legal Exposure crossed a threshold" in summary.reason
-
-
 def test_district_cause_tags_hide_raw_ledgers_behind_map_labels():
     """Verify map-facing labels describe causes without exposing raw counters."""
 
@@ -2424,21 +2411,6 @@ def test_district_cause_tags_hide_raw_ledgers_behind_map_labels():
     assert rules.derive_district_tags(anger) == ("Anger Cluster",)
     assert rules.derive_district_tags(unsafe) == ("Unsafe Corridor",)
     assert rules.derive_district_tags(stable) == ("Stable Anchor",)
-
-
-def test_weekly_report_explains_office_standing_movement():
-    """Verify end-week reports explain institutional legitimacy movement."""
-
-    profile = rules.DistrictProfile("D0000", "Gap Row", 1400, 35, 25, 30, 75, 5, "residential")
-    rules.normalize_profile(profile)
-    feature = rules.FeatureInstance("F-failed", "utility_trench", status="failed", condition=0, target_cell_ids=["D0000"])
-    state = rules.CityState(turn=1, activity=60, trust=50, friction=20, exposure=20)
-
-    result = rules.advance_turn_result(state, [], {profile.cell_id: profile}, [feature])
-
-    assert "Office Standing" in result.report
-    assert any(phrase in result.report for phrase in ("Standing slipped", "Standing is under review"))
-    assert any(track in result.report for track in ("Legal Exposure", "Service Failure"))
 
 
 def test_weekly_report_includes_notable_district_tags():
@@ -3104,3 +3076,13 @@ def test_district_initiatives_need_a_target_and_share_the_weekly_slot():
     assert rules.start_initiative(state, districts, "civic_action", sorted(districts)[:3]).ok is False
     assert rules.start_initiative(state, districts, "market_push", sorted(districts)[:1]).ok is True
     assert rules.start_initiative(state, districts, "civic_action", sorted(districts)[:1]).ok is False
+
+
+def test_week_report_drops_office_standing_and_files_the_lead_threat_as_a_finding():
+    """Verify the retired Office Standing score leaves the week report (D10)."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2034)}
+    report = rules.advance_turn_result(rules.CityState(turn=2), [], districts, [], {}).report
+
+    assert "Office Standing" not in report
+    assert not hasattr(rules, "office_standing_index")
