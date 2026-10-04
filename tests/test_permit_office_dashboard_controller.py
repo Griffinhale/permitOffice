@@ -2480,3 +2480,26 @@ def test_new_game_offers_three_mandates_and_choose_persists_the_pick(monkeypatch
     monkeypatch.setattr(dashboard, "read_state", lambda paths: deepcopy(written[-1]))
     controller.choose_mandate(offer["offer"][1])
     assert written[-1].mandate["chosen"] == offer["offer"][1]
+
+
+def test_controller_files_one_initiative_a_week(monkeypatch):
+    """Verify start_initiative persists the earmark and refuses a second initiative that week."""
+
+    board = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2034)}
+    saved = [rules.CityState(turn=2)]
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda **kwargs: None
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: deepcopy(saved[-1]))
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: board)
+    monkeypatch.setattr(dashboard, "write_state", lambda paths, state: saved.append(deepcopy(state)))
+    monkeypatch.setattr(dashboard, "command_insert", lambda *args, **kwargs: "cmd")
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: None)
+
+    controller.start_initiative("earmark", "civic")
+    controller.start_initiative("earmark", "academic")
+
+    assert rules.active_earmarks(saved[-1]) == {"civic": 5}
+    assert len(saved) == 2
+    assert "one initiative" in controller.status_text.lower()

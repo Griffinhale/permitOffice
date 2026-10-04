@@ -127,6 +127,7 @@ def write_state(paths, state):
         "week_day": (str(getattr(state, "week_day", 0)), getattr(state, "week_day", 0)),
         "daily_pressure": as_json("daily_pressure", getattr(state, "daily_pressure", {})),
         "mandate": as_json("mandate", getattr(state, "mandate", {})),
+        "initiatives": as_json("initiatives", getattr(state, "initiatives", {})),
     }
     _delete_all_rows(paths["state"])
     with arcpy.da.InsertCursor(paths["state"], ["key", "value_text", "value_num"]) as cursor:
@@ -192,6 +193,12 @@ def read_state(paths):
             state.mandate = parsed if isinstance(parsed, dict) else {}
         except Exception:
             state.mandate = {}
+    if "initiatives" in values and values["initiatives"][0]:
+        try:
+            parsed = json.loads(values["initiatives"][0])
+            state.initiatives = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            state.initiatives = {}
     return state
 
 

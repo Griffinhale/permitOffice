@@ -1,6 +1,7 @@
 """District buyout transition rules for hidden type pressure."""
 
 from __future__ import annotations
+from .initiatives import EARMARK_BID_BONUS, active_earmarks
 
 from dataclasses import dataclass, field
 import random
@@ -91,6 +92,7 @@ def resolve_buyout_round(
         return BuyoutRoundResult()
 
     rng = random.Random(f"buyout:{seed}:{state.turn}")
+    earmarks = active_earmarks(state)
     started: list[str] = []
     refused: list[str] = []
     reports: list[str] = []
@@ -98,7 +100,7 @@ def resolve_buyout_round(
         target = districts[cell_id]
         if not _eligible_target(cell_id, target, districts):
             continue
-        bidders = _eligible_bidders(target, districts, ledger, rng)
+        bidders = _eligible_bidders(target, districts, ledger, rng, earmarks)
         if not bidders:
             continue
         # Each resourced neighbor independently decides whether to file a bid this
@@ -107,7 +109,7 @@ def resolve_buyout_round(
         willing = [
             bidder
             for bidder in bidders
-            if _bidder_is_willing(bidder, target, ledger, seed, state.turn)
+            if bidder.district_type in earmarks or _bidder_is_willing(bidder, target, ledger, seed, state.turn)
         ]
         if not willing:
             continue
@@ -209,8 +211,9 @@ def _eligible_bidders(
     districts: Mapping[str, DistrictProfile],
     ledger: Mapping[str, Mapping[str, int]],
     rng: random.Random,
+    earmarks: Mapping[str, int] | None = None,
 ) -> list[DistrictProfile]:
-    """Return adjacent bidders ordered by hidden pressure strength."""
+    """Return adjacent bidders ordered by hidden pressure strength; earmarked types lead."""
 
     bidders: list[DistrictProfile] = []
     for adjacent_id in sorted(target.adjacent_cell_ids):
@@ -229,7 +232,8 @@ def _eligible_bidders(
         bidders.append(bidder)
 
     rng.shuffle(bidders)
-    return sorted(bidders, key=lambda bidder: _bidder_score(bidder, ledger), reverse=True)
+    bonus = {dtype: EARMARK_BID_BONUS for dtype in (earmarks or {})}
+    return sorted(bidders, key=lambda bidder: _bidder_score(bidder, ledger) + bonus.get(bidder.district_type, 0), reverse=True)
 
 
 def _bidder_is_willing(

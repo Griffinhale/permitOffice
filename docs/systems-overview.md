@@ -190,6 +190,13 @@ the mitigation cost ($3-10).
   stakeholder heat, project delay. *Defer* on an enforcement, maintenance or
   incident case costs 1 AP.
 
+**Initiatives.** Once a week the player may start an initiative of their own
+(`start_initiative`). *Earmark* (1 AP, $10) backs one district type for three
+weeks: its ledger gets capital and appetite, its districts lead and always bid
+in buyouts while the earmark runs, templates that suit it weigh three times as
+much in the draw, and the stakeholders of the two largest rival types gain 1
+heat.
+
 Points need exactly one target district, lines two, polygons one or more.
 Maintenance cases skip spillover.
 

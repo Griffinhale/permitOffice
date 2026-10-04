@@ -9,6 +9,7 @@ from typing import Iterable
 from .models import *
 from .catalogs import *
 from .helpers import *
+from .initiatives import EARMARK_DRAW_MULTIPLIER, active_earmarks
 from .incidents import incident_identity, incident_identity_from_item, write_incident_case_identity
 from .systems import normalize_feature_instance, project_step_template
 
@@ -218,6 +219,11 @@ def _weighted_template_pool(
                     weights[template_id] += 3
                 if profile.exposure > 45 and template.category in {"utility", "department", "compliance"}:
                     weights[template_id] += 2
+    # An earmarked district type pulls its kind of case into the draw (owner D6).
+    earmarked = set(active_earmarks(state)) if state else set()
+    for template_id in weights:
+        if earmarked & set(TEMPLATES[template_id].good_fit_types):
+            weights[template_id] *= EARMARK_DRAW_MULTIPLIER
     chosen: list[str] = []
     available = dict(weights)
     # Scenario docket priority is the strongest designer signal (e.g. a housing

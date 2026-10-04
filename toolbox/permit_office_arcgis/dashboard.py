@@ -852,6 +852,27 @@ class DashboardController:
                 self._command_busy = False
                 self.reload()
 
+    def start_initiative(self, kind, target):
+        """File this week's player initiative (Earmark first) and persist the result."""
+
+        command_id = command_insert(self.paths, kind, "", [target] if target else [])
+        try:
+            self._command_busy = True
+            state = read_state(self.paths)
+            districts = read_districts(self.paths)
+            result = rules.start_initiative(state, districts, kind, target)
+            if result.ok:
+                write_state(self.paths, state)
+                self._grade_dirty = True
+            command_finish(self.paths, command_id, result.command_status, result.report)
+            self.status_var.set(result.report)
+        except Exception as exc:
+            command_finish(self.paths, command_id, "error", error=str(exc))
+            self.status_var.set(f"Initiative failed: {exc}")
+        finally:
+            self._command_busy = False
+        self.reload()
+
     def choose_mandate(self, key):
         """Record the player's season goal from the New Game offer and persist it."""
 

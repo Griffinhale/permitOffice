@@ -340,6 +340,8 @@ class CityState:
     mandate: dict[str, object] = field(default_factory=dict)
     # Season result once status is complete: "won", "lost" or "dismissed".
     outcome: str = ""
+    # Player initiatives: {"week": turn of the last one, "earmarks": {type: until turn}}.
+    initiatives: dict[str, object] = field(default_factory=dict)
 
 
 # Docket statuses that still await a decision; every other status is filed.

@@ -235,6 +235,7 @@ def snapshot_city_state(state):
     clone.pending_followups = dict(getattr(state, "pending_followups", {}) or {})
     clone.daily_pressure = dict(getattr(state, "daily_pressure", {}) or {})
     clone.mandate = deepcopy(getattr(state, "mandate", {}) or {})
+    clone.initiatives = deepcopy(getattr(state, "initiatives", {}) or {})
     clone.type_ledger = {
         key: dict(value)
         for key, value in (getattr(state, "type_ledger", {}) or {}).items()

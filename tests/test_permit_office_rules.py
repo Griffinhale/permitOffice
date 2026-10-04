@@ -2987,3 +2987,73 @@ def test_season_achievements_list_every_mandate_met():
     met = rules.season_achievements(state, districts, [])
 
     assert "Public confidence" in met and "Balanced books" in met
+
+
+def _buyout_board():
+    """Return a weak target flanked by an industrial and a civic bidder, all adjacent."""
+
+    def make(cell_id, dtype, activity, adjacent):
+        profile = rules.DistrictProfile(cell_id, f"{dtype} {cell_id}", 1200, activity, 20, 35, 20, 50, dtype, adjacent_cell_ids=adjacent)
+        rules.normalize_profile(profile)
+        return profile
+
+    return {
+        "T": make("T", "residential", 25, ["A", "B"]),
+        "A": make("A", "industrial", 75, ["T"]),
+        "B": make("B", "civic", 60, ["T"]),
+    }
+
+
+def test_earmark_costs_once_a_week_and_lasts_three_weeks():
+    """Verify Earmark spends 1 AP and money, allows one initiative a week, and expires after three weeks (D6, D7)."""
+
+    districts = _board()
+    state = rules.CityState(turn=2)
+
+    result = rules.start_initiative(state, districts, "earmark", "civic")
+    assert result.ok and (state.ap, state.money) == (1, 60 - rules.EARMARK_COST)
+    assert rules.active_earmarks(state) == {"civic": 5}
+    assert rules.start_initiative(state, districts, "earmark", "academic").ok is False
+
+    for _ in range(3):
+        rules.advance_turn_result(state, [], districts, [], {})
+    assert rules.active_earmarks(state) == {}
+
+
+def test_earmark_tilts_a_contested_buyout_to_the_backed_type():
+    """Verify an earmarked type wins a bid its stronger rival would otherwise win."""
+
+    plain = rules.CityState(turn=3)
+    districts = _buyout_board()
+    ledger = rules.rebuild_type_ledger(districts)
+    for dtype in ("industrial", "civic"):
+        rules.adjust_type_ledger(ledger, dtype, capital_delta=40, appetite_delta=20)
+    rules.resolve_buyout_round(plain, districts, ledger, seed=1)
+    assert districts["T"].contesting_type == "industrial"
+
+    backed = rules.CityState(turn=3)
+    backed.initiatives = {"week": 3, "earmarks": {"civic": 6}}
+    districts = _buyout_board()
+    ledger = rules.rebuild_type_ledger(districts)
+    for dtype in ("industrial", "civic"):
+        rules.adjust_type_ledger(ledger, dtype, capital_delta=40, appetite_delta=20)
+    rules.resolve_buyout_round(backed, districts, ledger, seed=1)
+    assert districts["T"].contesting_type == "civic"
+
+
+def test_earmark_weights_the_draw_and_heats_rival_types():
+    """Verify Earmark pulls its type's cases into the draw and warms rival stakeholders."""
+
+    districts = _board()
+    counts_plain = {}
+    counts_backed = {}
+    for seed in range(2026, 2046):
+        for state, counts in ((rules.CityState(turn=2), counts_plain), (rules.CityState(turn=2, initiatives={"week": 2, "earmarks": {"natural": 5}}), counts_backed)):
+            for item in rules.generate_docket(turn=2, seed=seed, state=state, districts=districts):
+                fit = "natural" in rules.TEMPLATES[item.template_id].good_fit_types
+                counts[fit] = counts.get(fit, 0) + 1
+    assert counts_backed.get(True, 0) > counts_plain.get(True, 0)
+
+    state = rules.CityState(turn=2)
+    rules.start_initiative(state, districts, "earmark", "natural")
+    assert sum(state.stakeholder_heat.values()) >= 2

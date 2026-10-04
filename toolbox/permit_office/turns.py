@@ -9,6 +9,7 @@ from .catalogs import *
 from .helpers import *
 from .expiration import resolve_unattended_item
 from .mandates import mandate_status, mandate_title, season_achievements
+from .initiatives import expire_initiatives
 from .buyouts import resolve_buyout_round, resolve_contested_transitions
 from .type_pressure import read_type_ledger, write_type_ledger
 from .public_model import district_tag_report_sentence, snapshot_city_state, standing_report_sentence
@@ -281,6 +282,7 @@ def advance_turn_result(
     final_week = state.turn >= state.max_turns
     if not final_week:
         state.turn += 1
+    expire_initiatives(state)
     audit = generate_audit_result(state, districts, feature_list, items)
     checkpoint = closing_week in AUDIT_WEEKS or final_week
     ladder_text = f" {apply_audit_rung(state, audit.grade)}" if checkpoint else ""
