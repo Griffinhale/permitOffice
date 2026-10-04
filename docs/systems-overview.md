@@ -127,8 +127,9 @@ is still `turn`.
 
 **Season.** 12 weeks. A new game starts at week 1 with 2 AP, $60, activity 50,
 friction 20, trust 35, exposure 25. AP refills to 2 at every week close and
-does not carry over. When week 5 closes (the turn becomes 6) the week report
-adds an audit snapshot grade; nothing else changes. When week 12 closes the
+does not carry over. When week 5 closes (the turn becomes 6) the turn result
+carries a mid-season audit (grade, score, findings) for the desk to file as its
+own report; it has no mechanical effect. When week 12 closes the
 full week-close simulation runs, the game is marked `complete`, the final audit
 is filed, no new docket is generated and the clock stops. End Week after that
 only repeats the final grade.
@@ -146,7 +147,8 @@ pins it for probe runs.
 
 **Docket.** Up to four cases a week, filled in this order: project steps that
 are due, carried cases, pending momentum follow-ups, one maintenance order, one
-civic incident, one stakeholder-heat follow-up, then a weighted draw from the
+civic incident, one stakeholder-heat follow-up (at most once per stakeholder
+cooldown, recorded at week close), then a weighted draw from the
 twelve ordinary templates. The draw is weighted by district type, dominant
 citizen groups, population and district stats, so the same seed gives the same
 docket. The docket table is replaced every week; only `carried` cases come
@@ -191,7 +193,8 @@ seconds after the last open case is filed):
 5. Networks and hazards (when there are features or hazards), housing,
    population drift, grievance floors, new incidents.
 6. Contested buyouts resolve, then a new buyout round picks targets.
-7. Turn +1, AP refill, audit grade, new docket, map redraw, week report.
+7. Stakeholders who gained no heat this week lose 1 heat.
+8. Turn +1, AP refill, audit grade, new docket, map redraw, week report.
 
 **Audit grade.** Score = activity + trust - friction - exposure + money/3 +
 last net (clamped to ±10) minus finding penalties (negative or low money, high
