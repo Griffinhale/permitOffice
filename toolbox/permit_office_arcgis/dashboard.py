@@ -309,6 +309,10 @@ class DashboardController:
         # selection-only reloads reuse the last computed grade.
         self._audit_grade = None
         self._grade_dirty = True
+        # City stats and money at the start of the shown week, kept in memory so
+        # the desk's trends are real deltas (no saved history exists).
+        self._week_start = {}
+        self._week_start_turn = 0
 
     def _run_pure_precompute_once(self, state, districts, items, active_features, saved_game):
         """Run ArcPy-free startup precompute from main-thread row snapshots."""
@@ -487,24 +491,35 @@ class DashboardController:
                 _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
         self.reload()
 
-    def _current_audit_grade(self, state, districts, active_features, items):
-        """Return the cached audit grade, recomputing it only when dirty.
+    def _current_audit(self, state, districts, active_features, items):
+        """Return the cached AuditResult, recomputing it only when dirty.
 
-        Recompute mirrors `desk_model._ledger_rows`: copy districts and the
-        docket before handing them to `rules.scorecard` so its in-place profile
-        normalization never mutates the controller's live district objects.
+        Copies districts and the docket before handing them to the audit so its
+        in-place profile normalization never mutates the controller's live
+        district objects.
         """
 
         if self._grade_dirty or self._audit_grade is None:
-            grade, _report = rules.scorecard(
+            self._audit_grade = rules.generate_audit_result(
                 state,
                 deepcopy(districts),
                 desk_model._feature_snapshots(active_features),
-                deepcopy(items or ()),
+                deepcopy(list(items or ())),
             )
-            self._audit_grade = grade
             self._grade_dirty = False
         return self._audit_grade
+
+    def _sync_week_start(self, state):
+        """Snapshot the city stats and money the first time a week is shown."""
+
+        week = int(getattr(state, "turn", 0) or 0)
+        if week == self._week_start_turn and self._week_start:
+            return
+        self._week_start_turn = week
+        self._week_start = {
+            name: int(getattr(state, name, 0) or 0)
+            for name in ("activity", "friction", "trust", "exposure", "money")
+        }
 
     def _resolve_session_state(self, state, districts, items, active_features):
         """Return the rows to render plus whether a fresh start is being offered.
@@ -542,6 +557,8 @@ class DashboardController:
         if state.status == "complete" or state.turn > state.max_turns:
             self._record_final_audit_receipt(state, districts, active_features, items)
         saved_game = has_saved_game(self.paths) and not offering_fresh
+        if saved_game:
+            self._sync_week_start(state)
         if offering_fresh and not self.status_text:
             self.status_text = "Saved board found, but no Permit Office layers are on the map. Click New Game to start fresh."
         elif not saved_game and not self.status_text:
@@ -551,7 +568,7 @@ class DashboardController:
         except Exception:
             visible = {}
         proposal_visible_by_item = {item.item_id: bool(visible.get(item.item_id)) for item in items}
-        audit_grade = self._current_audit_grade(state, districts, active_features, items)
+        audit = self._current_audit(state, districts, active_features, items)
         model = build_desk_model(
             state,
             districts,
@@ -568,8 +585,10 @@ class DashboardController:
             selected_desk_tab=self.selected_desk_tab,
             auto_close_active=self._queue_autoclose_active,
             auto_close_seconds=self._queue_autoclose_seconds,
-            audit_grade=audit_grade,
+            audit_grade=audit.grade,
             game_active=saved_game,
+            audit=audit,
+            week_start=self._week_start if saved_game else None,
         )
         self.selected_item_id = model.selected_item_id
         self.selected_report_id = model.selected_report_id

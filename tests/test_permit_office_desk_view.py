@@ -2981,3 +2981,72 @@ def test_defer_lane_shows_the_ap_the_rules_charge():
     plain = rules.DocketItem("T10", "street_vendor_compact", "Street Vendor Compact", "POINT", 1, target_cell_ids=["D0000"])
     deny = {lane.action_id: lane for lane in build_desk_model(rules.CityState(ap=0), districts, [plain], "T10").action_lanes}["deny"]
     assert deny.cost.startswith("0 AP") and deny.enabled
+
+
+def _case(item_id, template_id, status="open"):
+    """Return a docket item for one template with a known district target."""
+
+    template = rules.TEMPLATES[template_id]
+    return rules.DocketItem(item_id, template_id, template.title, template.geometry_type, 1, status=status, target_cell_ids=["D0000"])
+
+
+def test_model_header_carries_audit_gap_money_net_and_clock():
+    """Verify the header facts the narrow pane shows come from the model, not the view."""
+
+    _item, districts = _vendor_case()
+    audit = rules.AuditResult("CONDITIONAL", 58, (rules.AuditFinding("f", "critical", "money", "low"),), "Audit CONDITIONAL")
+    state = rules.CityState(turn=3, money=58, last_net=3)
+
+    model = build_desk_model(state, districts, [], audit=audit)
+
+    assert (model.audit_grade, model.audit_score, model.audit_points_short, model.audit_criticals) == ("CONDITIONAL", 58, 12, 1)
+    assert (model.money, model.money_net, model.week_label, model.ap_label) == (58, 3, "3/12", "2/2")
+
+
+def test_model_rows_say_what_ignoring_each_case_does_and_forecast_the_close():
+    """Verify each open case names its expiration outcome and the footer forecast counts them."""
+
+    _item, districts = _vendor_case()
+    items = [
+        _case("A", "fire_budget_escalation"),
+        _case("B", "procession_route"),
+        _case("C", "connector_corridor"),
+        _case("D", "street_vendor_compact"),
+    ]
+
+    model = build_desk_model(rules.CityState(), districts, items)
+
+    assert {row.item_id: row.if_ignored for row in model.docket_rows} == {
+        "A": "returns next week",
+        "B": "expires",
+        "C": "expires, adds district pressure",
+        "D": "expires, may bring a follow-up",
+    }
+    assert model.close_forecast == "At close: 1 returns, 3 expire."
+
+
+def test_model_lists_filed_cases_apart_from_open_ones():
+    """Verify cases decided this week show as filed rows, never as open work."""
+
+    _item, districts = _vendor_case()
+    items = [_case("A", "street_vendor_compact", "active"), _case("B", "procession_route", "denied"), _case("C", "connector_corridor")]
+
+    model = build_desk_model(rules.CityState(), districts, items)
+
+    assert [row.item_id for row in model.docket_rows] == ["C"]
+    assert [(row.item_id, row.status) for row in model.filed_rows] == [("A", "active"), ("B", "denied")]
+
+
+def test_city_trends_are_deltas_since_week_start_or_unknown():
+    """Verify stat trends come from a real week-start snapshot and are never invented."""
+
+    _item, districts = _vendor_case()
+    state = rules.CityState(activity=53, friction=20, trust=35, exposure=27)
+    start = {"activity": 50, "friction": 22, "trust": 35, "exposure": 25, "money": 60}
+
+    with_start = {row.label: row for row in build_desk_model(state, districts, [], week_start=start).ledger_rows}
+    without = {row.label: row for row in build_desk_model(state, districts, []).ledger_rows}
+
+    assert [with_start[name].trend for name in ("Activity", "Friction", "Trust", "Exposure")] == ["up", "down", "flat", "up"]
+    assert all(without[name].trend == "unknown" for name in ("Activity", "Friction", "Trust", "Exposure"))
+    assert all(row.points == () for row in (*with_start.values(), *without.values()))

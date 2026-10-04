@@ -1430,7 +1430,8 @@ class PermitDeskView:
             value_w = cx1 - cx0 - 16 - (self._text_w(row.label.upper(), Type.SMALL, "bold") or 0) - Space.S
             c.create_text(cx1 - 8, cy0 + 7, text=self._fit_px(row.value, Type.BODY, "bold", value_w), anchor="ne", fill=tone, font=self._font(Type.BODY, "bold"))
             self._draw_sparkline(c, cx0 + 8, cy0 + 34, cx1 - 14, cy0 + 54, row.points, tone)
-            c.create_text(cx1 - 8, cy0 + 54, text=_trend_marker(row.trend), anchor="ne", fill=tone, font=self._font(Type.SMALL, "bold"))
+            if (row.trend or "").lower() in ("up", "down", "flat"):  # unknown before a week-start snapshot: draw nothing
+                c.create_text(cx1 - 8, cy0 + 54, text=row.trend, anchor="ne", fill=tone, font=self._font(Type.SMALL, "bold"))
         return y + (cell_h * 2) + gap
 
     def _draw_group_row(self, c, x0, x1, y, row, row_h=46):

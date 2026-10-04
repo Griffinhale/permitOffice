@@ -2046,18 +2046,18 @@ def test_build_desk_model_uses_provided_audit_grade_without_scorecard(monkeypatc
     assert audit_row.value == desk_model._short_audit_grade("CONDITIONAL")
 
 
-def test_build_desk_model_without_audit_grade_computes_via_scorecard(monkeypatch):
-    """Verify the default path still computes the grade through scorecard."""
+def test_build_desk_model_without_audit_grade_computes_the_audit(monkeypatch):
+    """Verify the default path computes the audit once when no cached result is passed."""
 
     item = rules.DocketItem("CASE-grade", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
     districts = {"D0000": _profile("D0000")}
     calls = []
 
-    def fake_scorecard(state, districts_arg, features_arg, docket_arg):
+    def fake_audit(state, districts_arg, features_arg, docket_arg):
         calls.append(True)
-        return "PASS", "Audit PASS."
+        return rules.AuditResult("PASS", 72, (), "Audit PASS.")
 
-    monkeypatch.setattr(desk_model.rules, "scorecard", fake_scorecard)
+    monkeypatch.setattr(desk_model.rules, "generate_audit_result", fake_audit)
 
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
 
@@ -2088,11 +2088,11 @@ def test_selection_only_reload_reuses_cached_audit_grade(monkeypatch):
     monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
     monkeypatch.setattr(dashboard, "proposal_visible_map", lambda paths: {})
 
-    def fake_scorecard(state_arg, districts_arg, features_arg, docket_arg):
+    def fake_audit(state_arg, districts_arg, features_arg, docket_arg):
         calls.append(True)
-        return "PASS", "Audit PASS."
+        return rules.AuditResult("PASS", 72, (), "Audit PASS.")
 
-    monkeypatch.setattr(dashboard.rules, "scorecard", fake_scorecard)
+    monkeypatch.setattr(dashboard.rules, "generate_audit_result", fake_audit)
 
     controller.reload()
     controller.reload()
@@ -2694,3 +2694,18 @@ def test_triage_skips_filed_cases_and_arms_autoclose_when_only_filed_cases_remai
     assert controller._next_triage_item("T02") is None
     controller.selected_item_id = "T01"
     assert controller.active_item() is None
+
+
+def test_week_change_takes_a_new_trend_snapshot():
+    """Verify the controller snapshots city stats once per week for the desk's trends."""
+
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    week3 = rules.CityState(turn=3, activity=50, money=60)
+
+    controller._sync_week_start(week3)
+    week3.activity = 55
+    controller._sync_week_start(week3)
+    assert controller._week_start["activity"] == 50
+
+    controller._sync_week_start(rules.CityState(turn=4, activity=55, money=40))
+    assert (controller._week_start["activity"], controller._week_start["money"]) == (55, 40)

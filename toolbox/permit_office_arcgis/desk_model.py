@@ -57,6 +57,7 @@ class DocketRow:
     selected: bool = False
     priority: int = 0
     due_turn: int = 0
+    if_ignored: str = ""
 
 
 @dataclass(frozen=True)
@@ -256,6 +257,26 @@ class DeskViewModel:
     district_group_rows: tuple[DistrictGroupRow, ...] = ()
     district_table_rows: tuple[DistrictTableRow, ...] = ()
     case_map_symbols: tuple[CaseMapSymbol, ...] = ()
+    filed_rows: tuple[DocketRow, ...] = ()
+    close_forecast: str = ""
+    audit_grade: str = ""
+    audit_score: int = 0
+    audit_points_short: int = 0
+    audit_criticals: int = 0
+    money: int = 0
+    money_net: int = 0
+    week_label: str = ""
+    ap_label: str = ""
+
+
+# What week close does to a case nobody decided, by template expiration policy
+# (toolbox/permit_office/expiration.py).
+IF_IGNORED = {
+    "mandatory_followup": "returns next week",
+    "missed_window": "expires",
+    "city_momentum": "expires, adds district pressure",
+    "momentum_with_followup_risk": "expires, may bring a follow-up",
+}
 
 
 def build_desk_model(
@@ -278,12 +299,16 @@ def build_desk_model(
     auto_close_seconds=0,
     audit_grade=None,
     game_active=True,
+    audit=None,
+    week_start=None,
 ) -> DeskViewModel:
     """Format gameplay state into a presentation-only desk model.
 
     `audit_grade`, when provided, is a controller-cached grade that lets the
     ledger skip the scorecard recompute on selection-only redraws; None keeps
-    the original recompute-via-scorecard behavior.
+    the original recompute-via-scorecard behavior. `audit` is the cached
+    AuditResult for the header (recomputed from copies when None), and
+    `week_start` the controller's week-start stat snapshot for real trends.
     """
 
     proposal_visible_by_item = proposal_visible_by_item or {}
@@ -299,12 +324,23 @@ def build_desk_model(
             selected=item.item_id == selected_id,
             priority=item.priority,
             due_turn=item.due_turn,
+            if_ignored=_if_ignored(item),
         )
         for item in active_items
     )
+    filed_rows = tuple(
+        DocketRow(item_id=item.item_id, title=item.title, geometry_type=item.geometry_type, status=item.status)
+        for item in items
+        if item.status not in ACTIVE_STATUSES
+    )
+    if audit is None:
+        audit = rules.generate_audit_result(state, deepcopy(districts), _feature_snapshots(active_features), deepcopy(list(items or ())))
+    if audit_grade is None:
+        audit_grade = audit.grade
+    points_short, criticals = rules.pass_gap(audit)
     case = _case_summary(state, districts, selected)
     action_lanes = _action_lanes(state, districts, selected) if selected else ()
-    ledger_rows = _ledger_rows(state, districts, active_features, active_items, audit_grade=audit_grade)
+    ledger_rows = _ledger_rows(state, districts, active_features, active_items, audit_grade=audit_grade, week_start=week_start)
     status = status_text or "No report yet. Select a docket row; use Retarget Map when changing targets."
     report_tabs = tuple(report_tabs or _legacy_report_tabs(receipt))
     selected_report_id = _resolve_selected_report_id(report_tabs, selected_report_id)
@@ -344,7 +380,40 @@ def build_desk_model(
         district_group_rows,
         district_table_rows,
         case_map_symbols,
+        filed_rows=filed_rows,
+        close_forecast=_close_forecast(active_items),
+        audit_grade=audit.grade,
+        audit_score=int(audit.score),
+        audit_points_short=points_short,
+        audit_criticals=criticals,
+        money=int(state.money),
+        money_net=int(state.last_net),
+        week_label=f"{state.turn}/{state.max_turns}",
+        ap_label=f"{state.ap}/{state.max_ap}",
     )
+
+
+def _if_ignored(item) -> str:
+    """Return what week close does to this case if nobody decides it."""
+
+    template = rules.TEMPLATES.get(item.template_id)
+    policy = (template.expiration_policy if template else "") or "city_momentum"
+    return IF_IGNORED.get(policy, IF_IGNORED["city_momentum"])
+
+
+def _close_forecast(active_items) -> str:
+    """Summarize what End Week would do to the open cases, for the footer."""
+
+    if not active_items:
+        return "At close: no open cases."
+    returns = sum(1 for item in active_items if _if_ignored(item) == IF_IGNORED["mandatory_followup"])
+    expire = len(active_items) - returns
+    parts = []
+    if returns:
+        parts.append(f"{returns} returns")
+    if expire:
+        parts.append(f"{expire} expire" if expire != 1 else "1 expires")
+    return f"At close: {', '.join(parts)}."
 
 
 def _resolve_selected_item(items, selected_item_id):
@@ -1187,7 +1256,15 @@ def _threat_track_summaries(state, districts, active_features=None, docket=None)
     return (LedgerRow("Threats", "quiet", "neutral"),)
 
 
-def _ledger_rows(state, districts, active_features=None, docket=None, audit_grade=None) -> tuple[LedgerRow, ...]:
+def _stat_row(label, value, tone, week_start) -> LedgerRow:
+    """Return a city stat row whose trend is the real change since week start, or unknown."""
+
+    start = (week_start or {}).get(label.lower())
+    trend = _trend_from_delta(None if start is None else int(value) - int(start))
+    return LedgerRow(label, str(value), tone, value, trend)
+
+
+def _ledger_rows(state, districts, active_features=None, docket=None, audit_grade=None, week_start=None) -> tuple[LedgerRow, ...]:
     """Build the city ledger rows shown in the dashboard sidebar.
 
     When `audit_grade` is provided the caller has a cached grade, so the
@@ -1231,24 +1308,10 @@ def _ledger_rows(state, districts, active_features=None, docket=None, audit_grad
         LedgerRow("Threats", threat_value, threat_tone, threat_meter),
         LedgerRow("Heat", heat, "bad" if heat != "none" else "neutral"),
         LedgerRow("Pressure", pressure, "watch" if pressure != "stable" else "neutral"),
-        LedgerRow("Activity", str(state.activity), "good", state.activity, "up", _spark_points(state.activity, "up")),
-        LedgerRow(
-            "Friction",
-            str(state.friction),
-            "bad" if state.friction >= 50 else "watch",
-            state.friction,
-            "down" if state.friction < 50 else "up",
-            _spark_points(state.friction, "down" if state.friction < 50 else "up"),
-        ),
-        LedgerRow("Trust", str(state.trust), "good", state.trust, "flat", _spark_points(state.trust, "flat")),
-        LedgerRow(
-            "Exposure",
-            str(state.exposure),
-            "bad" if state.exposure >= 50 else "watch",
-            state.exposure,
-            "up" if state.exposure >= 50 else "flat",
-            _spark_points(state.exposure, "up" if state.exposure >= 50 else "flat"),
-        ),
+        _stat_row("Activity", state.activity, "good", week_start),
+        _stat_row("Friction", state.friction, "bad" if state.friction >= 50 else "watch", week_start),
+        _stat_row("Trust", state.trust, "good", week_start),
+        _stat_row("Exposure", state.exposure, "bad" if state.exposure >= 50 else "watch", week_start),
         LedgerRow("Economy", f"rev ${state.last_revenue}; up ${state.last_upkeep}; net {state.last_net:+d}", "watch" if state.last_net < 0 else "good" if state.last_net > 0 else "neutral"),
         LedgerRow("Services", service_summary, "bad" if "critical" in service_summary else "watch" if service_summary != "none" else "neutral"),
         LedgerRow("Hazards", hazard_summary, "watch" if hazard_summary != "no active hazards" else "neutral"),
