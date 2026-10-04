@@ -2889,3 +2889,71 @@ def test_week_close_applies_a_full_week_of_pressure_from_open_cases():
 
     assert "Stakeholder heat added to 1 unresolved case(s)." in result.report
     assert state.week_day == 0 and state.daily_pressure == {}
+
+
+def _board(seed=2034):
+    """Return a fresh 5x5 board keyed by cell id."""
+
+    return {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=seed)}
+
+
+def test_new_season_offers_three_seeded_mandates():
+    """Verify the offer is three distinct mandates, the same for the same seed (owner D9)."""
+
+    districts = _board()
+    offer = rules.offer_mandates(2034, districts)
+
+    assert offer == rules.offer_mandates(2034, _board())
+    assert len(offer["offer"]) == 3 and len(set(offer["offer"])) == 3
+    assert all(rules.mandate_title(key) for key in offer["offer"])
+    assert offer["chosen"] == ""
+    counts = offer["baseline"]["type_counts"]
+    for key in offer["offer"]:
+        if key.startswith("grow_quarter:"):
+            assert counts[key.split(":", 1)[1]] < max(counts.values())
+    offers = {tuple(rules.offer_mandates(seed, _board(seed))["offer"]) for seed in range(2026, 2046)}
+    assert len(offers) > 3
+
+
+def test_player_picks_the_goal_once_from_the_offer():
+    """Verify only an offered mandate can be chosen, and only once."""
+
+    state = rules.CityState()
+    state.mandate = rules.offer_mandates(2034, _board())
+    first, second = state.mandate["offer"][:2]
+
+    assert rules.choose_mandate(state, "not_offered") is False
+    assert rules.choose_mandate(state, first) is True
+    assert rules.choose_mandate(state, second) is False
+    assert state.mandate["chosen"] == first
+
+
+def test_each_mandate_reports_progress_and_whether_it_is_met():
+    """Verify every catalog mandate can say how far the city is from it."""
+
+    districts = _board()
+    baseline = rules.offer_mandates(2034, districts)["baseline"]
+    state = rules.CityState(trust=56, money=90, last_net=2)
+
+    results = {key: rules.mandate_status(key, state, districts, [], baseline) for key in (
+        "grow_quarter:academic", "quiet_streets", "public_confidence", "close_the_gaps", "balanced_books", "even_handed",
+    )}
+
+    assert results["public_confidence"][0] is True
+    assert results["balanced_books"][0] is True
+    assert results["grow_quarter:academic"][0] is False
+    assert results["close_the_gaps"][0] is False
+    assert all(any(char.isdigit() for char in progress) for _met, progress in results.values())
+    assert set(rules.MANDATE_IDS) == {"grow_quarter", "quiet_streets", "public_confidence", "close_the_gaps", "balanced_books", "even_handed"}
+
+
+def test_season_achievements_list_every_mandate_met():
+    """Verify mandates met at week 12 count as achievements, chosen or not."""
+
+    districts = _board()
+    state = rules.CityState(trust=60, money=100, last_net=1)
+    state.mandate = rules.offer_mandates(2034, districts)
+
+    met = rules.season_achievements(state, districts, [])
+
+    assert "Public confidence" in met and "Balanced books" in met

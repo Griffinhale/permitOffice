@@ -823,7 +823,9 @@ class DashboardController:
                 clear_game_rows(self.paths)
                 create_district_board(self.paths, seed, self.messages)
                 seed_city_features(self.paths, seed, self.messages)
-                write_state(self.paths, rules.CityState())
+                state = rules.CityState()
+                state.mandate = rules.offer_mandates(seed, read_districts(self.paths))
+                write_state(self.paths, state)
                 generate_docket_rows(self.paths, seed, self.messages)
                 remove_outputs_from_map(self.messages)
                 add_outputs_to_map(self.paths, self.messages)
@@ -849,6 +851,20 @@ class DashboardController:
             finally:
                 self._command_busy = False
                 self.reload()
+
+    def choose_mandate(self, key):
+        """Record the player's season goal from the New Game offer and persist it."""
+
+        try:
+            state = read_state(self.paths)
+            if rules.choose_mandate(state, key):
+                write_state(self.paths, state)
+                self.status_var.set(f"Season goal filed: {rules.mandate_title(key)}.")
+            else:
+                self.status_var.set("That goal is not on offer, or one is already filed.")
+        except Exception as exc:
+            self.status_var.set(f"Goal filing failed: {exc}")
+        self.reload()
 
     def show_scorecard(self):
         if not has_saved_game(self.paths):

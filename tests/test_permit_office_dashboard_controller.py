@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 import sys
 
@@ -614,6 +615,7 @@ def test_start_new_game_replaces_rows_and_map_layers(monkeypatch):
     monkeypatch.setattr(dashboard, "create_district_board", lambda paths, seed, messages: order.append(("districts", seed)))
     monkeypatch.setattr(dashboard, "seed_city_features", lambda paths, seed, messages: order.append(("city", seed)))
     monkeypatch.setattr(dashboard, "write_state", lambda paths, state: order.append(("state", state.turn)))
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {})
     monkeypatch.setattr(dashboard, "generate_docket_rows", lambda paths, seed, messages: order.append(("docket", seed)))
     monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages: order.append("remove"))
     monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: order.append("map"))
@@ -2423,3 +2425,58 @@ def test_no_office_clock_can_close_the_week():
         assert not hasattr(dashboard.DashboardController, name)
     assert not hasattr(dashboard, "WEEK_DEADLINE_SECONDS")
     assert not hasattr(dashboard, "HOLD_DAY_ENV")
+
+
+def test_state_persists_the_mandate_offer_and_choice(monkeypatch):
+    """Verify the season's mandate offer, pick, and baseline survive a save and load."""
+
+    rows = []
+    state = rules.CityState()
+    state.mandate = {"offer": ["quiet_streets", "public_confidence", "even_handed"], "chosen": "even_handed", "baseline": {"type_counts": {"civic": 2}, "critical_gaps": 4}}
+
+    class FakeCursor:
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def insertRow(self, row):
+            rows.append(tuple(row))
+
+    class FakeSearch(FakeCursor):
+        def __enter__(self):
+            return iter(list(rows))
+
+    monkeypatch.setattr(store, "_delete_all_rows", lambda _path: rows.clear())
+    monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeCursor, SearchCursor=FakeSearch), raising=False)
+
+    store.write_state({"state": "state"}, state)
+
+    assert store.read_state({"state": "state"}).mandate == state.mandate
+
+
+def test_new_game_offers_three_mandates_and_choose_persists_the_pick(monkeypatch):
+    """Verify New Game stores a seeded offer and choose_mandate writes the player's pick."""
+
+    board = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2034)}
+    written = []
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda **kwargs: None
+    for name in ("clear_game_rows", "create_district_board", "seed_city_features", "generate_docket_rows", "remove_outputs_from_map", "add_outputs_to_map", "refresh_all"):
+        monkeypatch.setattr(dashboard, name, lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: board)
+    monkeypatch.setattr(dashboard, "write_state", lambda paths, state: written.append(deepcopy(state)))
+
+    controller.start_new_game(2034)
+
+    offer = written[-1].mandate
+    assert offer == rules.offer_mandates(2034, board)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: deepcopy(written[-1]))
+    controller.choose_mandate(offer["offer"][1])
+    assert written[-1].mandate["chosen"] == offer["offer"][1]

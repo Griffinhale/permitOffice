@@ -335,6 +335,8 @@ class CityState:
     pending_followups: dict[str, str] = field(default_factory=dict)
     week_day: int = 0
     daily_pressure: dict[str, int] = field(default_factory=dict)
+    # Season goal (owner D9): {"offer": [3 keys], "chosen": key, "baseline": {...}}.
+    mandate: dict[str, object] = field(default_factory=dict)
 
 
 # Docket statuses that still await a decision; every other status is filed.

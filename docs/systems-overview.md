@@ -134,6 +134,16 @@ full week-close simulation runs, the game is marked `complete`, the final audit
 is filed and no new docket is generated. End Week after that only repeats the
 final grade.
 
+**Mandate.** New Game offers three season goals drawn from the seed
+(`offer_mandates`); the player picks one (`choose_mandate`). The catalog has
+six: grow a district type by three districts, quiet streets (no group at
+grievance 4, no open incident), public confidence (trust 55+), close the gaps
+(critical service gaps cut to a third), balanced books ($80+, non-negative net,
+no failed features) and an even-handed city (no type over 8 districts, every
+starting type keeps one). Every mandate met at the end also counts as an
+achievement for the round (`season_achievements`). The thresholds are first
+guesses.
+
 **No clock.** A week lasts until End Week, or until the queue auto-close two
 seconds after the last open case is filed. There is no real-time deadline.
 At week close, `advance_daily_pressure` builds a full week (four days) of

@@ -6,7 +6,7 @@ ledgers into the compact public model shown in reports and the desk.
 
 from __future__ import annotations
 
-from copy import copy
+from copy import copy, deepcopy
 from typing import Iterable
 
 from .helpers import _top_dissatisfaction, district_label
@@ -234,6 +234,7 @@ def snapshot_city_state(state):
     clone.stakeholder_memory = dict(getattr(state, "stakeholder_memory", {}) or {})
     clone.pending_followups = dict(getattr(state, "pending_followups", {}) or {})
     clone.daily_pressure = dict(getattr(state, "daily_pressure", {}) or {})
+    clone.mandate = deepcopy(getattr(state, "mandate", {}) or {})
     clone.type_ledger = {
         key: dict(value)
         for key, value in (getattr(state, "type_ledger", {}) or {}).items()

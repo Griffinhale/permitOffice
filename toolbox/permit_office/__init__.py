@@ -13,5 +13,6 @@ from .public_model import *
 from .turns import *
 from .decisions import *
 from .city_detail import *
+from .mandates import *
 
 __all__ = [name for name in globals() if not name.startswith("__")]
