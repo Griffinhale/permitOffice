@@ -317,7 +317,8 @@ class CityState:
     ap: int = 2
     max_ap: int = 2
     money: int = 60
-    audit_stage: int = 0
+    # Patience ladder (owner D5): index into AUDIT_RUNGS.
+    audit_rung: int = 0
     status: str = "playing"
     last_report: str = ""
     activity: int = 50
@@ -337,6 +338,8 @@ class CityState:
     daily_pressure: dict[str, int] = field(default_factory=dict)
     # Season goal (owner D9): {"offer": [3 keys], "chosen": key, "baseline": {...}}.
     mandate: dict[str, object] = field(default_factory=dict)
+    # Season result once status is complete: "won", "lost" or "dismissed".
+    outcome: str = ""
 
 
 # Docket statuses that still await a decision; every other status is filed.
@@ -477,6 +480,13 @@ class AuditResult:
     report: str
 
 
+# Weeks whose close runs a checkpoint audit, and the patience ladder it moves
+# (owner D5): FAIL climbs a rung, PASS descends one, CONDITIONAL holds.
+AUDIT_WEEKS = (4, 8, 12)
+AUDIT_RUNGS = ("attended", "warning", "sanctioned", "dismissed")
+SANCTIONED_RUNG = 2
+DISMISSED_RUNG = 3
+
 # Audit grade floors: PASS also needs money >= 0 and no critical finding;
 # CONDITIONAL allows at most one critical.
 PASS_SCORE = 70
@@ -496,8 +506,8 @@ class TurnAdvanceResult:
     upkeep: int = 0
     net: int = 0
     audit: AuditResult | None = None
-    # Set only on the week close that reaches the mid-season audit turn.
-    mid_audit: AuditResult | None = None
+    # Set only on the week 4, 8 and 12 closes, which move the patience ladder.
+    checkpoint_audit: AuditResult | None = None
 
 
 @dataclass(frozen=True)

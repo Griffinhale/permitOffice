@@ -127,12 +127,18 @@ is still `turn`.
 
 **Season.** 12 weeks. A new game starts at week 1 with 2 AP, $60, activity 50,
 friction 20, trust 35, exposure 25. AP refills to 2 at every week close and
-does not carry over. When week 5 closes (the turn becomes 6) the turn result
-carries a mid-season audit (grade, score, findings) for the desk to file as its
-own report; it has no mechanical effect. When week 12 closes the
-full week-close simulation runs, the game is marked `complete`, the final audit
-is filed and no new docket is generated. End Week after that only repeats the
-final grade.
+does not carry over.
+
+**Audit ladder.** The week 4, 8 and 12 closes run a checkpoint audit
+(`AUDIT_WEEKS`). A FAIL moves the council's patience one rung up the ladder
+(attended, warning, sanctioned, dismissed), a PASS moves it one rung down, and
+a CONDITIONAL holds it. While sanctioned, AP refills to one less. Reaching
+dismissed ends the season at once (`outcome = "dismissed"`). When week 12
+closes the full week-close simulation runs, the game is marked `complete`, and
+the season is won if the filed mandate is met and the office was not
+dismissed (`outcome = "won"` or `"lost"`). The week report names the verdict
+and the round's achievements. No new docket is generated after the season
+ends; End Week then only repeats the final grade.
 
 **Mandate.** New Game offers three season goals drawn from the seed
 (`offer_mandates`); the player picks one (`choose_mandate`). The catalog has
@@ -210,8 +216,9 @@ last net (clamped to ±10) minus finding penalties (negative or low money, high
 friction or exposure, service gaps, incidents, hazards, displacement, failed or
 worn features, overdue violations). PASS needs 70+, money of zero or more and no
 critical finding; CONDITIONAL needs 45+ and at most one critical; anything else
-is FAIL. A new game grades CONDITIONAL (score 60). The grade is recomputed at
-every week close, and the dashboard recomputes it after each write.
+is FAIL. A new game grades CONDITIONAL (score 60). Only the checkpoint
+audits move the ladder; the dashboard recomputes the grade after each write so
+the player can see where the next checkpoint stands.
 
 **Command flow.** Every action runs on the Tk thread: insert a command row,
 read game rows (`store.py`), resolve through `rules`, write the results to the

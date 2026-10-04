@@ -107,8 +107,9 @@ def write_state(paths, state):
         "ap": (str(state.ap), state.ap),
         "max_ap": (str(state.max_ap), state.max_ap),
         "money": (str(state.money), state.money),
-        "audit_stage": (str(state.audit_stage), state.audit_stage),
+        "audit_rung": (str(state.audit_rung), state.audit_rung),
         "status": (state.status, None),
+        "outcome": (state.outcome, None),
         "last_report": (state.last_report, None),
         "activity": (str(state.activity), state.activity),
         "friction": (str(state.friction), state.friction),
@@ -144,11 +145,11 @@ def read_state(paths):
         if current not in values and legacy in values:
             values[current] = values[legacy]
     state = rules.CityState()
-    for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_stage", "activity", "friction", "trust", "exposure", "last_revenue", "last_upkeep", "last_net", "maintenance_backlog", "week_day"):
+    for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_rung", "activity", "friction", "trust", "exposure", "last_revenue", "last_upkeep", "last_net", "maintenance_backlog", "week_day"):
         entry = values.get(key)
         if entry is not None and entry[1] is not None:
             setattr(state, key, int(entry[1]))
-    for key in ("status", "last_report", "scenario_id"):
+    for key in ("status", "last_report", "scenario_id", "outcome"):
         entry = values.get(key)
         if entry is not None:
             setattr(state, key, entry[0] or ("default" if key == "scenario_id" else ""))

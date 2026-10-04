@@ -1049,7 +1049,7 @@ def test_advance_turn_after_final_audit_is_idempotent(monkeypatch):
     controller.status_text = ""
     controller.status_var = dashboard._StatusProxy(controller)
     controller.reload = lambda **kwargs: None
-    state = rules.CityState(turn=12, status="complete", audit_stage=2)
+    state = rules.CityState(turn=12, status="complete", audit_rung=0)
     order = []
 
     monkeypatch.setattr(dashboard, "command_insert", lambda paths, action, item_id, target_ids: "CMD-1")
@@ -1117,7 +1117,7 @@ def test_completed_game_reloads_inline_final_audit_receipt(monkeypatch):
     controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
     controller.status_text = ""
     controller.status_var = dashboard._StatusProxy(controller)
-    state = rules.CityState(turn=12, status="complete", audit_stage=2)
+    state = rules.CityState(turn=12, status="complete", audit_rung=0)
     districts = {"D0000": _profile("D0000")}
 
     class FakeView:

@@ -1879,33 +1879,30 @@ def test_land_use_conflict_increases_failure_chance():
     assert bad_chance > good_chance
 
 
-def test_twelve_week_season_mid_audit_week_six_and_final_week_twelve():
+def test_twelve_week_season_audits_at_weeks_four_eight_and_twelve():
+    """Verify the ladder only moves on the week 4, 8 and 12 closes, and week 12 ends the season (D5)."""
     state = rules.CityState()
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
 
-    for _ in range(5):
-        rules.advance_turn_result(state, [], districts)
+    audited = []
+    for _ in range(11):
+        week = state.turn
+        result = rules.advance_turn_result(state, [], districts)
+        if result.checkpoint_audit is not None:
+            audited.append(week)
 
-    assert state.turn == 6
-    assert state.audit_stage == 1
-    assert state.status == "playing"
+    assert state.turn == 12 and state.status == "playing"
+    result = rules.advance_turn_result(state, [], districts)
+    audited.append(12) if result.checkpoint_audit is not None else None
 
-    for _ in range(6):
-        rules.advance_turn_result(state, [], districts)
-
+    assert audited == [4, 8, 12]
     assert state.turn == 12
-    assert state.audit_stage == 1
-    assert state.status == "playing"
-
-    rules.advance_turn_result(state, [], districts)
-
-    assert state.turn == 12
-    assert state.audit_stage == 2
     assert state.status == "complete"
+    assert state.outcome in ("won", "lost")
 
 
-def test_advance_turn_resets_ap_and_marks_mid_audit_stage():
-    """Verify turn advancement restores AP and updates the week-six audit stage."""
+def test_advance_turn_resets_ap():
+    """Verify turn advancement restores AP while the office is in good standing."""
     state = rules.CityState(turn=5, ap=0)
     items = rules.generate_docket(turn=5, seed=2026, count=4)
 
@@ -1914,7 +1911,6 @@ def test_advance_turn_resets_ap_and_marks_mid_audit_stage():
     assert "Advanced week" in report
     assert state.turn == 6
     assert state.ap == state.max_ap
-    assert state.audit_stage == 1
     assert {item.status for item in items} <= {"carried", "expired"}
 
 
@@ -1929,14 +1925,14 @@ def test_final_week_closes_audit_without_advancing_past_max_turns():
     assert "Final audit:" in report
     assert state.turn == 12
     assert state.status == "complete"
-    assert state.audit_stage == 2
+    assert state.outcome == "lost"
     assert state.ap == state.max_ap
     assert {item.status for item in items} <= {"carried", "expired"}
 
 
 def test_week_eleven_advance_opens_playable_week_twelve():
     """Verify entering week twelve leaves the final docket playable."""
-    state = rules.CityState(turn=11, audit_stage=1)
+    state = rules.CityState(turn=11)
 
     report = rules.advance_turn(state, [])
 
@@ -1944,31 +1940,29 @@ def test_week_eleven_advance_opens_playable_week_twelve():
     assert "Final audit:" not in report
     assert state.turn == 12
     assert state.status == "playing"
-    assert state.audit_stage == 1
 
 
 def test_completed_game_does_not_advance_again():
     """Verify repeated final audit clicks do not mutate the game clock."""
-    state = rules.CityState(turn=12, status="complete", audit_stage=2)
+    state = rules.CityState(turn=12, status="complete", outcome="won")
 
     report = rules.advance_turn(state, [])
 
     assert "Final audit already filed" in report
     assert state.turn == 12
     assert state.status == "complete"
-    assert state.audit_stage == 2
+    assert state.outcome == "won"
 
 
 def test_legacy_week_seven_save_is_clamped_to_final_audit():
     """Verify old six-week saves past the final week stop at week six."""
-    state = rules.CityState(turn=7, max_turns=6, status="playing", audit_stage=1)
+    state = rules.CityState(turn=7, max_turns=6, status="playing")
 
     report = rules.advance_turn(state, [])
 
     assert "Final audit already filed" in report
     assert state.turn == 6
     assert state.status == "complete"
-    assert state.audit_stage == 2
 
 
 def test_advance_turn_applies_population_drift_and_unresolved_local_grievance():
@@ -2859,23 +2853,59 @@ def test_unfed_stakeholder_heat_decays_by_one_at_week_close():
     assert "heat eased" not in rules.advance_turn_result(quiet, [], districts, [], {}).report.lower()
 
 
-def test_week_five_close_returns_the_mid_season_audit():
-    """Verify only the week-5 close carries a mid-season audit, matching scorecard (owner D3)."""
+def test_audit_ladder_climbs_on_fail_descends_on_pass_and_holds_on_conditional():
+    """Verify each checkpoint grade moves the patience ladder one rung (D5)."""
+
+    state = rules.CityState()
+    rungs = []
+    for grade in ("FAIL", "CONDITIONAL", "FAIL", "PASS", "PASS", "PASS"):
+        rules.apply_audit_rung(state, grade)
+        rungs.append(state.audit_rung)
+    assert rungs == [1, 1, 2, 1, 0, 0]
+    assert rules.AUDIT_RUNGS == ("attended", "warning", "sanctioned", "dismissed")
+
+
+def test_failing_checkpoint_audit_climbs_and_sanction_costs_an_ap():
+    """Verify a FAIL at the week-4 close climbs a rung, and a sanctioned office refills one AP less."""
 
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
-    for turn in (4, 6):
-        assert rules.advance_turn_result(rules.CityState(turn=turn), [], districts, [], {}).mid_audit is None
+    broke = rules.CityState(turn=4, money=-40)
+    result = rules.advance_turn_result(broke, [], districts, [], {})
+    assert result.checkpoint_audit.grade == "FAIL"
+    assert broke.audit_rung == 1 and "warning" in result.report.lower()
 
-    state = rules.CityState(turn=5)
+    sanctioned = rules.CityState(turn=6, audit_rung=2)
+    rules.advance_turn_result(sanctioned, [], districts, [], {})
+    assert sanctioned.ap == sanctioned.max_ap - 1
+
+
+def test_a_third_rung_dismisses_the_office_and_ends_the_season():
+    """Verify climbing past sanctioned dismisses the clerk mid-season."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
+    state = rules.CityState(turn=8, money=-40, audit_rung=2)
+
     result = rules.advance_turn_result(state, [], districts, [], {})
 
-    audit = result.mid_audit
-    assert audit is not None and state.turn == 6
-    assert (audit.grade, audit.report) == rules.scorecard(state, districts, [], [])
-    short, criticals = rules.pass_gap(audit)
-    assert short == max(0, rules.PASS_SCORE - audit.score)
-    assert criticals == sum(1 for finding in audit.findings if finding.severity == "critical")
-    assert "Audit snapshot" in result.report
+    assert state.audit_rung == 3
+    assert (state.status, state.outcome) == ("complete", "dismissed")
+    assert "dismissed" in result.report.lower()
+
+
+def test_week_twelve_wins_only_with_the_chosen_mandate_met():
+    """Verify the season is won when the filed goal is met and the office was not dismissed."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
+    goal = {"offer": ["public_confidence", "quiet_streets", "even_handed"], "chosen": "public_confidence", "baseline": {"type_counts": {}, "critical_gaps": 0}}
+
+    winner = rules.CityState(turn=12, trust=70, money=40, mandate=dict(goal))
+    won = rules.advance_turn_result(winner, [], districts, [], {})
+    loser = rules.CityState(turn=12, trust=30, money=40, mandate=dict(goal))
+    lost = rules.advance_turn_result(loser, [], districts, [], {})
+
+    assert winner.outcome == "won" and "Season won" in won.report
+    assert loser.outcome == "lost" and "Season lost" in lost.report
+    assert "Achievements:" in won.report
 
 
 def test_week_close_applies_a_full_week_of_pressure_from_open_cases():

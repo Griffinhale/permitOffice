@@ -8,6 +8,7 @@ from .models import *
 from .catalogs import *
 from .helpers import *
 from .expiration import resolve_unattended_item
+from .mandates import mandate_status, mandate_title, season_achievements
 from .buyouts import resolve_buyout_round, resolve_contested_transitions
 from .type_pressure import read_type_ledger, write_type_ledger
 from .public_model import district_tag_report_sentence, snapshot_city_state, standing_report_sentence
@@ -175,7 +176,6 @@ def advance_turn_result(
         if state.turn > state.max_turns:
             state.turn = state.max_turns
             state.status = "complete"
-            state.audit_stage = max(state.audit_stage, 2)
         audit = generate_audit_result(state, districts, features, open_items)
         report = f"Final audit already filed. Scorecard: {audit.grade}."
         state.week_day = 0
@@ -277,17 +277,23 @@ def advance_turn_result(
         if buyout_result.report:
             system_notes.append(buyout_result.report)
     eased = decay_unfed_heat(state)
+    closing_week = state.turn
     final_week = state.turn >= state.max_turns
     if not final_week:
         state.turn += 1
-    state.ap = state.max_ap
-    mid_audit_turn = max(2, state.max_turns // 2)
-    if not final_week and state.turn == mid_audit_turn:
-        state.audit_stage = max(state.audit_stage, 1)
-    if final_week:
-        state.status = "complete"
-        state.audit_stage = max(state.audit_stage, 2)
     audit = generate_audit_result(state, districts, feature_list, items)
+    checkpoint = closing_week in AUDIT_WEEKS or final_week
+    ladder_text = f" {apply_audit_rung(state, audit.grade)}" if checkpoint else ""
+    dismissed = state.audit_rung >= DISMISSED_RUNG
+    state.ap = state.max_ap - (1 if state.audit_rung >= SANCTIONED_RUNG and not dismissed else 0)
+    season_text = ""
+    if dismissed:
+        state.status = "complete"
+        state.outcome = "dismissed"
+        season_text = " Season lost: the council dismissed the office."
+    elif final_week:
+        state.status = "complete"
+        season_text = _resolve_season(state, districts or {}, feature_list)
     state.week_day = 0
     state.daily_pressure = {}
     heat_text = f" Stakeholder heat added to {heated} unresolved case(s)." if heated else ""
@@ -308,14 +314,14 @@ def advance_turn_result(
     standing_text = standing_report_sentence(state, previous_state, districts, feature_list, items)
     tag_text = district_tag_report_sentence(districts)
     audit_text = (
-        f" Final audit: {audit.grade}."
+        f" Final audit: {audit.grade}.{ladder_text}{season_text}"
         if state.status == "complete"
-        else f" Audit snapshot: {audit.grade}."
-        if state.turn == mid_audit_turn
+        else f" Checkpoint audit: {audit.grade}.{ladder_text}"
+        if checkpoint
         else ""
     )
     report = (
-        f"{'Final week closed' if state.status == 'complete' else 'Advanced week'}. Carried {carried} item(s), expired {expired} item(s)."
+        f"{'Office dismissed' if state.outcome == 'dismissed' else 'Final week closed' if state.status == 'complete' else 'Advanced week'}. Carried {carried} item(s), expired {expired} item(s)."
         f"{heat_text}{grievance_text}{violation_text}{feature_text}{economy_text}{population_text}{incident_text}{system_text}{standing_text}{tag_text}{audit_text}"
     )
     state.last_report = report
@@ -328,8 +334,36 @@ def advance_turn_result(
         upkeep=upkeep,
         net=net,
         audit=audit,
-        mid_audit=audit if not final_week and state.turn == mid_audit_turn else None,
+        checkpoint_audit=audit if checkpoint else None,
     )
+
+
+def apply_audit_rung(state: CityState, grade: str) -> str:
+    """Move the patience ladder one rung for a checkpoint grade and say what happened."""
+
+    before = int(state.audit_rung or 0)
+    if grade == "FAIL":
+        state.audit_rung = min(DISMISSED_RUNG, before + 1)
+    elif grade == "PASS":
+        state.audit_rung = max(0, before - 1)
+    rung = AUDIT_RUNGS[state.audit_rung]
+    if state.audit_rung > before:
+        return f"Council patience drops to {rung}."
+    if state.audit_rung < before:
+        return f"Council patience recovers to {rung}."
+    return f"Council patience holds at {rung}."
+
+
+def _resolve_season(state: CityState, districts: dict[str, DistrictProfile], features: list[FeatureInstance]) -> str:
+    """Decide the season at the week-12 close: won only when the filed goal is met."""
+
+    goal = str((state.mandate or {}).get("chosen") or "")
+    met, progress = mandate_status(goal, state, districts, features) if goal else (False, "no goal filed")
+    state.outcome = "won" if met else "lost"
+    achievements = season_achievements(state, districts, features)
+    title = mandate_title(goal) or "No goal"
+    verdict = f" Season won: {title} met ({progress})." if met else f" Season lost: {title} not met ({progress})."
+    return verdict + (f" Achievements: {', '.join(achievements)}." if achievements else "")
 
 
 def pass_gap(audit: AuditResult) -> tuple[int, int]:
