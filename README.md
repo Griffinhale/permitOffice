@@ -9,10 +9,12 @@ The premise is a joke about bureaucracy. The rules are not: every permit is tied
 to map geometry, district state, stakeholder pressure and recurring costs, and
 its consequences show up on the map.
 
-> **Status: public beta, v0.95.0.** Playable end to end. `main` has a dashboard
-> redesign that hasn't been through a live ArcGIS Pro test yet; use the v0.95.0
-> release for the tested build. Running the game needs ArcGIS Pro 3.3+ with ArcPy
-> (tested on 3.6). The pure-Python rules and tests run without it.
+> **Status: public beta.** v0.95.0 is the last tested release. The
+> `docs/presentation` branch reworks the loop (seeded goals, an audit ladder,
+> player initiatives, no real-time clock) and the dashboard (a narrow,
+> resizable pane); its live ArcGIS Pro check is pending. Running the game needs
+> ArcGIS Pro 3.3+ with ArcPy (tested on 3.6 and 3.7). The pure-Python rules and
+> tests run without it.
 
 ![Permit Office running as a geoprocessing tool in ArcGIS Pro, with the labeled
 district grid and two districts selected from the active docket](docs/images/01-arcgis-engine-selection.png)
@@ -22,24 +24,31 @@ and line features drawn on it](docs/images/02-district-board.png)
 
 ## How It Plays
 
-Each office week gives you a small docket of permit applications, incidents, or
-follow-up orders.
+A season is 12 office weeks. The clerk has 2 AP a week, a small budget, and a
+council that audits the office at weeks 4, 8 and 12.
 
-1. Select a docket item in the dashboard.
-2. Review its proposed map exhibit and selected district targets.
-3. Optionally inspect the file to reveal risk, evidence, violations, and local
-   population context.
-4. Issue the permit, issue it with mitigation conditions, deny it, or leave it
-   unresolved until the week closes.
-5. ArcPy applies the result to districts, support features, stakeholder heat,
-   population grievances, recurring revenue/upkeep, maintenance, and audit risk.
-6. At the end of the run, the city receives an audit scorecard.
+1. **Pick a goal.** New Game offers three goals drawn from the seed, such as
+   growing one district type by three districts, quieting every grievance, or
+   raising city trust to 55. Meet the one you file by week 12 to win the season.
+   Any other goal the city happens to meet counts as an achievement.
+2. **Work the docket.** Two new cases arrive each week, plus follow-ups. Select
+   one to draw its proposed exhibit and select its target districts on the map.
+   Inspect it (1 AP) to reveal risk, then issue it, issue it with conditions,
+   or deny it. Each case says what happens if you ignore it: it returns, expires,
+   or expires and leaves trouble behind.
+3. **Start one initiative.** Once a week, earmark a district type so it wins
+   neighbor buyouts and its kind of case comes up more often, or fund a civic
+   action or a market push on the districts selected on the map.
+4. **End the week.** Ignored cases build district pressure, heat and grievance.
+   Features age, the economy settles, districts drift, and stronger neighbors
+   bid for weak districts.
+5. **Survive the audits.** A failed checkpoint audit costs council patience
+   (warning, then sanctioned with one AP less, then dismissed). A pass wins it
+   back.
 
 Approvals can spawn points, lines, or polygons on the map: vendor markets,
 utility trenches, fire coverage areas, public art grants, corridors, reserves,
 incidents, inspection orders, and other civic paperwork with consequences.
-A season runs 12 weeks. Each week brings more cases than your action points can
-cover, and the cases you leave unresolved keep pushing the city.
 
 ## Why I Built It
 
@@ -93,21 +102,18 @@ official decisions.
   older builds degrade gracefully rather than crash). The faster district redraw
   (a definition-query flip) turns on only at Pro 3.7+, where it was tested; older
   builds use the display ring. Everything else is Pro 2.x-era.
-- **Python 3** for the pure-rules test suite (this runs without ArcGIS). Install
-  the test dependency (`pytest`) with **either** pip or
-  [uv](https://docs.astral.sh/uv/):
+- **Python 3.11+** for the pure-rules test suite (this runs without ArcGIS).
+  With [uv](https://docs.astral.sh/uv/):
 
   ```bash
-  # pip
-  python3 -m pip install -r requirements-dev.txt
-
-  # uv (creates an isolated .venv, then installs)
   uv venv
   uv pip install -r requirements-dev.txt
+  uv run pytest -q
   ```
 
-  pip/uv only set up the **offline test** environment — running the game itself
-  uses ArcGIS Pro's bundled Python and arcpy, not a pip/uv install.
+  Or with pip: `python3 -m pip install -r requirements-dev.txt` then
+  `python3 -m pytest -q`. pip and uv only set up the offline tests; the game
+  itself runs on ArcGIS Pro's bundled Python and arcpy.
 
 ### Run In ArcGIS Pro
 
@@ -121,9 +127,11 @@ toolbox inside that folder.
 3. Run `Permit Office Prototype`.
 4. Leave **Game Workspace** empty to create/resume the project-default save, or
    choose a folder/`.gdb` for a separate save.
-5. If no saved game exists, click `New Game` in the dashboard.
-6. Use the dashboard and map together: select docket rows, update targets from
-   map selections, inspect files, issue or deny permits, and end the week.
+5. If no saved game exists, click `New Game` in the dashboard and pick one of
+   the three goals.
+6. Keep the dashboard beside the map: select cases, retarget them from map
+   selections, inspect, issue or deny, start the week's initiative, and end
+   the week.
 
 By default (no **Game Workspace** chosen) the tool creates or resumes
 `permit_office.gdb` under the ArcGIS project's `data/` folder; set the optional
@@ -134,21 +142,35 @@ saved. Don't commit the generated `.gdb`.
 ### Run Pure Python Tests
 
 ```bash
-python3 -m pytest -q     # or: uv run pytest -q
+uv run pytest -q          # or: python3 -m pytest -q
 ```
 
 The tests cover the ArcPy-free rules and lightweight ArcGIS adapter shims. They
-do not replace a live ArcGIS Pro smoke test.
+do not replace a live ArcGIS Pro smoke test
+([`docs/arcgis-pro-smoke-checklist.md`](docs/arcgis-pro-smoke-checklist.md)).
+
+### Preview The Dashboard Without Pro
+
+```bash
+uv run --with pillow python tools/desk_preview.py --out /tmp/desk
+```
+
+This draws the real dashboard from fixed game states to PNGs at the default and
+minimum pane sizes. It needs Tk and, without a display, Xvfb. Fonts are a
+stand-in for Segoe UI, so spacing is close, not exact.
 
 ## Repository Map
 
 - `toolbox/arcpy_permit_office.pyt` - ArcGIS Pro toolbox entrypoint.
 - `toolbox/permit_office/` - ArcPy-free gameplay rules, catalogs, decisions,
-  turn advancement, audits, and city systems.
+  turn advancement, audits, season goals (`mandates.py`), initiatives
+  (`initiatives.py`), and city systems.
 - `toolbox/permit_office_arcgis/` - ArcPy/Tkinter adapter: schema, geodatabase
   store helpers, geometry operations, symbology, dashboard command flow,
   redraw planning, and district/support display rings.
-- `tests/` - regression tests for the rules and ArcGIS adapter shims.
+- `tests/` - regression tests for the rules and ArcGIS adapter shims, plus the
+  preview scenarios in `tests/fixtures/desk_preview/`.
+- `tools/desk_preview.py` - renders the dashboard to PNG without ArcGIS Pro.
 - `docs/` - the core reference set (see below).
 
 ## Documentation
@@ -167,21 +189,20 @@ do not replace a live ArcGIS Pro smoke test.
 
 ## Current Status
 
-**Playable:** generated districts and seeded city detail, weighted docket
-templates driven by district type and citizen culture, inspections, approvals,
-mitigation, denials, incidents, maintenance follow-ups, recurring economy,
-multi-week projects, district identity and multi-bidder buyouts, a final audit,
-and a Tkinter dashboard.
+**Playable offline, pending live check:** seeded goals, the week 4/8/12 audit
+ladder, two cases a week, weekly initiatives, no real-time clock, and the
+narrow dashboard pane. The rules and the pane are covered by the offline tests
+and previews; the live ArcGIS Pro pass is the next step.
 
-**Redraw:** a district display ring plus point/line/zone rings. Decisions resolve
-against the geodatabase and write it once; redraw planning refreshes only the
-layers that decision changed. If a ring fails, the toolbox falls back to the
-older remove/add/refresh path.
+**Verified live (v0.95 and the ArcPy review):** generated districts and city
+detail, weighted dockets, inspections, approvals and denials, incidents,
+maintenance, recurring economy, projects, buyouts, the final audit, shipped
+`.lyrx` layer styles, and a week-close redraw that drops each feature layer
+once with no white flash. How those map bugs were caught is in
+[`docs/live-testing-loop.md`](docs/live-testing-loop.md).
 
-**Not yet verified live:** the ArcGIS Pro smoke checklist (workspace routing,
-feature-ring repaint, cold-start resume, legacy `.gdb` migration, symbology), a
-fair 12-week balance route, and the dashboard changes listed under Unreleased in
-[`CHANGELOG.md`](CHANGELOG.md).
+**Open:** a fair 12-week balance pass for the new goals and initiatives, and
+the week-close redraw batching probe.
 
 ## License
 

@@ -6,31 +6,52 @@ behavior between minor versions.
 
 ## Unreleased
 
-Work since v0.95.0. The rules tests pass; none of it has had the live ArcGIS Pro
-smoke test yet.
+Work since v0.95.0. The rules tests and dashboard previews pass. The ArcPy
+review items below were checked live in ArcGIS Pro; the loop and pane changes
+are waiting on their live check.
 
 ### Added
-- A public pressure model: a small set of player-facing city meters derived from
-  the hidden internals.
-- Evidence widgets and live trend symbology on the dashboard.
+- Season goals: New Game offers three goals drawn from the seed and the player
+  files one; week 12 decides the season by it. Goals met along the way count as
+  achievements.
+- An audit ladder: checkpoint audits at weeks 4, 8 and 12 move council patience
+  (warning, sanctioned with one AP less, dismissed).
+- Weekly initiatives: Earmark a district type (buyouts and the case draw lean
+  its way), Civic action, and Market push on map-selected districts.
+- Hotkeys for every action shown on the desk, and a probe log file
+  (`PERMIT_OFFICE_LOG_FILE`).
+- `tools/desk_preview.py`, which renders the dashboard without ArcGIS Pro.
 
 ### Changed
-- Redesigned the dashboard desk: layout, action cards, map key, report and help
-  reference.
-- Startup is more resilient: schema versioning and repair on open, and ArcPy-free
-  precompute on a worker thread from copied rows, with a timeout that falls back
-  to running it on the main thread.
+- The dashboard is a narrow, resizable pane (480 x 820, down to 400 x 560) with
+  Desk, Reports and City tabs and an End Week footer that forecasts the close.
+- Two new cases a week instead of four, on top of follow-up work.
+- Weeks end on End Week. The 150-second office clock is gone; ignored cases
+  build a full week of pressure at the close.
+- Stakeholder heat fades by one a week when nothing feeds it, and heat
+  follow-ups respect their cooldown.
+- Layers load from shipped `.lyrx` styles; map redraws requery layers in place,
+  keep selections the next case replaces, and draw a district underlay, so a
+  week close drops each feature layer once with no white flash.
 - `geometry.py` is split by job into `proposals.py`, `city_features.py`,
   `map_layers.py`, and `symbology.py`; `geometry.py` re-exports them for one
   release.
 
+### Fixed
+- Approved cases stayed in the inbox and could be approved a second time,
+  paying twice, and the queue auto-close never fired after an approval.
+- Deferring an enforcement, maintenance or incident case showed 0 AP while the
+  rules charged 1.
+- The dashboard window no longer frees Tk on another thread (a Pro crash).
+
 ### Removed
+- Office Standing, threat-track and other standalone meters; their causes now
+  appear as report findings.
+- The unused demo docket sequence.
 - Redraw experiment and benchmark controls from the public toolbox. The display
   ring is the production redraw path (ADR-16); retired probes are recorded in
   `docs/failed-experiments.md`.
 - The one-ply decision-future cache (`futures.py`, `cache_keys.py`, `dirty.py`).
-  Each decision now resolves once; redraw planning lives in `redraw_plan.py` and
-  `map_redraw.py`.
 
 ## v0.95.0 - 2026-06-10
 
