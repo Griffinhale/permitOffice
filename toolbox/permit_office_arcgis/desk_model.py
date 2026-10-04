@@ -239,9 +239,6 @@ class DeskViewModel:
     ledger_rows: tuple[LedgerRow, ...] = ()
     status_text: str = ""
     exhibit_visible: bool = False
-    deadline_text: str = ""
-    deadline_meter: int = 0
-    deadline_running: bool = False
     receipt: ReceiptModel | None = None
     report_tabs: tuple[ReportTab, ...] = ()
     selected_report_id: str = ""
@@ -286,9 +283,6 @@ def build_desk_model(
     selected_item_id="",
     status_text="",
     proposal_visible_by_item=None,
-    deadline_text="",
-    deadline_meter=0,
-    deadline_running=False,
     active_features=None,
     receipt=None,
     report_tabs=None,
@@ -362,9 +356,6 @@ def build_desk_model(
         ledger_rows,
         status,
         exhibit_visible,
-        deadline_text,
-        deadline_meter,
-        deadline_running,
         receipt,
         report_tabs,
         selected_report_id,
@@ -625,7 +616,7 @@ def _report_status(report):
         return "denied"
     if lower.startswith(("inspected", "inspection")):
         return "inspected"
-    if lower.startswith(("advanced", "final week", "auto-deadline")):
+    if lower.startswith(("advanced", "final week", "auto-close")):
         return "week"
     return "filed"
 

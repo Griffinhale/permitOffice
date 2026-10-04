@@ -495,12 +495,8 @@ def read_districts(paths):
 
 
 @perf_traced("write_district_updates")
-def write_district_updates(paths, districts, report, affected_ids=None, daily_pressure=None):
-    """Persist profiles and return whether built-in district display fields changed.
-
-    Pass ``daily_pressure`` once a day tick has written overlays this week, so
-    display_state keeps the overlay instead of reverting to the base state.
-    """
+def write_district_updates(paths, districts, report, affected_ids=None):
+    """Persist profiles and return whether built-in district display fields changed."""
 
     affected = set(affected_ids or districts)
     # Every district row is refreshed from normalized state, while last_report is
@@ -518,8 +514,6 @@ def write_district_updates(paths, districts, report, affected_ids=None, daily_pr
             profile = districts[cid]
             rules.normalize_profile(profile)
             encoded = _encode_district(profile, DISTRICT_UPDATE_CODEC, limits)
-            if daily_pressure is not None:
-                encoded["display_state"] = _daily_overlay_state(profile, max(0, min(4, int(daily_pressure.get(cid, 0) or 0))))
             display_changed |= any(values.get(field) != encoded.get(field) for field in display_fields)
             values.update(encoded)
             if cid in affected:
@@ -528,50 +522,6 @@ def write_district_updates(paths, districts, report, affected_ids=None, daily_pr
     return display_changed
 
 
-@perf_traced("write_daily_pressure_overlays")
-def write_daily_pressure_overlays(paths, districts, pressure):
-    """Persist only daily pressure display overlays on district rows."""
-
-    pressure = {str(cid): max(0, min(4, int(value or 0))) for cid, value in (pressure or {}).items()}
-    fields = ["cell_id", "display_state", "last_report"]
-    with arcpy.da.UpdateCursor(paths["districts"], fields) as cursor:
-        for cid, _display_state, _last_report in cursor:
-            profile = districts.get(cid) if districts else None
-            amount = pressure.get(cid, 0)
-            overlay = _daily_overlay_state(profile, amount)
-            cursor.updateRow([cid, overlay, _daily_overlay_report(cid, overlay, amount, profile)])
-
-
-def _daily_overlay_state(profile, pressure):
-    """Choose daily map overlay state without normalizing district profiles."""
-
-    if profile and profile.incident_state != "none":
-        return "incident"
-    if profile and max((int(band or 0) for band in (profile.hazards or {}).values()), default=0) >= 2:
-        return "hazard"
-    if profile and max((int(gap or 0) for gap in (profile.service_gap or {}).values()), default=0) >= 30:
-        return "service_gap"
-    if profile and max((int(band or 0) for band in (profile.displacement or {}).values()), default=0) >= 2:
-        return "housing_pressure"
-    if profile and rules._top_dissatisfaction(profile)[1] >= rules.DISSATISFACTION_AGGRIEVED_THRESHOLD:
-        return "grievance"
-    if pressure >= 1:
-        return "daily_pressure"
-    return profile.display_state if profile else "stable"
-
-
-def _daily_overlay_report(cid, overlay, pressure, profile):
-    """Return compact map note for daily pressure overlays."""
-
-    if overlay == "incident":
-        return f"{cid}: active civic incident remains visible."[:512]
-    if overlay in {"hazard", "service_gap", "housing_pressure", "grievance"}:
-        return f"{cid}: {overlay.replace('_', ' ')} condition remains visible."[:512]
-    if overlay == "daily_pressure":
-        return f"{cid}: daily docket pressure {pressure}/4."[:512]
-    if profile:
-        return f"{cid}: no daily pressure filed."[:512]
-    return ""
 
 
 def read_active_features(paths):

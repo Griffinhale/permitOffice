@@ -228,7 +228,7 @@ class PermitDeskView:
 
         self.model = model
         # New frame content: bound the text-fit memo to this model's strings.
-        # (Left warm across hover redraws and deadline ticks, which keep the model.)
+        # (Left warm across hover redraws, which keep the model.)
         self._fit_cache.clear()
         width = max(self.canvas.winfo_width(), MIN_DESK_W)
         height = max(self.canvas.winfo_height(), MIN_DESK_H)
@@ -271,28 +271,6 @@ class PermitDeskView:
         """Return the currently rendered selected item id."""
 
         return self.model.selected_item_id
-
-    def update_deadline(self, text: str, meter: int, running: bool, status_text: str | None = None):
-        """Update the live filing-deadline presentation without reloading ArcGIS rows."""
-
-        if (
-            self.model.deadline_text == text
-            and self.model.deadline_meter == meter
-            and self.model.deadline_running == running
-            and (status_text is None or self.model.status_text == status_text)
-        ):
-            return
-        next_status = self.model.status_text if status_text is None else status_text
-        self.model = replace(
-            self.model,
-            status_text=next_status,
-            deadline_text=text,
-            deadline_meter=meter,
-            deadline_running=running,
-        )
-        width = max(self.canvas.winfo_width(), MIN_DESK_W)
-        height = max(self.canvas.winfo_height(), MIN_DESK_H)
-        self._draw(width, height)
 
     def _on_configure(self, event):
         """Redraw the canvas when the window size changes."""
@@ -458,7 +436,7 @@ class PermitDeskView:
         metrics = self._ledger_by_label
         headlines = HEADLINE_METRICS
         x_start = 310
-        right_pad = 292 if self.model.deadline_text else 84
+        right_pad = 84
         spacing = max(70, (width - x_start - right_pad) // len(headlines))
         x = x_start
         for key, display in headlines:
@@ -469,29 +447,7 @@ class PermitDeskView:
             value = self._fit_px(row.value, Type.TITLE, "bold", spacing - Space.M)
             c.create_text(x, h // 2 + 9, text=value, anchor="w", fill=_tone_color(row.tone), font=self._font(Type.TITLE, "bold"))
             x += spacing
-        if self.model.deadline_text:
-            self._draw_deadline_clock(c, width, h)
         self._draw_menu_button(c, width - 56, 16, width - Space.L, h - 16)
-
-    def _draw_deadline_clock(self, c, width, h):
-        """Draw the live office clock in the top banner."""
-
-        x1 = width - 72
-        x0 = x1 - 170
-        y0 = Space.S
-        y1 = h - Space.S
-        meter = max(0, min(100, int(self.model.deadline_meter or 0)))
-        fill = Palette.WATCH if meter >= 75 else Palette.ACCENT if self.model.deadline_running else Palette.MUTED
-        day, time, held = _deadline_day_time(self.model.deadline_text)
-        c.create_rectangle(x0, y0, x1, y1, fill=Palette.SUBTLE, outline=Palette.BORDER, width=1)
-        c.create_text(x0 + Space.M, y0 + 6, text="DAY", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
-        c.create_text(x0 + Space.M, y0 + 22, text=self._fit_px(day, Type.BODY, "bold", 60), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
-        # A probe hold (PERMIT_OFFICE_HOLD_DAY) swaps the TIME caption for HELD.
-        caption, caption_fill = ("HELD", Palette.WATCH) if held else ("TIME", Palette.MUTED)
-        c.create_text(x0 + 80, y0 + 6, text=caption, anchor="nw", fill=caption_fill, font=self._font(Type.SMALL, "bold"))
-        c.create_text(x0 + 80, y0 + 22, text=self._fit_px(time, Type.BODY, "bold", 80), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
-        # Thin progress bar pinned to the inner bottom edge, clear of the text.
-        c.create_rectangle(x0 + 1, y1 - 4, x0 + 1 + int((x1 - x0 - 2) * meter / 100), y1 - 1, fill=fill, outline="")
 
     def _draw_status_strip(self, c, box):
         """Draw the one-line ambient status (office-day note, selection, errors).
@@ -1677,7 +1633,7 @@ class PermitDeskView:
 
         The label->ledger-row and action_id->lane maps are pure functions of the
         current model, so they are cached by model identity and reused across
-        hover/deadline redraws (which keep the same model) instead of rebuilt by
+        hover redraws (which keep the same model) instead of rebuilt by
         each draw method every frame.
         """
 
@@ -1787,17 +1743,6 @@ def _clip(value, width):
     """Shorten text to a single normalized line for canvas rendering."""
 
     return shorten(" ".join(str(value or "").split()), width=width, placeholder="...")
-
-
-def _deadline_day_time(value):
-    """Return day and time tokens, and whether the clock is held, from the controller's office-clock text."""
-
-    tokens = str(value or "").split()
-    held = "HELD" in tokens
-    tokens = [token for token in tokens if token != "HELD"]
-    day = tokens[0] if tokens else ""
-    time = next((token for token in reversed(tokens) if ":" in token), tokens[-1] if tokens else "")
-    return day, time, held
 
 
 def _folder_key_top(rail_box):

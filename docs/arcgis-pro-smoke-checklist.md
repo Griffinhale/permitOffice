@@ -39,7 +39,7 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       `district_type`, prosperity overlay, identity overlay) and any new/updated
       feature shows. Log shows `[REBUILD] ... mode=district-readd ...` and, with
       perf enabled, `ring_redraw=...`.
-- [ ] Advance a week (or let the deadline fire). Districts whose state changed
+- [ ] End the week. Districts whose state changed
       repaint; converted/contested districts show their new fill + name.
 - [ ] Confirm the board never goes blank / lines-only after an action. The visible
       district ring slot should stay intact while the prepare slot updates; on
@@ -79,19 +79,15 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       and no new persisted fields are required (this round added none).
 
 ## 9. End-of-game flow (#7)
-- [ ] Reach week 12 / deadline. The inline final-audit receipt auto-shows with
+- [ ] Close week 12. The inline final-audit receipt auto-shows with
       PASS/CONDITIONAL/FAIL flavor; the week label reads `12/12 CLOSED`. Repeated
       End Week after close is idempotent (no duplicate receipts).
 
 ## 10. Pacing and redraw budget
-- [ ] Start a game with `PERMIT_OFFICE_PERF=1`. Confirm the filing deadline is
-      2:30 and each office day lasts about 30 seconds.
-- [ ] Let the week advance from Monday to Tuesday. Confirm the desk status names
-      rising pressure, and the log does not show a district re-add unless a
-      configured checkpoint is reached.
-- [ ] Let the week advance to a configured checkpoint. Confirm the log includes
-      `[REBUILD] targeted=['PermitDistricts'] mode=district-readd dirty=districts`.
-- [ ] Record timings for a normal decision and a checkpoint tick:
+- [ ] Start a game with `PERMIT_OFFICE_PERF=1`. Confirm the banner has no
+      clock and the week stays open until End Week (or the queue auto-close
+      after the last case).
+- [ ] Record timings for a normal decision and a week close:
       `ring_redraw`, `feature_PermitPoints_ring_refresh` /
       `feature_PermitPoints_ring_rehydrate`, and total `rebuild`. If the ring
       path reports a warning and falls back, record `remove`, `add`, `refresh`
@@ -147,14 +143,11 @@ lands and this check passes live.
       decision that changes a district's type, display state, prosperity, or
       identity: it logs `district-flip`. Every changed feature and district
       shows its new color, and nothing unchanged looks stale.
-- [ ] (after AR16) After a day tick, with some districts showing daily
-      pressure, make a points-only decision. It logs no `district-flip`, and the
-      daily-pressure districts keep their color until the next day tick.
 - [ ] (after AR16) Show and hide the selected case's exhibit, then use Update
       from Map. Each logs `feature-query` and no `RefreshLayer`; the map never
       flashes white.
 - [ ] (after AR18, Pro 3.7+) With `PERMIT_OFFICE_PERF=1` and
-      `PERMIT_OFFICE_HOLD_DAY` set, close a week where the new docket has a
+      no other setup, close a week where the new docket has a
       line or zone case. The log shows `district-flip` and
       `feature-query target='PermitLines'` (or zones), with no ring seed and no
       `RefreshLayer`; the background never flashes white. Note whether the
@@ -162,8 +155,7 @@ lands and this check passes live.
 - [ ] (after AR18) Drag `PermitPoints` (and its `Permit Office Predrawn Points`
       slots) above `PermitLines` in Contents, then make a points-only
       decision. Note whether the lines still blink.
-- [ ] (after AR18) With `PERMIT_OFFICE_PERF=1` and `PERMIT_OFFICE_HOLD_DAY`
-      set, make a points-only decision whose next case is also a point case.
+- [ ] (after AR18) With `PERMIT_OFFICE_PERF=1` set, make a points-only decision whose next case is also a point case.
       Only the points layer blinks; districts and lines stay put. The log shows
       `[REBUILD] targeted=['PermitPoints']`, one `feature-query target='PermitPoints'`,
       then one `[SELECT] clear kept=[...] cleared=[...]` line that never lists
@@ -192,7 +184,7 @@ Windows DPI) proves the look. Run each item at the default desk size
 (1180 x 1040 client) and at the minimum size (1180 x 860), on `ar_probe.aprx`
 or the `fresh.gdb` test project, never a real save. Screenshot both tabs at
 both sizes and note the Windows display scale.
-- [ ] Header: week, clock, AP and $ values are readable on the light title row
+- [ ] Header: week, AP and $ values are readable on the light title row
       (no green-on-green), and values never run into their labels.
 - [ ] Map key: no label overlaps its sublabel or the next row at either size;
       when the rail is short, rows or sublabels drop instead of overlapping.

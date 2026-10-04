@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-import os
 import traceback
 import threading
 from concurrent import futures as concurrent_futures
@@ -43,7 +42,6 @@ from .store import (
     read_state,
     write_active_features,
     write_district_updates,
-    write_daily_pressure_overlays,
     write_docket_item,
     write_projects,
     write_state,
@@ -65,25 +63,11 @@ from .redraw_plan import (
 )
 
 
-WEEK_DEADLINE_SECONDS = 150
-TIMER_TICK_MS = 1000
 TICKER_TICK_MS = 90
 TICKER_STEP_PX = 3
 STATUS_TEXT_HOLD_SECONDS = 6.0
 QUEUE_AUTOCLOSE_SECONDS = 2
 STARTUP_MIN_SIZE = (1180, 860)
-WORK_WEEK_DAYS = (
-    ("MON INTAKE", "New applications logged. Triage high-risk packets."),
-    ("TUE INSPECTION", "Inspection desk is active. File reviews reveal compliance risk."),
-    ("WED COMMENT", "Public comment window is open. Unresolved cases may draw attention."),
-    ("THU ESCALATION", "Escalation review. Ignored stakeholders are warming up."),
-    ("FRI CLOSE", "Filing close approaching. Open cases advance unresolved."),
-)
-WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
-MIDWEEK_MAP_REDRAW_DAYS = frozenset((2, 4))
-# Probe-only: hold the office clock mid-way through this zero-based day index so
-# live recordings are not split by day ticks or the Friday deadline.
-HOLD_DAY_ENV = "PERMIT_OFFICE_HOLD_DAY"
 PURE_WORKER_TIMEOUT_SECONDS = 1.0
 STARTUP_SESSION_DELAY_MS = 50
 # _finish_decision passes this when the next case could not be read before the redraw.
@@ -235,14 +219,6 @@ class _StatusProxy:
         return self.controller.status_text
 
 
-def _held_office_day():
-    """Return the office day index set by PERMIT_OFFICE_HOLD_DAY, or None."""
-
-    try:
-        day = int(os.environ.get(HOLD_DAY_ENV, "").strip())
-    except ValueError:
-        return None
-    return max(0, min(len(WORK_WEEK_DAYS) - 1, day))
 
 
 class DashboardController:
@@ -267,7 +243,7 @@ class DashboardController:
     ):
         """Wire paths, the district layer name, the run seed, and GP messages.
 
-        Initializes UI/session state (selection, report tabs, deadline timer,
+        Initializes UI/session state (selection, report tabs, queue auto-close,
         command-busy guard); the geodatabase rows are read later in reload().
         offer_fresh_start is True when the launcher detected a save in this
         workspace but no Permit Office layers on the map: the desk then opens on a
@@ -296,10 +272,6 @@ class DashboardController:
         self._queue_autoclose_active = False
         self._queue_autoclose_seconds = 0
         self._newgame_overlay = None
-        self._deadline_week = 0
-        self._deadline_started = 0.0
-        self._deadline_after_id = None
-        self._deadline_running = False
         self._ticker_after_id = None
         self._ticker_index = 0
         self._ticker_offset_px = 0
@@ -417,7 +389,6 @@ class DashboardController:
 
             self.reload()
             self.schedule_startup_session_preparation()
-            self._schedule_deadline_tick()
             self._schedule_ticker_tick()
             self.root.mainloop()
         finally:
@@ -552,7 +523,6 @@ class DashboardController:
         state, districts, items, active_features, offering_fresh = self._resolve_session_state(
             state, districts, items, active_features
         )
-        self._sync_deadline_timer(state)
         self._sync_report_week(state)
         if state.status == "complete" or state.turn > state.max_turns:
             self._record_final_audit_receipt(state, districts, active_features, items)
@@ -576,7 +546,6 @@ class DashboardController:
             self.selected_item_id,
             self._display_status_text(),
             proposal_visible_by_item,
-            *self._deadline_presentation(),
             active_features=active_features,
             receipt=self.last_receipt,
             report_tabs=tuple(self.report_tabs),
@@ -747,84 +716,16 @@ class DashboardController:
         if getattr(self, "root", None):
             self.root.destroy()
 
-    def _sync_deadline_timer(self, state):
-        """Start or reset the five-minute filing clock for the current week."""
-
-        if state.status == "complete" or state.turn > state.max_turns or not has_saved_game(self.paths):
-            self._deadline_running = False
-            self._deadline_week = int(getattr(state, "turn", 0) or 0)
-            self._deadline_started = 0.0
-            return
-        week = int(getattr(state, "turn", 1) or 1)
-        if self._deadline_week != week or not self._deadline_started:
-            self._deadline_week = week
-            self._deadline_started = time.monotonic()
-        self._deadline_running = True
-
-    def _deadline_remaining_seconds(self):
-        if not self._deadline_running or not self._deadline_started:
-            return WEEK_DEADLINE_SECONDS
-        elapsed = max(0, time.monotonic() - self._deadline_started)
-        return max(0, int(round(WEEK_DEADLINE_SECONDS - elapsed)))
-
-    def _deadline_elapsed_seconds(self):
-        """Return elapsed seconds in the current office week."""
-
-        if not self._deadline_running or not self._deadline_started:
-            return 0
-        return min(WEEK_DEADLINE_SECONDS, max(0, int(time.monotonic() - self._deadline_started)))
-
-    def _deadline_phase(self):
-        """Return the current office-day label, note, and seconds left in that day."""
-
-        elapsed = self._deadline_elapsed_seconds()
-        index = self._deadline_day_index()
-        label, note = WORK_WEEK_DAYS[index]
-        seconds_left = max(0, WORK_DAY_SECONDS - (elapsed - index * WORK_DAY_SECONDS))
-        return label, note, seconds_left
-
-    def _deadline_day_index(self):
-        """Return zero-based office day index for the live deadline clock."""
-
-        return min(len(WORK_WEEK_DAYS) - 1, self._deadline_elapsed_seconds() // WORK_DAY_SECONDS)
-
-    def _deadline_presentation(self):
-        """Return banner text, meter, and running state for the deadline clock."""
-
-        if not self._deadline_running:
-            return ("CLOCK PAUSED", 0, False)
-        day_label, _note, day_remaining = self._deadline_phase()
-        minutes, seconds = divmod(day_remaining, 60)
-        elapsed = self._deadline_elapsed_seconds()
-        meter = int(100 * elapsed / WEEK_DEADLINE_SECONDS)
-        held = " HELD" if _held_office_day() is not None else ""
-        return (f"{day_label} {minutes}:{seconds:02d}{held}", meter, True)
-
     def _display_status_text(self):
-        """Return action status when present, otherwise the current office-day note."""
+        """Return the current action status; the ambient ticker fills the strip otherwise."""
 
-        if self.status_text:
-            return self.status_text
-        if self._deadline_running:
-            _label, note, _day_remaining = self._deadline_phase()
-            return note
-        return ""
+        return self.status_text
 
     def _set_status_text(self, value):
         """Set transient command status before ambient ticker resumes."""
 
         self.status_text = str(value or "")
         self._status_hold_until = time.monotonic() + STATUS_TEXT_HOLD_SECONDS if self.status_text else 0.0
-
-    def _schedule_deadline_tick(self):
-        """Keep the live clock moving without reloading ArcGIS rows."""
-
-        if not getattr(self, "root", None):
-            return
-        try:
-            self._deadline_after_id = self.root.after(TIMER_TICK_MS, self._deadline_tick)
-        except Exception:
-            self._deadline_after_id = None
 
     def _schedule_ticker_tick(self):
         """Schedule the ambient status ticker without touching ArcGIS rows."""
@@ -857,58 +758,6 @@ class DashboardController:
             view.update_status_marquee(self._ticker_offset_px)
         finally:
             self._schedule_ticker_tick()
-
-    def _deadline_tick(self):
-        """Advance daily pressure and close the week when the deadline expires."""
-
-        self._deadline_after_id = None
-        try:
-            if self._deadline_running and not self._command_busy:
-                self._apply_clock_hold()
-                pressure_status = self._advance_daily_pressure_if_due()
-                text, meter, running = self._deadline_presentation()
-                if getattr(self, "view", None):
-                    self.view.update_deadline(text, meter, running, pressure_status or self._display_status_text())
-                if self._deadline_remaining_seconds() <= 0:
-                    self.status_var.set("Friday filing deadline reached. Closing the week.")
-                    self.advance_turn(auto=True)
-            elif getattr(self, "view", None):
-                self.view.update_deadline(*self._deadline_presentation(), self._display_status_text())
-        finally:
-            self._schedule_deadline_tick()
-
-    def _apply_clock_hold(self):
-        """Pin elapsed week time to the middle of the held day, if one is set."""
-
-        held = _held_office_day()
-        if held is None or not self._deadline_started:
-            return
-        pin = held * WORK_DAY_SECONDS + WORK_DAY_SECONDS // 2
-        now = time.monotonic()
-        if now - self._deadline_started > pin:
-            self._deadline_started = now - pin
-
-    def _advance_daily_pressure_if_due(self):
-        """Persist district overlays when the office day moves forward."""
-
-        target_day = self._deadline_day_index()
-        try:
-            state = read_state(self.paths)
-            if target_day <= int(getattr(state, "week_day", 0) or 0):
-                return ""
-            items = read_docket(self.paths)
-            districts = read_districts(self.paths)
-            active_features = read_active_features(self.paths)
-            pressure = rules.advance_daily_pressure(state, items, districts, active_features, target_day)
-            self._grade_dirty = True
-            write_state(self.paths, state)
-            write_daily_pressure_overlays(self.paths, districts, pressure)
-            if target_day in MIDWEEK_MAP_REDRAW_DAYS:
-                rebuild_output_layers(self.paths, self.messages, layer_names={DISTRICTS}, dirty_scope=DIRTY_DISTRICTS)
-            return _pressure_status_text(target_day, pressure)
-        except Exception as exc:
-            _warn(self.messages, "DASH", f"daily pressure update failed: {exc}")
-            return ""
 
     def new_game(self):
         """Open an inline seed-entry overlay (no native dialog, single screen)."""
@@ -993,8 +842,6 @@ class DashboardController:
                 self._report_counter = 0
                 self._report_week = 0
                 self._show_help = False
-                self._deadline_week = 0
-                self._deadline_started = 0.0
                 self.status_var.set(f"New game started with seed {seed}.")
             except Exception as exc:
                 self.status_var.set(f"New game failed: {exc}")
@@ -1248,12 +1095,7 @@ class DashboardController:
         filed_report = _filed_report_text(result, districts)
         self._grade_dirty = True
         with perf_block("writes"):
-            # After a day tick, district rows carry daily overlays; keep them so a
-            # points-only decision does not repaint every pressured district.
-            overlay_pressure = dict(state.daily_pressure or {}) if int(getattr(state, "week_day", 0) or 0) > 0 else None
-            district_display_changed = write_district_updates(
-                self.paths, districts, result.report, result.affected_cell_ids, daily_pressure=overlay_pressure
-            )
+            district_display_changed = write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
             write_state(self.paths, state)
             write_projects(self.paths, projects)
             write_docket_item(self.paths, item)
@@ -1342,9 +1184,6 @@ class DashboardController:
                     rebuild_output_layers(self.paths, self.messages, remove_scope_override={DISTRICTS})
                     self.district_layer = DISTRICTS
                     self.status_var.set(report)
-                    self._deadline_running = False
-                    self._deadline_week = int(getattr(state, "turn", 0) or 0)
-                    self._deadline_started = 0.0
                     return
                 with perf_block("resolve"):
                     turn_result = rules.advance_turn_result(state, items, districts, active_features, projects)
@@ -1369,16 +1208,13 @@ class DashboardController:
                     remove_scope_override=redraw_layers,
                 )
                 self.district_layer = DISTRICTS
-                prefix = "Auto-deadline: " if auto else ""
+                prefix = "Auto-close: " if auto else ""
                 if state.status == "complete":
                     _grade, final_report = self._record_final_audit_receipt(state, districts, active_features, items)
                     self.status_var.set(f"{prefix}{final_report}")
-                    self._deadline_running = False
                 else:
                     self._record_week_report("Week Closed", report, state, districts)
                     self.status_var.set(f"{prefix}{report}")
-                self._deadline_week = 0
-                self._deadline_started = 0.0
                 # state, districts, and active_features are all fully rewritten
                 # above; items is re-read because generate_docket_rows just added
                 # next week's docket rows that the in-memory list does not hold.
@@ -1405,16 +1241,6 @@ class DashboardController:
         self._report_week = int(getattr(state, "turn", 0) or 0)
 
 
-def _pressure_status_text(target_day, pressure):
-    """Return a compact desk status for daily pressure changes."""
-
-    active_count = sum(1 for value in (pressure or {}).values() if int(value or 0) > 0)
-    if active_count <= 0:
-        return ""
-    day_index = min(len(WORK_WEEK_DAYS) - 1, max(0, int(target_day or 0)))
-    day_label = WORK_WEEK_DAYS[day_index][0].split()[0].title()
-    noun = "district" if active_count == 1 else "districts"
-    return f"{day_label}: {active_count} {noun} pressure rising."
 
 
 def _report_tab_sections(report, districts=None):
@@ -1460,7 +1286,7 @@ def _report_status(report):
         return "denied"
     if lower.startswith(("inspected", "inspection")):
         return "inspected"
-    if lower.startswith(("advanced", "final week", "auto-deadline")):
+    if lower.startswith(("advanced", "final week", "auto-close")):
         return "week"
     return "filed"
 

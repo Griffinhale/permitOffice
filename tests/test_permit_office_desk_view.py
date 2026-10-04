@@ -60,16 +60,11 @@ def test_uninspected_case_uses_qualitative_impact_buckets():
         [item],
         item.item_id,
         proposal_visible_by_item={item.item_id: True},
-        deadline_text="MON INTAKE 1:00",
-        deadline_meter=0,
-        deadline_running=True,
     )
     buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
 
     assert list(buckets) == ["Cost", "City", "Local", "People", "Services", "Budget"]
     assert model.exhibit_visible is True
-    assert model.deadline_text == "MON INTAKE 1:00"
-    assert model.deadline_running is True
     assert "Issue 1AP/$12" in buckets["Cost"].value
     assert "conditions +$6" in buckets["Cost"].value
     assert "deny 0AP" in buckets["Cost"].value
@@ -255,7 +250,7 @@ def test_headline_metrics_hide_generic_city_builder_stats():
     assert "Threats" not in labels
 
 
-def test_top_header_renders_only_title_core_metrics_deadline_and_global_menu():
+def test_top_header_renders_only_title_core_metrics_and_global_menu():
     """Verify the top header owns the only menu and keeps headline copy compact."""
 
     item, districts = _vendor_case()
@@ -264,9 +259,6 @@ def test_top_header_renders_only_title_core_metrics_deadline_and_global_menu():
         districts,
         [item],
         item.item_id,
-        deadline_text="MON INTAKE 1:00",
-        deadline_meter=40,
-        deadline_running=True,
     )
     view, _callbacks = _view_for_drawing(model)
     canvas = _FakeCanvas()
@@ -279,10 +271,8 @@ def test_top_header_renders_only_title_core_metrics_deadline_and_global_menu():
     assert "WEEK" in texts
     assert "AP" in texts
     assert "$" in texts
-    assert "DAY" in texts
-    assert "TIME" in texts
-    assert "MON" in texts
-    assert "1:00" in texts
+    assert "DAY" not in texts
+    assert "TIME" not in texts
     assert "STAND" not in texts
     assert "AUDIT" not in texts
     assert "THREAT" not in texts
@@ -1310,7 +1300,7 @@ def test_header_values_meet_contrast_on_the_banner():
     from toolbox.permit_office_arcgis.desk_model import LedgerRow
 
     item, districts = _vendor_case()
-    base = build_desk_model(rules.CityState(), districts, [item], item.item_id, deadline_text="MON INTAKE 1:00", deadline_running=True)
+    base = build_desk_model(rules.CityState(), districts, [item], item.item_id)
     for tone in ("good", "bad", "watch", "neutral"):
         rows = tuple(LedgerRow(row.label, row.value, tone) if row.label in ("Week", "AP", "Money") else row for row in base.ledger_rows)
         model = replace(base, ledger_rows=rows)
@@ -1347,7 +1337,7 @@ def test_desk_uses_at_most_four_font_sizes():
     item, districts = _vendor_case()
     tabs = (ReportTab("week-1", "Week Closed", "week", "week", False, "Week one report."),)
     models = (
-        build_desk_model(rules.CityState(), districts, [item], item.item_id, deadline_text="MON INTAKE 1:00", deadline_running=True, show_start_help=True),
+        build_desk_model(rules.CityState(), districts, [item], item.item_id, show_start_help=True),
         build_desk_model(rules.CityState(), districts, [item], item.item_id, report_tabs=tabs, selected_desk_tab="reports"),
         build_desk_model(rules.CityState(), districts, [], ""),
     )
@@ -1996,7 +1986,7 @@ def test_draw_lookups_rebuild_only_on_model_swap():
     The banner and ledger rail both index ledger rows by label, and case controls
     index action lanes by action_id, every redraw. Those maps are a pure function
     of the current model, so they are built once per model swap and reused across
-    hover/deadline redraws instead of rebuilt each frame.
+    hover redraws instead of rebuilt each frame.
     """
 
     item, districts = _vendor_case()
@@ -2848,32 +2838,6 @@ def test_summary_helpers_report_service_hazard_and_maintenance_backlog():
     assert _service_gap_summary([profile], "child_services") == "mobility gap 40 in D0000"
     assert _hazard_summary([profile]) == "fire band 3 x1"
     assert _maintenance_summary([feature]) == "1 due; lowest condition 22"
-
-
-def test_banner_clock_shows_held_when_the_probe_holds_the_day():
-    """Verify PERMIT_OFFICE_HOLD_DAY's HELD suffix reaches the banner clock."""
-
-    item, districts = _vendor_case()
-    model = build_desk_model(
-        rules.CityState(ap=2, money=75),
-        districts,
-        [item],
-        item.item_id,
-        deadline_text="TUE INSPECTION 0:15 HELD",
-        deadline_meter=30,
-        deadline_running=True,
-    )
-    view, _callbacks = _view_for_drawing(model)
-    canvas = _FakeCanvas()
-    view.canvas = canvas
-
-    view._draw(1120, 900)
-
-    texts = _text_values(canvas)
-    assert "TUE" in texts
-    assert "0:15" in texts
-    assert "HELD" in texts
-    assert "TIME" not in texts
 
 
 def _key(view, char, state=0, widget=None):

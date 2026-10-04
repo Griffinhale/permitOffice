@@ -69,9 +69,6 @@ def applications_mid_week():
         selected.item_id,
         "",
         {selected.item_id: True},
-        deadline_text="WED REVIEW 2:30",
-        deadline_meter=48,
-        deadline_running=True,
         selected_desk_tab="applications",
     )
 
@@ -100,9 +97,6 @@ def filed_reports_long():
         report_tabs=tabs,
         selected_report_id="report-1",
         selected_desk_tab="reports",
-        deadline_text="MON INTAKE 0:15",
-        deadline_meter=2,
-        deadline_running=True,
     )
 
 

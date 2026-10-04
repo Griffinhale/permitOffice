@@ -91,8 +91,8 @@ largest capture gap. A capture-limits block. A list of what did not run. A
 hash manifest of the package.
 
 **Native logs.** The game's geoprocessing messages carry `PERF` and `REDRAW`
-lines when `PERMIT_OFFICE_PERF=1` is set. `PERMIT_OFFICE_HOLD_DAY` pins the
-clock so a day tick or week close cannot land inside a trial.
+lines when `PERMIT_OFFICE_PERF=1` is set. The game has no real-time clock, so
+nothing closes a week inside a trial unless the operator does.
 
 ## One cycle
 
@@ -168,7 +168,7 @@ Segoe UI, since Linux previews use substitute fonts and Tk 9.
 - Launch the dashboard through the game's geoprocessing tool, never from
   Pro's Python window. A Tk dashboard hosted in the Python window keeps the
   map view from repainting until it closes, and environment variables set
-  there never reach the tool. Set `PERMIT_OFFICE_PERF` and
-  `PERMIT_OFFICE_HOLD_DAY` in the shell that starts Pro.
+  there never reach the tool. Set `PERMIT_OFFICE_PERF` (and
+  `PERMIT_OFFICE_LOG_FILE` when needed) in the shell that starts Pro.
 - One operator, one Pro instance. The harness has no queue runner, no
   auto-restart, and no replay of an incomplete action, on purpose.

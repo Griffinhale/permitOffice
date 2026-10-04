@@ -28,7 +28,7 @@ The codebase is split so the game is testable without ArcGIS Pro.
   governance) and `features.py` (feature archetypes / operating rules).
 - `profiles.py` - district generation, docket generation, inspection cases.
 - `decisions.py` - inspect / approve / mitigate / deny resolution.
-- `turns.py` - turn advancement, scorecards, audit results, deadlines.
+- `turns.py` - turn advancement, week-close pressure, scorecards, audit results.
 - `systems.py` - projects, feature lifecycle, economy, networks, hazards, housing.
 - `helpers.py` - district math, population, stakeholder heat, effect math.
 - `expiration.py`, `type_pressure.py`, `buyouts.py`, `city_detail.py` - unattended
@@ -131,19 +131,16 @@ does not carry over. When week 5 closes (the turn becomes 6) the turn result
 carries a mid-season audit (grade, score, findings) for the desk to file as its
 own report; it has no mechanical effect. When week 12 closes the
 full week-close simulation runs, the game is marked `complete`, the final audit
-is filed, no new docket is generated and the clock stops. End Week after that
-only repeats the final grade.
+is filed and no new docket is generated. End Week after that only repeats the
+final grade.
 
-**Office clock.** The week runs 150 seconds of real time, five 30-second days
-(Mon intake to Fri close). The day names are flavor; every day runs the same
-rule. On entering a new day, `advance_daily_pressure` adds +1 (capped at 4) to
-a district's pressure for each open case that targets it, for an incident or a
-high grievance, service gap, hazard or displacement, and for each feature on
-it that is due for maintenance or degraded. The district layer redraws on
-Wednesday and Friday. Pressure only matters at week close (below), and resets
-then. When the 150 seconds run out, the week closes by itself on the same path
-as End Week. The clock does not pause during a command. `PERMIT_OFFICE_HOLD_DAY`
-pins it for probe runs.
+**No clock.** A week lasts until End Week, or until the queue auto-close two
+seconds after the last open case is filed. There is no real-time deadline.
+At week close, `advance_daily_pressure` builds a full week (four days) of
+district pressure: +1 a day, capped at 4, for each open case that targets the
+district, for an incident or a high grievance, service gap, hazard or
+displacement, and for each feature on it that is due for maintenance or
+degraded. Pressure feeds the unresolved-case step below and then resets.
 
 **Docket.** Two new cases a week (`DRAWN_CASES_PER_WEEK`), plus follow-up work, up to
 four in all, filled in this order: project steps that
@@ -180,22 +177,23 @@ the mitigation cost ($3-10).
 Points need exactly one target district, lines two, polygons one or more.
 Maintenance cases skip spillover.
 
-**Week close** (End Week, the Friday deadline, or the queue auto-close two
-seconds after the last open case is filed):
+**Week close** (End Week, or the queue auto-close two seconds after the last
+open case is filed):
 
-1. Overdue violations add heat and priority.
-2. Each case still open or inspected adds heat from its targets' daily
+1. Open cases build a full week of district pressure.
+2. Overdue violations add heat and priority.
+3. Each case still open or inspected adds heat from its targets' daily
    pressure and a grievance reaction, then follows its template's expiration
    policy: mandatory follow-ups are carried, missed windows expire, momentum
    cases expire and raise buyout pressure, some queue an enforcement or
    incident follow-up.
-3. Feature lifecycle: expiry, decay, maintenance due, degraded, failed.
-4. Economy: district and feature revenue minus upkeep. Money can go negative.
-5. Networks and hazards (when there are features or hazards), housing,
+4. Feature lifecycle: expiry, decay, maintenance due, degraded, failed.
+5. Economy: district and feature revenue minus upkeep. Money can go negative.
+6. Networks and hazards (when there are features or hazards), housing,
    population drift, grievance floors, new incidents.
-6. Contested buyouts resolve, then a new buyout round picks targets.
-7. Stakeholders who gained no heat this week lose 1 heat.
-8. Turn +1, AP refill, audit grade, new docket, map redraw, week report.
+7. Contested buyouts resolve, then a new buyout round picks targets.
+8. Stakeholders who gained no heat this week lose 1 heat.
+9. Turn +1, AP refill, audit grade, new docket, map redraw, week report.
 
 **Audit grade.** Score = activity + trust - friction - exposure + money/3 +
 last net (clamped to ±10) minus finding penalties (negative or low money, high
@@ -250,10 +248,6 @@ balance tuning toward a fair PASS.
   reports file, and buyout/identity stays legible from map + text.
 - Refresh diagnostics: enable **Log Refresh Timings** in the toolbox or set
   `PERMIT_OFFICE_PERF=1`; output is a nested `[PERF] turn=... total=...` tree.
-- Probe runs: set `PERMIT_OFFICE_HOLD_DAY=<0-4>` before launching Pro to hold
-  the office clock on that day (0 = Monday). The clock runs until mid-way
-  through that day, then stops; the banner shows `HELD`. No later day ticks or
-  Friday deadline fire. End Week still advances by hand.
 - Probe runs: set `PERMIT_OFFICE_LOG_FILE=<path>` before launching Pro to append
   every tagged message (`PERF`, `REDRAW`, `SELECT`, warnings) to that file with
   a UTC timestamp. Pro can offload GP messages out of reach; the file stays.
