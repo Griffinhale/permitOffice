@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from textwrap import shorten, wrap
 from typing import Callable
@@ -49,6 +50,8 @@ DECISION_BRIEF_MIN_H = 508
 TABLE_MIN_H = 140
 # Stamp cards narrower than this stack label, cost, and impacts in one column.
 STACKED_CARD_W = 230
+# Control is 0x4 everywhere; Alt is 0x20000 on Windows (where 0x8 is NumLock) and Mod1 0x8 on X11.
+KEY_MODIFIER_MASK = 0x4 | (0x20000 if sys.platform == "win32" else 0x8)
 MAP_CHEAT_GROUPS = ("MapCheat",)
 LEGEND_GROUP_FIELDS = {
     "PermitDistricts": "district_type",
@@ -206,6 +209,8 @@ class PermitDeskView:
         self._menu_open = False
         self._menu_anchor = None
         self._ticker_offset_px = 0
+        # Lowercase hotkey -> callback for the actions drawn enabled this frame.
+        self._hotkey_targets: dict[str, Callable[[], None]] = {}
 
         self.canvas = tk.Canvas(root, bg=Palette.FRAME, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
@@ -216,6 +221,7 @@ class PermitDeskView:
         self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
         self.canvas.bind("<Button-4>", self._on_mouse_wheel)
         self.canvas.bind("<Button-5>", self._on_mouse_wheel)
+        root.bind("<Key>", self._on_key, add="+")
 
     def render(self, model: DeskViewModel):
         """Store and draw the latest view model."""
@@ -308,6 +314,26 @@ class PermitDeskView:
             self._redraw_current()
         return None
 
+    def _on_key(self, event):
+        """Run the enabled action whose hotkey badge or help-card key was pressed.
+
+        Keys typed into another widget (the New Game seed entry) or held with
+        Control/Alt are ignored, and the start/help card answers only ``?``.
+        """
+
+        if event.widget is not self.canvas and event.widget is not self.root:
+            return None
+        if int(getattr(event, "state", 0) or 0) & KEY_MODIFIER_MASK:
+            return None
+        key = str(getattr(event, "char", "") or "").lower()
+        if self.model.show_start_help and key != "?":
+            return None
+        callback = self._hotkey_targets.get(key)
+        if callback is None:
+            return None
+        callback()
+        return "break"
+
     def _on_motion(self, event):
         """Update hover state and cursor for registered hit targets."""
 
@@ -370,6 +396,7 @@ class PermitDeskView:
         c = self.canvas
         c.delete("all")
         self._click_targets = []
+        self._hotkey_targets = {}
         self._draw_background(c, width, height)
 
         margin = Space.L
@@ -410,6 +437,11 @@ class PermitDeskView:
             self._draw_session_menu(c, width)
         if self.model.show_start_help:
             self._draw_start_help_overlay(c, width, height)
+        # The utility menu always offers these, so the help card's keys can too.
+        if self.model.game_active:
+            self._hotkey_targets["w"] = self.callbacks.advance_turn
+            self._hotkey_targets["s"] = self.callbacks.scorecard
+        self._hotkey_targets["?"] = self.callbacks.show_help
 
     def _draw_background(self, c, width, height):
         """Paint the desk surface behind every pane (the banner paints its own row on top)."""
@@ -450,11 +482,13 @@ class PermitDeskView:
         y1 = h - Space.S
         meter = max(0, min(100, int(self.model.deadline_meter or 0)))
         fill = Palette.WATCH if meter >= 75 else Palette.ACCENT if self.model.deadline_running else Palette.MUTED
-        day, time = _deadline_day_time(self.model.deadline_text)
+        day, time, held = _deadline_day_time(self.model.deadline_text)
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.SUBTLE, outline=Palette.BORDER, width=1)
         c.create_text(x0 + Space.M, y0 + 6, text="DAY", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
         c.create_text(x0 + Space.M, y0 + 22, text=self._fit_px(day, Type.BODY, "bold", 60), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
-        c.create_text(x0 + 80, y0 + 6, text="TIME", anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
+        # A probe hold (PERMIT_OFFICE_HOLD_DAY) swaps the TIME caption for HELD.
+        caption, caption_fill = ("HELD", Palette.WATCH) if held else ("TIME", Palette.MUTED)
+        c.create_text(x0 + 80, y0 + 6, text=caption, anchor="nw", fill=caption_fill, font=self._font(Type.SMALL, "bold"))
         c.create_text(x0 + 80, y0 + 22, text=self._fit_px(time, Type.BODY, "bold", 80), anchor="nw", fill=Palette.INK, font=self._font(Type.BODY, "bold"))
         # Thin progress bar pinned to the inner bottom edge, clear of the text.
         c.create_rectangle(x0 + 1, y1 - 4, x0 + 1 + int((x1 - x0 - 2) * meter / 100), y1 - 1, fill=fill, outline="")
@@ -1246,6 +1280,8 @@ class PermitDeskView:
         c.create_rectangle(x0, y0, x0 + 4, y1, fill=tone, outline="")
         if enabled:
             self._add_target("case-action", label, (x0, y0, x1, y1), callback)
+            if hotkey:
+                self._hotkey_targets[hotkey.lower()] = callback
         if x1 - x0 < STACKED_CARD_W:
             self._draw_stacked_card_body(c, x0, y0, x1, y1, label, cost, detail, tone, enabled, hotkey, disabled_reason)
             return
@@ -1753,12 +1789,14 @@ def _clip(value, width):
 
 
 def _deadline_day_time(value):
-    """Return day and time tokens from the controller's office-clock text."""
+    """Return day and time tokens, and whether the clock is held, from the controller's office-clock text."""
 
     tokens = str(value or "").split()
+    held = "HELD" in tokens
+    tokens = [token for token in tokens if token != "HELD"]
     day = tokens[0] if tokens else ""
     time = next((token for token in reversed(tokens) if ":" in token), tokens[-1] if tokens else "")
-    return day, time
+    return day, time, held
 
 
 def _folder_key_top(rail_box):

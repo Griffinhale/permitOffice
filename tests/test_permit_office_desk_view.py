@@ -6,6 +6,7 @@ from toolbox import arcpy_permit_office_rules as rules
 from toolbox.permit_office_arcgis.desk_view import (
     DECISION_BRIEF_MIN_H,
     HEADLINE_METRICS,
+    KEY_MODIFIER_MASK,
     STACKED_CARD_W,
     Palette,
     PermitDeskView,
@@ -1908,6 +1909,7 @@ def _view_for_drawing(model):
     view._ledger_by_label = {}
     view._lane_by_action = {}
     view._menu_open = False
+    view._hotkey_targets = {}
     view.root = None
     view._font = lambda size, weight="normal": ("Segoe UI", size, weight)
     view._px_measurer = lambda _size, _weight: None
@@ -2846,3 +2848,102 @@ def test_summary_helpers_report_service_hazard_and_maintenance_backlog():
     assert _service_gap_summary([profile], "child_services") == "mobility gap 40 in D0000"
     assert _hazard_summary([profile]) == "fire band 3 x1"
     assert _maintenance_summary([feature]) == "1 due; lowest condition 22"
+
+
+def test_banner_clock_shows_held_when_the_probe_holds_the_day():
+    """Verify PERMIT_OFFICE_HOLD_DAY's HELD suffix reaches the banner clock."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(
+        rules.CityState(ap=2, money=75),
+        districts,
+        [item],
+        item.item_id,
+        deadline_text="TUE INSPECTION 0:15 HELD",
+        deadline_meter=30,
+        deadline_running=True,
+    )
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+
+    view._draw(1120, 900)
+
+    texts = _text_values(canvas)
+    assert "TUE" in texts
+    assert "0:15" in texts
+    assert "HELD" in texts
+    assert "TIME" not in texts
+
+
+def _key(view, char, state=0, widget=None):
+    """Send one key press to the view's hotkey handler."""
+
+    from types import SimpleNamespace
+
+    event = SimpleNamespace(char=char, keysym=char, state=state, widget=view.canvas if widget is None else widget)
+    return view._on_key(event)
+
+
+def _drawn_case_view(state):
+    """Return a fully drawn view with one selected vendor case."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(state, districts, [item], item.item_id)
+    view, callbacks = _view_for_drawing(model)
+    view.canvas = _FakeCanvas()
+    view._draw(1120, 900)
+    return view, callbacks
+
+
+def test_shown_hotkeys_run_their_enabled_actions():
+    """Verify each badge letter and the help card's W, S, ? keys run their actions."""
+
+    view, callbacks = _drawn_case_view(rules.CityState(ap=2, money=75))
+
+    for char in ("v", "T", "i", "a", "m", "d", "w", "s", "?"):
+        assert _key(view, char) == "break"
+
+    assert [name for name, _args in callbacks.calls] == [
+        "toggle_exhibit",
+        "update_from_map",
+        "inspect",
+        "approve",
+        "approve_mitigated",
+        "deny",
+        "advance_turn",
+        "scorecard",
+        "show_help",
+    ]
+
+
+def test_hotkeys_skip_disabled_actions_modifiers_and_text_entry():
+    """Verify a key cannot do what a click cannot, and typing a seed never decides a case."""
+
+    view, callbacks = _drawn_case_view(rules.CityState(ap=0, money=75))
+
+    _key(view, "a")
+    _key(view, "m")
+    _key(view, "d", state=0x4)
+    _key(view, "d", state=KEY_MODIFIER_MASK & ~0x4)
+    _key(view, "d", widget=object())
+    _key(view, "x")
+
+    assert callbacks.calls == []
+    _key(view, "d")
+    assert [name for name, _args in callbacks.calls] == ["deny"]
+
+
+def test_start_help_card_only_answers_the_help_key():
+    """Verify hotkeys stay off while the start/help card covers the desk."""
+
+    model = build_desk_model(rules.CityState(), {}, [], show_start_help=True)
+    view, callbacks = _view_for_drawing(model)
+    view.canvas = _FakeCanvas()
+    view._draw(1120, 900)
+
+    _key(view, "w")
+    _key(view, "s")
+    _key(view, "?")
+
+    assert [name for name, _args in callbacks.calls] == ["show_help"]
