@@ -48,7 +48,7 @@ from .store import (
 )
 from . import desk_model
 from .desk_model import report_sections
-from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, ReportTab, Type, build_desk_model, desk_font, receipt_metrics
+from .desk_view import DEFAULT_DESK_SIZE, MIN_DESK_H, MIN_DESK_W, DeskCallbacks, Palette, PermitDeskView, ReceiptModel, ReportTab, Type, build_desk_model, desk_font, receipt_metrics
 from .map_redraw import rebuild_output_layers
 from .redraw_plan import (
     DIRTY_DESK_ONLY,
@@ -67,7 +67,6 @@ TICKER_TICK_MS = 90
 TICKER_STEP_PX = 3
 STATUS_TEXT_HOLD_SECONDS = 6.0
 QUEUE_AUTOCLOSE_SECONDS = 2
-STARTUP_MIN_SIZE = (1180, 860)
 PURE_WORKER_TIMEOUT_SECONDS = 1.0
 STARTUP_SESSION_DELAY_MS = 50
 # _finish_decision passes this when the next case could not be read before the redraw.
@@ -155,42 +154,25 @@ def _row_count(path):
 
 
 def _configure_dashboard_window(root):
-    """Apply the startup window size, re-asserting it once after Tk lays out.
+    """Open the desk as a narrow pane at the screen's top left, resizable down to the floor."""
 
-    Tk/Windows can shrink the window below our minimum during initial mapping,
-    so we re-check 80ms later (after the event loop has processed layout) and
-    restore the geometry if it came up too small. The delay is the smallest that
-    reliably lands after layout; falls back to an immediate enforce if `after`
-    is unavailable (e.g. a fake root in tests).
-    """
-
-    geometry = _startup_geometry(root)
-    root.minsize(*STARTUP_MIN_SIZE)
-    root.geometry(geometry)
-
-    def _enforce():
-        try:
-            root.update_idletasks()
-            if root.winfo_width() < STARTUP_MIN_SIZE[0] or root.winfo_height() < STARTUP_MIN_SIZE[1]:
-                root.geometry(geometry)
-        except Exception:
-            pass
+    root.minsize(MIN_DESK_W, MIN_DESK_H)
+    root.geometry(_startup_geometry(root))
     try:
-        root.after(80, _enforce)
+        root.resizable(True, True)
     except Exception:
-        _enforce()
+        pass
 
 
 def _startup_geometry(root):
-    """Return a left-half screen geometry with sane minimum dimensions."""
+    """Return the default pane geometry, shortened to fit a small screen."""
 
     try:
-        screen_w = int(root.winfo_screenwidth())
         screen_h = int(root.winfo_screenheight())
     except Exception:
-        screen_w, screen_h = 2720, 1080
-    width = max(STARTUP_MIN_SIZE[0], screen_w // 2)
-    height = max(STARTUP_MIN_SIZE[1], screen_h - 40)
+        screen_h = 1080
+    width, height = DEFAULT_DESK_SIZE
+    height = max(MIN_DESK_H, min(height, screen_h - 80))
     return f"{width}x{height}+0+0"
 
 
@@ -412,6 +394,8 @@ class DashboardController:
             end_game=self.end_game,
             cancel_queue_autoclose=self.cancel_queue_autoclose,
             pause_queue_autoclose=self._pause_queue_autoclose,
+            choose_mandate=self.choose_mandate,
+            start_initiative=self.start_initiative,
             close=self.root.destroy,
         )
 
@@ -642,7 +626,7 @@ class DashboardController:
             self._report_week = week
 
     def select_desk_tab(self, tab_id):
-        self.selected_desk_tab = "reports" if tab_id == "reports" else "applications"
+        self.selected_desk_tab = tab_id if tab_id in ("reports", "city") else "applications"
         if self.selected_desk_tab == "reports":
             self._pause_queue_autoclose()
         self.reload()

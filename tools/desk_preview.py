@@ -30,7 +30,7 @@ for _path in (ROOT, SCENARIO_DIR):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-SIZES = ((1280, 1000), (1180, 860))
+SIZES = ((480, 820), (400, 560))
 XVFB_FALLBACK = "/run/current-system/sw/bin/Xvfb"
 
 

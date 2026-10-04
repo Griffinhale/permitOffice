@@ -654,53 +654,6 @@ def test_scorecard_files_report_tab_without_dialog(monkeypatch):
     assert controller.selected_report_id == controller.report_tabs[-1].report_id
 
 
-def test_dashboard_enforces_startup_geometry_after_window_maps():
-    """Verify startup sizing claims the left half of the working display."""
-
-    class FakeRoot:
-        def __init__(self):
-            self.calls = []
-            self.width = 900
-            self.height = 780
-            self.screen_width = 2560
-            self.screen_height = 1440
-
-        def geometry(self, value=None):
-            if value is not None:
-                self.calls.append(("geometry", value))
-
-        def minsize(self, width, height):
-            self.calls.append(("minsize", width, height))
-
-        def update_idletasks(self):
-            self.calls.append(("update",))
-
-        def winfo_width(self):
-            return self.width
-
-        def winfo_height(self):
-            return self.height
-
-        def winfo_screenwidth(self):
-            return self.screen_width
-
-        def winfo_screenheight(self):
-            return self.screen_height
-
-        def after(self, delay, callback):
-            self.calls.append(("after", delay))
-            callback()
-            return "after-1"
-
-    root = FakeRoot()
-
-    dashboard._configure_dashboard_window(root)
-
-    assert ("minsize", 1180, 860) in root.calls
-    assert ("geometry", "1280x1400+0+0") in root.calls
-    assert root.calls.count(("geometry", "1280x1400+0+0")) == 2
-
-
 def _install_fake_tkinter(monkeypatch):
     """Install a fake tkinter whose root and tkapp can be watched by weakref.
 
@@ -2494,3 +2447,21 @@ def test_district_initiative_uses_the_map_selection_and_redraws_districts(monkey
 
     assert calls == ["state", ("districts", ["D0101"]), ("redraw", [dashboard.DISTRICTS])]
     assert controller.status_text.startswith("Civic action funded")
+
+
+def test_dashboard_opens_as_a_small_resizable_pane():
+    """Verify the window opens at the pane default and can shrink to the floor, not locked at the old desk size."""
+
+    calls = []
+    root = SimpleNamespace(
+        minsize=lambda w, h: calls.append(("minsize", w, h)),
+        geometry=lambda value: calls.append(("geometry", value)),
+        resizable=lambda w, h: calls.append(("resizable", w, h)),
+        winfo_screenheight=lambda: 1080,
+    )
+
+    dashboard._configure_dashboard_window(root)
+
+    assert calls == [("minsize", 400, 560), ("geometry", "480x820+0+0"), ("resizable", True, True)]
+    short = SimpleNamespace(winfo_screenheight=lambda: 600)
+    assert dashboard._startup_geometry(short) == "480x560+0+0"

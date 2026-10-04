@@ -26,11 +26,17 @@ from toolbox.permit_office_arcgis.desk_view import receipt_metrics  # noqa: E402
 SEED = 2026
 
 
-def _new_game():
-    """Return a deterministic fresh city: state, districts by id, week-one docket."""
+def _new_game(goal=True):
+    """Return a deterministic fresh city: state, districts by id, week-one docket.
+
+    With ``goal`` the first offered mandate is already filed as the season goal.
+    """
 
     state = rules.CityState()
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=SEED)}
+    state.mandate = rules.offer_mandates(SEED, districts)
+    if goal:
+        rules.choose_mandate(state, state.mandate["offer"][0])
     items = rules.generate_docket(state.turn, seed=SEED, state=state, districts=districts)
     for index, item in enumerate(items):
         if not item.target_cell_ids:
@@ -54,6 +60,24 @@ def _report_tab(report_id, title, kind, status, report, state, districts, *, sel
     return ReportTab(
         report_id, title, kind, status, selected, report, affected, receipt_metrics(state), sections=sections, summary=summary
     )
+
+
+def goal_picker():
+    """A new season before the player has filed a goal."""
+
+    state, districts, items = _new_game(goal=False)
+    return build_desk_model(state, districts, items, items[0].item_id, "New game started with seed 2026.", selected_desk_tab="applications")
+
+
+def city_tab():
+    """City tab in week 3 with an earmark running and real week-start trends."""
+
+    state, districts, items = _new_game()
+    start = {"activity": state.activity, "friction": state.friction, "trust": state.trust, "exposure": state.exposure, "money": state.money}
+    rules.start_initiative(state, districts, "earmark", "academic")
+    state.activity += 3
+    state.friction -= 1
+    return build_desk_model(state, districts, items, "", "", selected_desk_tab="city", week_start=start)
 
 
 def applications_mid_week():
@@ -104,8 +128,8 @@ def final_audit():
     """Final audit receipt after the season closes."""
 
     state, districts, items = _new_game()
-    state.turn = state.max_turns + 1
     state.status = "complete"
+    state.outcome = "lost"
     grade, card = rules.scorecard(state, districts, (), items)
     report = dashboard._final_audit_report(grade, card)
     tab = _report_tab("scorecard-1", f"Final Audit: {grade}", "scorecard", "scorecard", report, state, districts, selected=True)
@@ -128,7 +152,9 @@ TICKER_OFFSETS = {
 
 
 SCENARIOS = {
+    "goal-picker": goal_picker,
     "applications": applications_mid_week,
+    "city": city_tab,
     "reports": filed_reports_long,
     "final-audit": final_audit,
 }

@@ -338,7 +338,7 @@ def build_desk_model(
     case = _case_summary(state, districts, selected)
     action_lanes = _action_lanes(state, districts, selected) if selected else ()
     ledger_rows = _ledger_rows(state, districts, active_features, active_items, week_start=week_start)
-    status = status_text or "No report yet. Select a docket row; use Retarget Map when changing targets."
+    status = status_text or "No report yet. Select a case; use Retarget from map to change its targets."
     report_tabs = tuple(report_tabs or _legacy_report_tabs(receipt))
     selected_report_id = _resolve_selected_report_id(report_tabs, selected_report_id)
     if report_tabs and selected_report_id:
