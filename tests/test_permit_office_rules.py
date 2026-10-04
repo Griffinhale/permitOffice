@@ -2839,3 +2839,22 @@ def test_unfed_stakeholder_heat_decays_by_one_at_week_close():
 
     quiet = rules.CityState(turn=3)
     assert "heat eased" not in rules.advance_turn_result(quiet, [], districts, [], {}).report.lower()
+
+
+def test_week_five_close_returns_the_mid_season_audit():
+    """Verify only the week-5 close carries a mid-season audit, matching scorecard (owner D3)."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
+    for turn in (4, 6):
+        assert rules.advance_turn_result(rules.CityState(turn=turn), [], districts, [], {}).mid_audit is None
+
+    state = rules.CityState(turn=5)
+    result = rules.advance_turn_result(state, [], districts, [], {})
+
+    audit = result.mid_audit
+    assert audit is not None and state.turn == 6
+    assert (audit.grade, audit.report) == rules.scorecard(state, districts, [], [])
+    short, criticals = rules.pass_gap(audit)
+    assert short == max(0, rules.PASS_SCORE - audit.score)
+    assert criticals == sum(1 for finding in audit.findings if finding.severity == "critical")
+    assert "Audit snapshot" in result.report

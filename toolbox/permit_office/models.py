@@ -475,6 +475,12 @@ class AuditResult:
     report: str
 
 
+# Audit grade floors: PASS also needs money >= 0 and no critical finding;
+# CONDITIONAL allows at most one critical.
+PASS_SCORE = 70
+CONDITIONAL_SCORE = 45
+
+
 @dataclass
 class TurnAdvanceResult:
     """Structured result from advancing the game loop by one turn."""
@@ -488,6 +494,8 @@ class TurnAdvanceResult:
     upkeep: int = 0
     net: int = 0
     audit: AuditResult | None = None
+    # Set only on the week close that reaches the mid-season audit turn.
+    mid_audit: AuditResult | None = None
 
 
 @dataclass(frozen=True)

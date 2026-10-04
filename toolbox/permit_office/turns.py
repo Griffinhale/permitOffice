@@ -326,7 +326,18 @@ def advance_turn_result(
         upkeep=upkeep,
         net=net,
         audit=audit,
+        mid_audit=audit if not final_week and state.turn == mid_audit_turn else None,
     )
+
+
+def pass_gap(audit: AuditResult) -> tuple[int, int]:
+    """Return (points short of PASS, critical findings) for an audit result.
+
+    PASS also needs money of zero or more; callers show money on its own.
+    """
+
+    criticals = sum(1 for finding in audit.findings if finding.severity == "critical")
+    return max(0, PASS_SCORE - int(audit.score)), criticals
 
 
 
@@ -482,9 +493,9 @@ def generate_audit_result(
 
     score += sum(finding.score_delta for finding in findings)
     critical_count = sum(1 for finding in findings if finding.severity == "critical")
-    if score >= 70 and state.money >= 0 and critical_count == 0:
+    if score >= PASS_SCORE and state.money >= 0 and critical_count == 0:
         grade = "PASS"
-    elif score >= 45 and critical_count <= 1:
+    elif score >= CONDITIONAL_SCORE and critical_count <= 1:
         grade = "CONDITIONAL"
     else:
         grade = "FAIL"
