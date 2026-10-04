@@ -1252,7 +1252,7 @@ def test_prepare_dashboard_session_regenerates_missing_docket_for_saved_game(mon
     assert order == ["map", ("docket", 2026), "refresh"]
 
 
-def test_generate_docket_rows_uses_rules_default_four_item_docket(monkeypatch):
+def test_generate_docket_rows_uses_rules_default_two_case_draw(monkeypatch):
     """Verify persisted ArcGIS dockets follow the rules default row count."""
 
     inserted = []
@@ -1289,8 +1289,8 @@ def test_generate_docket_rows_uses_rules_default_four_item_docket(monkeypatch):
 
     items = store.generate_docket_rows(paths, 2026, object())
 
-    assert len(items) == 4
-    assert len(inserted) == 4
+    assert len(items) == 2
+    assert len(inserted) == 2
     assert saved_states == [{}]
 
 

@@ -53,6 +53,10 @@ def generate_district_profiles(rows: int = 5, cols: int = 5, seed: int = 2026) -
     return profiles
 
 
+# New ordinary cases drawn each week (owner D7); follow-ups come on top, up to the docket cap.
+DRAWN_CASES_PER_WEEK = 2
+
+
 def generate_docket(
     turn: int,
     seed: int = 2026,
@@ -62,11 +66,16 @@ def generate_docket(
     projects: Iterable[ProjectRecord] | dict[str, ProjectRecord] | None = None,
     active_features: Iterable[FeatureInstance] | None = None,
     carried_items: Iterable[DocketItem] | None = None,
+    drawn: int = DRAWN_CASES_PER_WEEK,
 ) -> list[DocketItem]:
-    """Generate the current turn docket, including due follow-up items first."""
+    """Generate the current turn docket: follow-up work first, then ``drawn`` new cases.
+
+    ``count`` caps the whole docket; the weighted draw adds at most ``drawn``
+    ordinary cases on top of due project steps, carried cases and follow-ups.
+    """
 
     scenario = SCENARIO_RULES.get(state.scenario_id if state else "default", SCENARIO_RULES["default"])
-    chosen = _weighted_template_pool(turn, seed, count, state, districts, scenario)
+    chosen = _weighted_template_pool(turn, seed, drawn, state, districts, scenario)
 
     items: list[DocketItem] = []
     for due in _project_due_items(turn, projects):

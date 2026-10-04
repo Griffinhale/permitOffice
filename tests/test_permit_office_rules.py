@@ -974,13 +974,13 @@ def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
         assert metadata["archetype_id"] == archetype.archetype_id
 
 
-def test_generate_docket_has_three_seeded_items_with_templates():
-    """Verify the first seeded docket has three valid template-backed cases."""
-    docket = rules.generate_docket(turn=1, seed=2026, count=3)
-    repeat = rules.generate_docket(turn=1, seed=2026, count=3)
+def test_generate_docket_has_two_seeded_items_with_templates():
+    """Verify the first seeded docket draws two valid template-backed cases."""
+    docket = rules.generate_docket(turn=1, seed=2026)
+    repeat = rules.generate_docket(turn=1, seed=2026)
 
-    assert len(docket) == 3
-    assert len({item.item_id for item in docket}) == 3
+    assert len(docket) == 2
+    assert len({item.item_id for item in docket}) == 2
     assert [item.template_id for item in docket] == [item.template_id for item in repeat]
     assert all(item.template_id in rules.TEMPLATES for item in docket)
     assert all(item.preview_text for item in docket)
@@ -1064,23 +1064,21 @@ def test_docket_weights_reflect_district_population_distribution():
     assert dense_mercantile > sparse_mercantile
 
 
-def test_probe_seed_2028_opens_with_line_point_and_polygon_cases():
-    """Pin the week-1 docket live probes use: a fresh seed-2028 board has every geometry type."""
+def test_probe_seed_2034_opens_with_a_line_and_a_point_case():
+    """Pin the week-1 docket live probes use: a fresh seed-2034 board opens with a line case then a point case."""
 
-    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2028)}
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2034)}
 
-    items = rules.generate_docket(turn=1, seed=2028, state=rules.CityState(), districts=districts)
+    items = rules.generate_docket(turn=1, seed=2034, state=rules.CityState(), districts=districts)
 
     assert [(item.item_id, item.geometry_type) for item in items] == [
         ("T01-01-utility_expansion_trench", "LINE"),
-        ("T01-02-natural_reserve_conversion", "POLYGON"),
-        ("T01-03-business_license_fee_sweep", "POINT"),
-        ("T01-04-mixed_use_rezoning", "POLYGON"),
+        ("T01-02-street_vendor_compact", "POINT"),
     ]
     assert not hasattr(rules, "DEMO_SEQUENCE")
 
 
-def test_twelve_week_docket_generation_keeps_three_or_four_items_available():
+def test_twelve_week_docket_generation_keeps_two_to_four_items_available():
     state = rules.CityState()
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
 
@@ -1093,14 +1091,32 @@ def test_twelve_week_docket_generation_keeps_three_or_four_items_available():
             state=state,
             districts=districts,
         )
-        assert 3 <= len(docket) <= 4
+        assert 2 <= len(docket) <= 4
         assert len({item.item_id for item in docket}) == len(docket)
         seen.update(item.template_id for item in docket)
         if state.turn < state.max_turns:
             rules.advance_turn_result(state, docket, districts)
 
     assert state.max_turns == 12
-    assert len(seen & set(rules.DEMO_TEMPLATE_IDS)) >= 8
+    assert len(seen & set(rules.DEMO_TEMPLATE_IDS)) >= 6
+
+
+def test_quiet_week_draws_two_cases_and_follow_ups_come_on_top():
+    """Verify the weekly draw adds two ordinary cases after follow-ups, within a cap of four (owner D7)."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2026)}
+    quiet = rules.generate_docket(turn=1, seed=2026, state=rules.CityState(), districts=districts)
+    assert len(quiet) == 2
+    assert all(item.template_id in rules.DEMO_TEMPLATE_IDS for item in quiet)
+
+    carried = [
+        rules.DocketItem(f"C{index}", "unpermitted_followthrough", "Follow-through", "POINT", 1, status="carried", target_cell_ids=["D0000"])
+        for index in range(3)
+    ]
+    busy = rules.generate_docket(turn=2, seed=2026, state=rules.CityState(turn=2), districts=districts, carried_items=carried)
+    drawn = [item for item in busy if item.template_id in rules.DEMO_TEMPLATE_IDS]
+    assert len(busy) == 4
+    assert len(drawn) == 1
 
 
 def _active_feature_from_route_item(item, turn):
@@ -2781,19 +2797,20 @@ def test_active_permit_office_files_stay_under_line_budget():
 def test_a_filed_case_cannot_be_decided_again():
     """Verify an approved case rejects a second decision instead of charging and applying it twice."""
 
-    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2028)}
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=5, cols=5, seed=2034)}
     state = rules.CityState()
-    item = rules.generate_docket(turn=1, seed=2028, state=state, districts=districts)[2]
+    item = rules.generate_docket(turn=1, seed=2034, state=state, districts=districts)[1]
     item.target_cell_ids = ["D0101"]
-    assert rules.resolve_decision(state, item, districts, "approve", item.target_cell_ids, seed=2028).ok
-    ap, money = state.ap, state.money
+    assert rules.resolve_decision(state, item, districts, "approve", item.target_cell_ids, seed=2034).ok
+    ap, money, filed = state.ap, state.money, item.status
 
     for action in ("approve", "inspect", "deny"):
-        result = rules.resolve_decision(state, item, districts, action, item.target_cell_ids, seed=2028)
+        result = rules.resolve_decision(state, item, districts, action, item.target_cell_ids, seed=2034)
         assert result.ok is False
         assert "already" in result.report
 
-    assert (state.ap, state.money, item.status) == (ap, money, "active")
+    assert (state.ap, state.money, item.status) == (ap, money, filed)
+    assert filed in ("active", "failed")
     assert "active" not in rules.OPEN_DOCKET_STATUSES
 
 

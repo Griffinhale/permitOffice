@@ -145,11 +145,12 @@ then. When the 150 seconds run out, the week closes by itself on the same path
 as End Week. The clock does not pause during a command. `PERMIT_OFFICE_HOLD_DAY`
 pins it for probe runs.
 
-**Docket.** Up to four cases a week, filled in this order: project steps that
+**Docket.** Two new cases a week (`DRAWN_CASES_PER_WEEK`), plus follow-up work, up to
+four in all, filled in this order: project steps that
 are due, carried cases, pending momentum follow-ups, one maintenance order, one
 civic incident, one stakeholder-heat follow-up (at most once per stakeholder
-cooldown, recorded at week close), then a weighted draw from the
-twelve ordinary templates. The draw is weighted by district type, dominant
+cooldown, recorded at week close), then two cases from a weighted draw over
+the twelve ordinary templates. The draw is weighted by district type, dominant
 citizen groups, population and district stats, so the same seed gives the same
 docket. The docket table is replaced every week; only `carried` cases come
 back. A case awaits a decision while it is `open`, `inspected` or `carried`
@@ -241,9 +242,9 @@ balance tuning toward a fair PASS.
 - Pure rules + adapter shims: `python3 -m pytest -q` (install
   `requirements-dev.txt`, or `uv run pytest -q`, if `pytest` is missing).
 - No seed is locked as a 12-week balance route yet; balance tuning is open.
-- Live ArcGIS run: launch the GP tool, New Game with seed `2028` (its week 1
-  docket has a line, a point and two polygon cases, pinned by
-  `test_probe_seed_2028_opens_with_line_point_and_polygon_cases`), then walk
+- Live ArcGIS run: launch the GP tool, New Game with seed `2034` (its week 1
+  docket is a line case then a point case, pinned by
+  `test_probe_seed_2034_opens_with_a_line_and_a_point_case`), then walk
   point/line/polygon approvals, inspect, deny, toggle exhibit, retarget, and End
   Week through week 12 — confirming exhibits draw, metrics/`display_state` update,
   reports file, and buyout/identity stays legible from map + text.
