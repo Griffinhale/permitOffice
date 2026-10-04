@@ -327,12 +327,13 @@ def _cell_list(value):
 
 # One row per persisted district column. read_districts, write_district_updates,
 # and create_district_board all run over this table, so a new column is one
-# line. A blank or null cell reads as `default` (if any) before decoding. cell_id and
-# district_name are fixed after New Game; last_report is written separately
-# because updates change it only for affected districts.
+# line. A blank or null cell reads as `default` (if any) before decoding. cell_id is
+# fixed after New Game; district_name changes when a buyout converts a district
+# (ADR-9). last_report is written separately because updates change it only for
+# affected districts.
 DISTRICT_CODEC = (
     DistrictField("cell_id", "cell_id", _same, _same, on_update=False),
-    DistrictField("district_name", "name", _same, _same, on_update=False),
+    DistrictField("district_name", "name", _same, _same),
     DistrictField("population", "population", _same, _as_int, 0),
     DistrictField("activity", "activity", _same, _as_int, 0),
     DistrictField("friction", "friction", _same, _as_int, 0),
@@ -436,10 +437,12 @@ def _cell_ids(value):
 
 
 # One row per persisted district column. A new column is one line here plus its
-# schema entry. last_report is written separately (per-decision report text).
+# schema entry. cell_id is fixed after New Game; district_name is rewritten
+# because a buyout conversion renames the district (ADR-9). last_report is
+# written separately (per-decision report text).
 DISTRICT_CODEC = (
     DistrictField("cell_id", "cell_id", _same, _same, on_update=False),
-    DistrictField("district_name", "name", _same, _same, on_update=False),
+    DistrictField("district_name", "name", _same, _same),
     DistrictField("population", "population", _same, int, 0),
     DistrictField("activity", "activity", _same, int, 0),
     DistrictField("friction", "friction", _same, int, 0),
@@ -519,7 +522,7 @@ def write_district_updates(paths, districts, report, affected_ids=None):
     fields = ["cell_id"] + [spec.field for spec in DISTRICT_UPDATE_CODEC] + ["last_report"]
     limits = _json_limits(paths["districts"], DISTRICT_JSON_FIELDS)
     display_changed = False
-    display_fields = ("district_type", "display_state", "prosperity_band", "identity_state")
+    display_fields = ("district_name", "district_type", "display_state", "prosperity_band", "identity_state")
     with arcpy.da.UpdateCursor(paths["districts"], fields) as cursor:
         for row in cursor:
             values = dict(zip(fields, row))

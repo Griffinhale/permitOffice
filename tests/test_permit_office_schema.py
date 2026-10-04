@@ -649,6 +649,24 @@ def test_district_write_distinguishes_display_changes_from_report_changes(monkey
     assert store.write_district_updates(paths, board, "Another report") is False
 
 
+def test_district_rename_survives_update_and_read(monkeypatch):
+    """Verify a buyout rename is saved, so the map label and later reads use it."""
+
+    store, table = _district_store(monkeypatch)
+    paths = {"districts": "districts"}
+    store.create_district_board(paths, 2026, None)
+    board = store.read_districts(paths)
+    old_name = board["D0000"].name
+    board["D0000"].name = "North Quarter"
+
+    assert store.write_district_updates(paths, board, "Converted.", affected_ids=["D0000"]) is True
+    loaded = store.read_districts(paths)
+
+    assert old_name != "North Quarter"
+    assert loaded["D0000"].name == "North Quarter"
+    assert {row["cell_id"]: row["district_name"] for row in table.rows}["D0000"] == "North Quarter"
+
+
 def test_district_read_applies_defaults_to_blank_rows(monkeypatch):
     """Verify blank district columns read back with the documented defaults."""
 
