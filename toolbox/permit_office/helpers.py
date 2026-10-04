@@ -100,17 +100,48 @@ def adjust_stakeholder_pressure(state: CityState, stakeholder: str, amount: int,
         state.stakeholder_heat[stakeholder] = after
     else:
         state.stakeholder_heat.pop(stakeholder, None)
+    if after > before:
+        _mark_heated(state, stakeholder)
     if adjusted > 0 and adjusted >= 2:
         # Large heat changes ripple to allies and rivals so follow-ups feel political.
         for ally in profile.allies:
             if ally != stakeholder:
                 state.stakeholder_heat[ally] = max(0, state.stakeholder_heat.get(ally, 0) + 1)
+                _mark_heated(state, ally)
         for rival in profile.rivals:
             if rival != stakeholder:
                 current = state.stakeholder_heat.get(rival, 0)
                 if current > 0:
                     state.stakeholder_heat[rival] = max(0, current - 1)
     return after - before
+
+
+def _mark_heated(state: CityState, stakeholder: str) -> None:
+    """Note that a stakeholder gained heat this week, which spares it from decay at close."""
+
+    state.stakeholder_memory[f"heated:{stakeholder}"] = int(state.turn)
+
+
+def decay_unfed_heat(state: CityState) -> list[str]:
+    """Lower by one the heat of every stakeholder who gained none this week (owner D2).
+
+    Runs at week close, after unresolved cases have added their heat, and
+    returns the stakeholders whose heat eased.
+    """
+
+    eased = []
+    for stakeholder in sorted(state.stakeholder_heat):
+        if int(state.stakeholder_memory.get(f"heated:{stakeholder}", 0) or 0) == int(state.turn):
+            continue
+        heat = int(state.stakeholder_heat[stakeholder] or 0)
+        if heat <= 0:
+            continue
+        if heat > 1:
+            state.stakeholder_heat[stakeholder] = heat - 1
+        else:
+            state.stakeholder_heat.pop(stakeholder)
+        eased.append(stakeholder)
+    return eased
 
 
 def heat_summary(state: CityState) -> str:

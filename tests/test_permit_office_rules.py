@@ -2821,3 +2821,21 @@ def test_heat_followup_waits_out_its_cooldown():
     for turn in range(4, 4 + cooldown):
         assert _heat_followups(rules.generate_docket(turn, state=state, districts=districts)) == []
     assert len(_heat_followups(rules.generate_docket(4 + cooldown, state=state, districts=districts))) == 1
+
+
+def test_unfed_stakeholder_heat_decays_by_one_at_week_close():
+    """Verify heat gained this week holds at close while unfed heat fades by one (owner D2)."""
+
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
+    state = rules.CityState(turn=3, stakeholder_heat={"compliance_office": 2, "general_public": 1, "arts_council": 3})
+    rules.adjust_stakeholder_pressure(state, "arts_council", 1)
+
+    result = rules.advance_turn_result(state, [], districts, [], {})
+
+    assert state.stakeholder_heat.get("arts_council") == 4
+    assert state.stakeholder_heat.get("compliance_office") == 1
+    assert "general_public" not in state.stakeholder_heat or state.stakeholder_heat["general_public"] == 0
+    assert "heat eased" in result.report.lower()
+
+    quiet = rules.CityState(turn=3)
+    assert "heat eased" not in rules.advance_turn_result(quiet, [], districts, [], {}).report.lower()

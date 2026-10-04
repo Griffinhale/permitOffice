@@ -274,6 +274,7 @@ def advance_turn_result(
             system_notes.append(transition_result.report)
         if buyout_result.report:
             system_notes.append(buyout_result.report)
+    eased = decay_unfed_heat(state)
     final_week = state.turn >= state.max_turns
     if not final_week:
         state.turn += 1
@@ -288,6 +289,8 @@ def advance_turn_result(
     state.week_day = 0
     state.daily_pressure = {}
     heat_text = f" Stakeholder heat added to {heated} unresolved case(s)." if heated else ""
+    if eased:
+        heat_text += f" Heat eased for {', '.join(name.replace('_', ' ') for name in eased)}."
     grievance_text = f" Local grievance files updated for {local_grievances} unresolved target(s)." if local_grievances else ""
     violation_text = f" Overdue violation(s): {overdue_violations}." if overdue_violations else ""
     feature_text = f" Feature updates: {len(feature_updates)}." if feature_updates else ""
