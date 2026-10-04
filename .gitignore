@@ -37,3 +37,6 @@ docs/superpowers/
 
 # Local DAGs, spike probes, and dev planning notes (kept out of the public repo).
 docs/dags/
+
+# Live-run evidence packages copied back from the Windows VM (recordings, logs).
+artifacts/
