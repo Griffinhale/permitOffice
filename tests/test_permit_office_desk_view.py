@@ -1181,6 +1181,49 @@ def test_model_carries_the_goal_and_the_ladder_line():
     assert (model.ladder_rung, model.next_checkpoint) == ("warning", 8)
 
 
+def test_header_week_label_says_closed_after_the_season_ends():
+    """Verify the header WEEK cell reads 12/12 CLOSED once the season is complete (D14)."""
+
+    _item, districts = _vendor_case()
+    state = rules.CityState(turn=12, status="complete", outcome="lost")
+
+    model = build_desk_model(state, districts, [])
+
+    assert model.week_label == "12/12 CLOSED"
+    assert dict((row.label, row.value) for row in model.ledger_rows).get("Week", model.week_label) == model.week_label
+
+
+def test_header_cells_give_a_long_week_label_the_spare_room():
+    """Verify measured header cells let 12/12 CLOSED take room AP does not need, and fall back to equal cells (D14)."""
+
+    _item, districts = _vendor_case()
+    view, _callbacks = _view_for_drawing(build_desk_model(rules.CityState(), districts, []))
+    cells = (("WEEK", "12/12 CLOSED", None), ("AP", "2/2", None), ("$", "60 (+0)", None))
+    view._px_measurer = lambda _size, _weight: (lambda text: 8 * len(text))
+
+    widths = view._header_cell_widths(cells, 330)
+
+    assert widths[0] > widths[1] and sum(widths) <= 330
+    assert widths[0] - widths[1] == 8 * (len("WEEK12/12 CLOSED") - len("AP2/2"))
+    assert view._header_cell_widths(cells, 100) == [70, 70, 70]
+    view._px_measurer = lambda _size, _weight: None
+    assert view._header_cell_widths(cells, 330) == [110, 110, 110]
+
+
+def test_goal_line_puts_the_title_before_the_progress():
+    """Verify the GOAL line leads with the goal title so a narrow pane cuts the progress instead (D15)."""
+
+    _item, districts = _vendor_case()
+    goal = {"offer": ["public_confidence", "quiet_streets", "even_handed"], "chosen": "public_confidence", "baseline": {"type_counts": {"mercantile": 1}, "critical_gaps": 0}}
+    model = build_desk_model(rules.CityState(turn=5, trust=40, mandate=goal), districts, [], game_active=True)
+    view, _callbacks = _view_for_drawing(model)
+
+    text = view._goal_text()
+
+    assert text.startswith("Public confidence")
+    assert model.goal_progress in text
+
+
 def test_ledger_keeps_only_the_approved_meters():
     """Verify Office Standing and the folded meters are gone from the desk (D10)."""
 
@@ -1269,7 +1312,7 @@ def test_pane_header_shows_resources_goal_audit_and_patience():
 
     texts = [str(text) for text in _text_values(canvas)]
     assert "3/12" in texts and "2/2" in texts and "58 (+3)" in texts
-    assert any(text.startswith("trust 41 of 55 (open). Public confidence") for text in texts)
+    assert any(text.startswith("Public confidence: trust 41 of 55 (open)") for text in texts)
     assert any(text.startswith("week 4 checkpoint:") and "to PASS" in text for text in texts)
     assert [text for text in texts if text in rules.AUDIT_RUNGS] == list(rules.AUDIT_RUNGS)
 

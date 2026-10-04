@@ -298,7 +298,7 @@ def build_desk_model(
         audit_criticals=criticals,
         money=int(state.money),
         money_net=int(state.last_net),
-        week_label=f"{state.turn}/{state.max_turns}",
+        week_label=_week_label(state),
         ap_label=f"{state.ap}/{state.max_ap}",
         **goal,
         ladder_rung=rules.AUDIT_RUNGS[max(0, min(len(rules.AUDIT_RUNGS) - 1, int(state.audit_rung or 0)))],
@@ -323,6 +323,13 @@ def _initiative_facts(state, districts) -> dict:
     else:
         note = ""
     return {"initiative_open": not note and state.status != "complete", "initiative_note": note, "earmark_types": types}
+
+
+def _week_label(state):
+    """Return the week as turn/max, with CLOSED once the season has ended."""
+
+    closed = state.status == "complete" or state.turn > state.max_turns
+    return f"{state.turn}/{state.max_turns}{' CLOSED' if closed else ''}"
 
 
 def _goal_facts(state, districts, active_features) -> dict:
@@ -833,7 +840,7 @@ def _ledger_rows(state, districts, active_features=None, docket=None, week_start
     heat = rules.heat_summary(state)
     incidents = rules.incident_summary(districts)
     service_summary = _city_service_summary(districts)
-    week_value = f"{state.turn}/{state.max_turns} CLOSED" if state.status == "complete" or state.turn > state.max_turns else f"{state.turn}/{state.max_turns}"
+    week_value = _week_label(state)
     return (
         LedgerRow("Week", week_value, "neutral", _meter(state.turn, state.max_turns)),
         LedgerRow("AP", f"{state.ap}/{state.max_ap}", "good" if state.ap else "watch", _meter(state.ap, state.max_ap)),

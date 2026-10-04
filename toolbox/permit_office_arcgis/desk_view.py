@@ -416,12 +416,12 @@ class PermitDeskView:
             ("AP", m.ap_label or "-", Palette.GOOD if not m.ap_label.startswith("0/") else Palette.WATCH),
             ("$", f"{m.money} ({m.money_net:+d})" if m.game_active else "-", Palette.GOOD if m.money >= 20 else Palette.WATCH),
         )
-        cell_w = max(70, (menu_x0 - x0 - Space.S) // len(cells))
-        for index, (label, value, color) in enumerate(cells):
-            cx = x0 + index * cell_w
+        cx = x0
+        for (label, value, color), cell_w in zip(cells, self._header_cell_widths(cells, menu_x0 - x0 - Space.S)):
             c.create_text(cx, y + 2, text=label, anchor="nw", fill=Palette.MUTED, font=self._font(Type.SMALL, "bold"))
             label_w = (self._text_w(label, Type.SMALL, "bold") or 24) + Space.XS
             c.create_text(cx + label_w, y, text=self._fit_px(value, Type.TITLE, "bold", cell_w - label_w - Space.S), anchor="nw", fill=color, font=self._font(Type.TITLE, "bold"))
+            cx += cell_w
         self._draw_menu_button(c, menu_x0, y, menu_x0 + 34, y + 26)
         y += top_h
         line_w = width - x0 - Space.M
@@ -430,6 +430,26 @@ class PermitDeskView:
         self._draw_header_line(c, x0, y, line_w, "AUDIT", self._audit_text(), _grade_color(m.audit_grade))
         y += HEADER_LINE_H
         self._draw_ladder(c, x0, y, line_w)
+
+    def _header_cell_widths(self, cells, avail):
+        """Give each top header cell its measured width plus an even share of the rest.
+
+        A long value such as 12/12 CLOSED takes room the short AP cell does not
+        need. Falls back to equal cells when fonts are unmeasured or text overflows.
+        """
+
+        equal = [max(70, avail // len(cells))] * len(cells)
+        needs = []
+        for label, value, _color in cells:
+            label_w = self._text_w(label, Type.SMALL, "bold")
+            value_w = self._text_w(value, Type.TITLE, "bold")
+            if label_w is None or value_w is None:
+                return equal
+            needs.append(label_w + Space.XS + value_w + Space.S)
+        spare = avail - sum(needs)
+        if spare < 0:
+            return equal
+        return [need + spare // len(cells) for need in needs]
 
     def _goal_text(self):
         m = self.model
@@ -440,8 +460,8 @@ class PermitDeskView:
         if not m.goal_title:
             return "Not filed yet. Pick one on the Desk tab."
         mark = "met" if m.goal_met else "open"
-        # Progress first: it is what changes, and the title truncates on a narrow pane.
-        return f"{m.goal_progress} ({mark}). {m.goal_title}"
+        # Title first, so a narrow pane cuts the progress, not the goal's name (D15).
+        return f"{m.goal_title}: {m.goal_progress} ({mark})."
 
     def _audit_text(self):
         m = self.model
