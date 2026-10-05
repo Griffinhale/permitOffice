@@ -1098,6 +1098,41 @@ def test_completed_game_reloads_inline_final_audit_receipt(monkeypatch):
     assert "Office Standing" not in rows_by_label
 
 
+def test_completed_game_desk_and_report_picks_stay_off_the_final_audit(monkeypatch):
+    """Verify a finished season lets the player leave the final audit tab."""
+
+    controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    state = rules.CityState(turn=12, status="complete", audit_rung=0)
+    districts = {"D0000": _profile("D0000")}
+
+    class FakeView:
+        def render(self, model):
+            self.model = model
+
+    controller.view = FakeView()
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: districts)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+
+    controller._record_week_report("Week Closed", "Week 12 closed.", state, districts)
+    week_id = controller.selected_report_id
+    controller.reload()
+    audit_ids = [tab.report_id for tab in controller.report_tabs if tab.kind == "scorecard"]
+    assert len(audit_ids) == 1
+    assert controller.selected_report_id == audit_ids[0]
+
+    controller.select_report(week_id)
+    assert controller.view.model.selected_report_id == week_id
+
+    controller.select_desk_tab("applications")
+    assert controller.view.model.selected_desk_tab == "applications"
+    assert [tab.report_id for tab in controller.report_tabs if tab.kind == "scorecard"] == audit_ids
+
+
 def test_queue_autoclose_final_week_records_same_inline_final_audit_receipt(monkeypatch):
     """Verify timer-driven final closure uses the same inline ending path."""
 

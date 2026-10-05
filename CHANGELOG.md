@@ -43,6 +43,8 @@ are waiting on their live check.
 - Deferring an enforcement, maintenance or incident case showed 0 AP while the
   rules charged 1.
 - The dashboard window no longer frees Tk on another thread (a Pro crash).
+- After the season ended, clicking Desk or a week report jumped straight back
+  to the final audit.
 
 ### Removed
 - Office Standing, threat-track and other standalone meters; their causes now

@@ -507,7 +507,9 @@ class DashboardController:
             state, districts, items, active_features
         )
         self._sync_report_week(state)
-        if state.status == "complete" or state.turn > state.max_turns:
+        if (state.status == "complete" or state.turn > state.max_turns) and not self._has_final_audit_tab():
+            # File the audit once; re-filing it on every reload pulled the Desk
+            # and other report picks back to it (AR21 v8 items 9.1, 13.6).
             self._record_final_audit_receipt(state, districts, active_features, items)
         saved_game = has_saved_game(self.paths) and not offering_fresh
         if saved_game:
@@ -583,6 +585,9 @@ class DashboardController:
         report = _final_audit_report(grade, scorecard)
         self._record_scorecard_tab(title, report, state)
         return grade, self.last_receipt.report
+
+    def _has_final_audit_tab(self):
+        return any(tab.kind == "scorecard" and tab.title.startswith("Final Audit:") for tab in self.report_tabs)
 
     def _record_scorecard_tab(self, title, report, state):
         """Store or select a scorecard report tab."""
