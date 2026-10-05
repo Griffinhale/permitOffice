@@ -176,8 +176,11 @@ lands and this check passes live.
       new docket has point, line and zone cases. The log shows one
       `feature-query` line per feature layer, all after `district-flip` with no
       ring seed or `RefreshLayer` between them. On the recording, lines, points
-      and zones drop together, each once, and the near-empty map lasts no
-      longer than AR18 run11 D3's (about 1 s); district interiors never go white.
+      and zones each drop once, and the near-empty map lasts no longer than
+      AR18 run11 D3's (about 1 s); district interiors never go white. Pro
+      redraws the layers one after another, about 0.13 s apart, even though the
+      queries are written within 2 ms, so the drops need not overlap (AR21 v8:
+      0.43 s gap).
 - [ ] (after AR19, Pro 3.7) In `ar_probe.aprx` on `probe_save.gdb`, save,
       then restart Pro. Open the dashboard, close it right away with no
       decisions, then run one
