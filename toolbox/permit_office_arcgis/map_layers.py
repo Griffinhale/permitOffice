@@ -118,14 +118,7 @@ def use_game_map(messages, map_name=GAME_MAP_NAME, timeout=5.0):
             while name in taken:
                 name = f"{map_name} {suffix}"
                 suffix += 1
-            target = aprx.createMap(name)
-            # createMap adds the user's default basemap (seen live at e9b3c54).
-            # The map is new and ours, so clear it.
-            for layer in list(target.listLayers()):
-                try:
-                    target.removeLayer(layer)
-                except Exception:
-                    pass
+            target = _create_empty_map(aprx, name)
             _log(messages, "MAP", f"created empty game map: {name}")
         _open_map_view(target, messages)
     except Exception as exc:
@@ -146,6 +139,26 @@ def use_game_map(messages, map_name=GAME_MAP_NAME, timeout=5.0):
         return False
     _log(messages, "MAP", f"playing in map: {target_name}")
     return True
+
+
+def _create_empty_map(aprx, name):
+    """Create a project map with no layers.
+
+    createMap adds the user's default basemap (seen live at e9b3c54). The map
+    is new and ours, so clear it.
+    """
+
+    target = aprx.createMap(name)
+    try:
+        layers = list(target.listLayers())
+    except Exception:
+        layers = []
+    for layer in layers:
+        try:
+            target.removeLayer(layer)
+        except Exception:
+            pass
+    return target
 
 
 def _active_map_name():
@@ -183,7 +196,7 @@ def ensure_active_map(messages, map_name=GAME_MAP_NAME):
         _warn(messages, "MAP", "project has no active map and ArcGISProject.createMap is unavailable")
         return None
     try:
-        target = create_map(map_name)
+        target = _create_empty_map(aprx, map_name)
         _open_map_view(target, messages)
         _log(messages, "MAP", f"created and opened map: {getattr(target, 'name', map_name)}")
         return target

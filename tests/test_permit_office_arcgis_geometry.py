@@ -1384,3 +1384,17 @@ def test_use_game_map_leaves_a_clean_map_alone(monkeypatch):
 
     assert map_layers.use_game_map(None) is True
     assert [m.name for m in project.maps] == ["Map1"]
+
+
+def test_ensure_active_map_clears_the_basemap_on_a_map_it_creates(monkeypatch):
+    """Verify a project with no map gets an empty Permit Office map, not one with Pro's default basemap."""
+
+    project = _FakeProject(_FakeMap("unused", ()))
+    project.maps = []
+    project.active = None
+    _install_project(monkeypatch, project)
+
+    target = map_layers.ensure_active_map(None)
+
+    assert target.name == "Permit Office"
+    assert target.listLayers() == []
