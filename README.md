@@ -122,22 +122,28 @@ unzipped folder to the project by dragging it into the **Contents** pane or by
 adding it as a folder connection from the Catalog pane. Then open the Python
 toolbox inside that folder.
 
-1. Open an ArcGIS Pro project.
+1. Open an ArcGIS Pro project. Play in a new map with every layer removed.
+   Pro's default new map adds World Topographic Map and World Hillshade; with
+   them on, the districts go blank for a second at each week close. If the
+   active map has other layers, New Game opens an empty map named
+   `Permit Office` for you.
 2. Add or open `toolbox/arcpy_permit_office.pyt` from the unzipped/repo folder.
-3. Run `Permit Office Prototype`.
-4. Leave **Game Workspace** empty to create/resume the project-default save, or
-   choose a folder/`.gdb` for a separate save.
-5. If no saved game exists, click `New Game` in the dashboard and pick one of
-   the three goals.
+3. Run `Permit Office Prototype`. The tool has no settings; click **Run**.
+4. The main menu opens. **Continue** picks up the saved game where you left
+   it. **New Game** asks for a seed and, when a save exists, warns that it
+   will replace it. **Help** explains the season and the keys.
+5. In a new game, pick one of the three goals.
 6. Keep the dashboard beside the map: select cases, retarget them from map
    selections, inspect, issue or deny, start the week's initiative, and end
    the week.
 
-By default (no **Game Workspace** chosen) the tool creates or resumes
-`permit_office.gdb` under the ArcGIS project's `data/` folder; set the optional
-**Game Workspace** parameter to use a specific geodatabase or folder instead. The
-geodatabase is the save file. The decision cache is rebuilt from it and never
-saved. Don't commit the generated `.gdb`.
+Each project has one save: `permit_office.gdb` in the project's `data/`
+folder. The geodatabase is the save file. The decision cache is rebuilt from
+it and never saved. Don't commit the generated `.gdb`.
+
+For testing, set `PERMIT_OFFICE_WORKSPACE` to a folder or `.gdb` before
+starting Pro to use a throwaway save instead (a folder gets
+`permit_office.gdb` inside it). `PERMIT_OFFICE_PERF=1` logs refresh timings.
 
 ### Run Pure Python Tests
 

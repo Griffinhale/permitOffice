@@ -21,6 +21,11 @@ are waiting on their live check.
 - Hotkeys for every action shown on the desk, and a probe log file
   (`PERMIT_OFFICE_LOG_FILE`).
 - `tools/desk_preview.py`, which renders the dashboard without ArcGIS Pro.
+- A main menu on every Run: Continue (the saved game), New Game (asks before
+  replacing a save) and Help. It tells the player to play in a new map with
+  no other layers, and names any layers the current map has.
+- New Game opens an empty `Permit Office` map when the active map has other
+  layers, such as Pro's default basemap.
 
 ### Changed
 - The dashboard is a narrow, resizable pane (480 x 820, down to 400 x 560) with
@@ -54,6 +59,10 @@ are waiting on their live check.
   now only says the final audit is already filed.
 
 ### Removed
+- The tool's **Game Workspace** and **Log Refresh Timings** parameters. Run
+  uses the project's `data/permit_office.gdb`; testers set
+  `PERMIT_OFFICE_WORKSPACE` for another save and `PERMIT_OFFICE_PERF=1` for
+  timings.
 - Office Standing, threat-track and other standalone meters; their causes now
   appear as report findings.
 - The unused demo docket sequence.

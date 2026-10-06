@@ -137,16 +137,17 @@ overlays by `prosperity_band` and `identity_state`, support layers by
 - `Toolbox` (label/alias/tools) + `PermitOfficePrototype` tool with
   `getParameterInfo` / `execute`, and `canRunInBackground = False`.
 - Parameters via `arcpy.Parameter(displayName=, name=, datatype=, parameterType=,
-  direction=)`: an optional `DEWorkspace`, a derived `GPFeatureLayer` output, and
-  an optional `GPBoolean` perf toggle.
-- `execute` resolves workspace → `ensure_schema` → add layers → open the
-  dashboard → `arcpy.SetParameterAsText(P_OUTPUT, paths["districts"])`.
+  direction=)`: only a derived `GPFeatureLayer` output, so the dialog shows no
+  inputs (ND14).
+- `execute` resolves workspace (`resolve_game_workspace`) → `ensure_schema` →
+  open the dashboard on its main menu → `arcpy.SetParameterAsText(P_OUTPUT, paths["districts"])`.
 - Messages go through `messages.py` helpers wrapping `AddMessage`/`AddWarning`/
   `AddError`.
 
 ## 7. Environment / workspace (`schema.py: resolve_workspace`)
 
-Prefers an explicit `.gdb` arg; else the active project's
+`resolve_game_workspace` passes `PERMIT_OFFICE_WORKSPACE` (testing only) to
+`resolve_workspace`, which prefers an explicit `.gdb` or folder; else the active project's
 `homeFolder/data/permit_office.gdb`; else
 `arcpy.env.scratchWorkspace or scratchFolder or os.getcwd()`. We do **not** set
 `arcpy.env.workspace` — all paths are absolute and passed in a `paths` dict.

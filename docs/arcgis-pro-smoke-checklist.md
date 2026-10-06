@@ -15,15 +15,26 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       (no new modules were added this round, so no change is expected).
 - [ ] `uv run --with pytest pytest -q` is green on the dev box (offline baseline).
 
-## 1. Workspace resolution (respects the optional param)
-- [ ] Run with **Game Workspace empty**. Log shows
-      `[WORKSPACE] no workspace given; using project default: ...\data\permit_office.gdb`
-      and the existing save resumes (or a start screen appears if none).
-- [ ] Run with **Game Workspace = a fresh/empty folder or .gdb**. Log shows
-      `[WORKSPACE] using provided game workspace: <that path>` and a NEW game is
-      offered/started there. It must NOT load the project-default game.
-- [ ] Re-run pointing at the same provided workspace: it resumes that game (not
-      the default).
+## 1. Startup: main menu and save location *
+- [ ] The tool dialog shows no parameters; **Run** is the only action.
+- [ ] In a fresh project with no save, Run opens the main menu with **New Game**
+      and **Help** only, the line "No saved game in this project yet." and the
+      new-map note. Log shows
+      `[WORKSPACE] no workspace given; using project default: ...\data\permit_office.gdb`.
+- [ ] In a map with World Topographic Map / World Hillshade, the menu names
+      them. New Game opens an empty `Permit Office` map and the game layers
+      land there (Contents shows only Permit Office layers).
+- [ ] New Game with a save present says it replaces the saved game; Cancel
+      keeps the menu and the save.
+- [ ] Play a week, close the dashboard, Run again: the menu says
+      "Saved game: week N of 12." and **Continue** resumes the same game.
+- [ ] Remove the Permit Office layers from the map, Run, Continue: the layers
+      come back and the same game resumes.
+- [ ] Reopen a finished season: the menu says "season over"; Continue shows
+      the Week Closed report and the Final Audit in Reports.
+- [ ] With `PERMIT_OFFICE_WORKSPACE=<folder or .gdb>` set before Pro starts,
+      the log shows `[WORKSPACE] PERMIT_OFFICE_WORKSPACE is set` and
+      `using provided game workspace: <that path>`; the project save is untouched.
 
 ## 2. Cold-start resume *
 - [ ] Close Pro entirely, reopen, run the tool against an existing save.

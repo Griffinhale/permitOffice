@@ -239,10 +239,13 @@ geodatabase once, plan the redraw from the actual `DecisionResult`
 (`redraw_plan.py`), redraw only the changed layers (`map_redraw.py`,
 `map_layers.py`), file a report, reload the desk (see `decisions.md`).
 
-**Launch, resume, new game.** The `.pyt` resolves the workspace, runs
-`ensure_schema`, adds output layers and opens the controller. A saved board is
-resumed (its docket regenerated if missing); otherwise the dashboard opens on a
-start screen. New Game clears the game rows, builds the board, seeds city
+**Launch, resume, new game.** The `.pyt` has no visible parameters. It uses
+`PERMIT_OFFICE_WORKSPACE` when set, else the project's
+`data/permit_office.gdb`, runs `ensure_schema` and opens the controller on the
+main menu: Continue (when a save exists), New Game, Help. Continue resumes the
+saved board, re-adding its layers when the map has none (its docket regenerated
+if missing). New Game first opens an empty `Permit Office` map when the active
+map has other layers, then clears the game rows, builds the board, seeds city
 features, writes the state, generates the docket and re-adds the layers.
 
 ## Status
@@ -276,8 +279,7 @@ balance tuning toward a fair PASS.
   point/line/polygon approvals, inspect, deny, toggle exhibit, retarget, and End
   Week through week 12 — confirming exhibits draw, metrics/`display_state` update,
   reports file, and buyout/identity stays legible from map + text.
-- Refresh diagnostics: enable **Log Refresh Timings** in the toolbox or set
-  `PERMIT_OFFICE_PERF=1`; output is a nested `[PERF] turn=... total=...` tree.
+- Refresh diagnostics: set `PERMIT_OFFICE_PERF=1` before starting Pro; output is a nested `[PERF] turn=... total=...` tree.
 - Probe runs: set `PERMIT_OFFICE_LOG_FILE=<path>` before launching Pro to append
   every tagged message (`PERF`, `REDRAW`, `SELECT`, warnings) to that file with
   a UTC timestamp. Pro can offload GP messages out of reach; the file stays.
