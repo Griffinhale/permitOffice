@@ -6,10 +6,6 @@ behavior between minor versions.
 
 ## Unreleased
 
-### Changed
-- The README's install steps now have the player remove Pro's basemap and play
-  on an empty map, the setup the redraw timings were measured on.
-
 ## v0.97.0 - 2026-10-06
 
 Work since v0.95.0. The rules tests and dashboard previews pass. The ArcPy
@@ -45,6 +41,8 @@ checked live in ArcGIS Pro 3.7.
   keep the selections the next case replaces, and draw a district underlay, so
   on a map with no basemap a week close drops each feature layer once, without
   the whole-map white flash.
+- The README's install steps have the player remove Pro's basemap and play on
+  an empty map, the setup the redraw timings were measured on.
 - `geometry.py` is split by job into `proposals.py`, `city_features.py`,
   `map_layers.py`, and `symbology.py`; `geometry.py` re-exports them for one
   release. `symbology.py` was later removed when every layer moved to the
