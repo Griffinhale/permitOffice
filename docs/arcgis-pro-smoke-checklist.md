@@ -6,13 +6,13 @@ repaint, symbology, resume). Each item lists the action and the pass condition.
 Capture a screenshot for the starred (*) items.
 
 Toolbox: `toolbox/arcpy_permit_office.pyt` -> "Permit Office Prototype".
-Tip: keep the Geoprocessing message log open; several checks read its tagged
+Keep the Geoprocessing message log open; several checks read its tagged
 lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 
 ## 0. Pre-flight
 - [ ] ArcGIS Pro module cache is fresh: the `.pyt` reload loop at the top of
       `arcpy_permit_office.pyt` lists every `permit_office_arcgis/*` module in use
-      (no new modules were added this round, so no change is expected).
+      (`test_toolbox_reload_list_matches_modules_on_disk` checks this offline).
 - [ ] `uv run --with pytest pytest -q` is green on the dev box (offline baseline).
 
 ## 1. Startup: main menu and save location *
@@ -50,8 +50,8 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       `district_type`, prosperity overlay, identity overlay) and any new/updated
       feature shows. Log shows `[REBUILD] ... mode=district-readd ...` and, with
       perf enabled, `ring_redraw=...`.
-- [ ] End the week. Districts whose state changed
-      repaint; converted/contested districts show their new fill + name.
+- [ ] End the week. Districts whose state changed repaint; converted/contested
+      districts show their new fill + name.
 - [ ] Confirm the board never goes blank / lines-only after an action. The visible
       district ring slot should stay intact while the prepare slot updates; on
       failure the old visible slot should remain visible.
@@ -161,28 +161,27 @@ lands and this check passes live.
 - [ ] (after AR16) Show and hide the selected case's exhibit, then use Update
       from Map. Each logs `feature-query` and no `RefreshLayer`; the map never
       flashes white.
-- [ ] (after AR18, Pro 3.7+) With `PERMIT_OFFICE_PERF=1` and
-      no other setup, close a week where the new docket has a
-      line or zone case. The log shows `district-flip` and
+- [ ] (after AR18, Pro 3.7+) With `PERMIT_OFFICE_PERF=1` and no other setup,
+      close a week where the new docket has a line or zone case. The log shows `district-flip` and
       `feature-query target='PermitLines'` (or zones), with no ring seed and no
       `RefreshLayer`; the background never flashes white. Note whether the
       city shapes blink, and which layers.
 - [ ] (after AR18) Drag `PermitPoints` (and its `Permit Office Predrawn Points`
       slots) above `PermitLines` in Contents, then make a points-only
       decision. Note whether the lines still blink.
-- [ ] (after AR18) With `PERMIT_OFFICE_PERF=1` set, make a points-only decision whose next case is also a point case.
-      Only the points layer blinks; districts and lines stay put. The log shows
+- [ ] (after AR18) With `PERMIT_OFFICE_PERF=1` set, make a points-only
+      decision whose next case is also a point case. Only the points layer blinks; districts and lines stay put. The log shows
       `[REBUILD] targeted=['PermitPoints']`, one `feature-query target='PermitPoints'`,
       then one `[SELECT] clear kept=[...] cleared=[...]` line that never lists
-      `PermitDistricts` under cleared. Points drop once. No district white. On a map
+      `PermitDistricts` under cleared. Points drop once and no district goes white. On a map
       with no `Permit Office Predrawn Points` slot, none is created and the base
       `PermitPoints` stays visible. The next case's targets and proposal point
       are highlighted afterwards.
 - [ ] (after AR18) New Game: Contents lists `District Underlay` directly below
       `PermitDistricts`, with no labels of its own (each district name drawn
       once). Close a week: district interiors never go white; at most they
-      show the previous fill for a moment.
-      Zones, lines and points each drop at most once, for well under a second.
+      show the previous fill for a moment. Zones, lines and points each drop at
+      most once, for well under a second.
 - [ ] (after AR21, Pro 3.7+) With `PERMIT_OFFICE_PERF=1`, close a week whose
       `[REBUILD]` line names `PermitLines`, `PermitPoints` and `PermitZones`
       (in seed 2034 only the week 12 close did). The log shows the district
@@ -197,8 +196,7 @@ lands and this check passes live.
       0.43 s gap).
 - [ ] (after AR19, Pro 3.7) In `ar_probe.aprx` on `probe_save.gdb`, save,
       then restart Pro. Open the dashboard, close it right away with no
-      decisions, then run one
-      `arcpy.management.GetCount(r"...\probe_save.gdb\PermitPoints")` in the
+      decisions, then run one `arcpy.management.GetCount(r"...\probe_save.gdb\PermitPoints")` in the
       Python window. Pro must not crash with `Tcl_AsyncDelete`. If it does,
       keep event 1000 and the dump, restart Pro, and stop after two crashes.
 - [ ] (after AR6) Swap the district ring a few times. Every slot keeps its full

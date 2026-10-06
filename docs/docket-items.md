@@ -14,8 +14,8 @@ copy voice).
   inspection results, targets). Generated each week, persisted in `PermitDocket`.
 
 Generation (`profiles.py: generate_docket_rows`) weights templates by district
-type mix, good/bad fit, and stat pressure, then samples without replacement —
-while reserving slots for any scenario-mandated priority templates. See the
+type mix, good/bad fit, and stat pressure, then samples without replacement,
+reserving slots for any scenario-mandated priority templates. See the
 weighting comments in `profiles.py` and the determinism ADR in `decisions.md`.
 
 ## Worked template: `connector_corridor`
@@ -80,7 +80,7 @@ DocketItem(
 Each card is a small case file. Before targeting it shows the template preview;
 after targeting it adds a **target census note** from the selected districts;
 `Inspect File` reveals likely supporters, likely objectors, highest local
-grievance, and service-capacity wording — without exposing exact formulas.
+grievance, and service-capacity wording, without exposing exact formulas.
 
 The three action buttons are reused across card kinds:
 
@@ -105,7 +105,7 @@ The locked seed-`2026` demo route uses ten normal templates (three/week):
 
 ## Generated (non-authored) items
 
-Some items aren't drawn from the weighted pool — they're spawned by city state:
+Some items are spawned by city state instead of drawn from the weighted pool:
 
 - **Enforcement** (`unpermitted_followthrough`): appears when a stakeholder
   group's hidden heat crosses its threshold (from denied/ignored permits).
@@ -119,12 +119,12 @@ docket reads as a response to the living city, not a random draw.
 
 ## Consequence model
 
-- Rejected/ignored permits add **stakeholder heat** — not an audit metric, but a
-  pressure layer that can spawn enforcement cards.
+- Rejected/ignored permits add **stakeholder heat**, a pressure layer that can spawn
+  enforcement cards. It is not an audit metric.
 - Approved permits can still **fail**, deterministically from seed, scaled by
   inspection risk band, archetype fit, service capacity, district exposure, and
   whether mitigation was applied. Failure applies `failure_effects` and can leave
   failed-feature state + audit risk instead of the normal active feature.
 - Unattended items at End Week resolve through their `expiration_policy`
   (`missed_window`, `city_momentum`, `momentum_with_followup_risk`, mandatory
-  carryover) — creating future pressure rather than quietly disappearing.
+  carryover), so they create future pressure instead of quietly disappearing.

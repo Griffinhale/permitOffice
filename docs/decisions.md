@@ -1,8 +1,9 @@
 # Architecture Decision Records
 
-Concise record of the load-bearing choices and the alternatives tried and
-rejected — so they aren't re-litigated from scratch. Each entry: the decision,
-why, and what we turned down. Newest spikes fold in their original dated notes.
+The choices the code depends on, and the alternatives tried and rejected,
+kept here so they aren't argued again from scratch. Each entry gives the
+decision, the reason, and what was turned down. Later spikes are folded into
+the entry they affect as dated follow-ups.
 
 ---
 
@@ -32,20 +33,20 @@ runs show UI-freeze pain.
 
 ### ADR-4 — Predrawn rehydrate for district redraws
 **Decision:** `rebuild_output_layers()` defaults district-dirty redraws to a
-**predrawn rehydrate** path: one hidden pre-drawn district snapshot layer is
+predrawn rehydrate path: one hidden pre-drawn district snapshot layer is
 re-added from the GDB, symbolized, refreshed, and swapped visible. Feature layers
 stay refresh-only except when explicitly in the dirty scope; `force_readd=True`
 keeps the full remove→add of every in-scope layer (New Game / schema / symbology
 change). The previous district-family remove+add path remains the fallback if
 rehydrate fails.
-**Why:** `arcpy.RefreshLayer` only redraws the cached renderer — it does **not**
+**Why:** `arcpy.RefreshLayer` only redraws the cached renderer; it does not
 reload GDB attribute writes. The district layers render on attribute values
 (`district_type`, `prosperity_band`, `identity_state`) that change every decision
 and turn, so refresh-only left them frozen on the new-game snapshot (districts
 "not rendering"). Live June 2026 redraw experiments showed district-family
 remove+add was correct but expensive (`rebuild` commonly ~4-5s), volatile overlay
 was cheaper but visually incomplete (districts could disappear), pure predrawn
-visibility swap was extremely fast (~0.004-0.008s) but could keep stale district
+visibility swap was very fast (~0.004-0.008s) but could keep stale district
 symbology, and predrawn rehydrate preserved visual correctness with lower live
 rebuild cost (~1.1-2.3s in the recorded runs). **Rejected:** unconditional
 remove→add of *all* layers every turn (slow, flicker-prone); pure refresh-only
@@ -61,8 +62,8 @@ remains a diagnostic experiment. Retired probes and why are in
 **September 30 follow-up (Pro 3.7):** a live probe found that on Pro 3.7,
 `RefreshLayer` alone does show new attribute values, and so does flipping the
 layer's `definitionQuery` between `1=1` and `2=2`. A later recorded probe showed
-the flip briefly drops the city shapes (labels stay, no white flash). On Pro 3.7+ (`QUERY_FLIP_MIN_PRO` in `map_layers.py`), a district redraw now
-flips the visible ring slot's query instead of re-adding a layer. In live play
+the flip briefly drops the city shapes (labels stay, no white flash). On Pro
+3.7+ (`QUERY_FLIP_MIN_PRO` in `map_layers.py`), a district redraw now flips the visible ring slot's query instead of re-adding a layer. In live play
 the district step took 0.33-0.52 s, down from 1.1-2.3 s. Older Pro and any slot
 that reads another save still use the ring. The whole-map white flash seen on
 each redraw in both builds came from the points `RefreshLayer`, which repaints
@@ -136,7 +137,7 @@ instructions if a live demo ever needs it.
 ### ADR-8 — Unique-value symbology; defer richer renderers
 **Decision:** districts render by `district_type`, support layers by
 `display_state`, via a `UniqueValueRenderer` (with list/string/CIM field-set
-fallbacks for cross-build robustness). **Why:** these channels keep workflow and
+fallbacks so it works across Pro builds). **Why:** these channels keep workflow and
 identity readable now. **Rejected (deferred):** bivariate activity/exposure
 renderer and per-family support layers — overload the same visual channels before
 live ArcGIS evidence proves the need.
@@ -150,14 +151,13 @@ snapshot RNG keys — larger design, follow-up scope (multi-bid now picked up in
 ADR-14).
 
 ### ADR-10 — Small public stat model, hidden internals
-**Decision:** the player-facing audit goals are exactly four vitals — **Activity /
-Friction / Trust / Exposure** — shown on the City Pulse rail under a folded
-**City Health** headline, with **Heat** (stakeholder pressure) and a single
-**Pressure** causes-rollup as the at-a-glance risk signals. Everything else —
-**services**, dissatisfaction, hazards, housing/affordability, maintenance,
-population mix, identity, heat bands, economy detail — is internal/derived and
-surfaces only in the **scorecard report and inspected cases**, not the always-on
-rail (it still influences the four vitals and the audit score). **Why:** a few
+**Decision:** the player-facing audit goals are exactly four vitals (Activity,
+Friction, Trust, Exposure), shown on the City Pulse rail under a folded City
+Health headline, with Heat (stakeholder pressure) and a single Pressure
+causes-rollup as the at-a-glance risk signals. Everything else (services,
+dissatisfaction, hazards, housing/affordability, maintenance, population mix,
+identity, heat bands, economy detail) is internal or derived and surfaces only
+in the scorecard report and inspected cases, not the always-on rail (it still influences the four vitals and the audit score). **Why:** a few
 legible goals + rich docket/scorecard detail beat many shallow exposed systems;
 the same names are used in the rail, the audit report, and the help overlay.
 **Rejected:** keeping Services (or any granular support system) on the always-on
@@ -173,7 +173,7 @@ regression routes (seed `2026`) while staying responsive to city state.
 ### ADR-12 — File-size budget is a soft target
 **Decision:** ~1000 lines is the soft review target; the guardrail test only
 trips at a 1500 hard ceiling. **Why:** keep files reviewable without forcing
-premature splits or comment-stripping when logic genuinely warrants the length.
+premature splits or comment-stripping when the logic needs the length.
 **Rejected:** a hard 1050 cap — pushed against documentation and cohesive modules.
 
 ### ADR-13 — Seeded proposals, not Feature Set drawing
@@ -203,10 +203,10 @@ names-first text and type/culture-driven proposals. Four parts:
 
 3. **Multi-bidder negotiation.** `resolve_buyout_round` no longer just takes the
    top-scored eligible neighbor. Each eligible bidder rolls a deterministic
-   **willingness** check — `chance = clamp(0.05..1.0, 0.25 + 0.01·advantage +
+   willingness check — `chance = clamp(0.05..1.0, 0.25 + 0.01·advantage +
    0.01·capital + 0.05·appetite − 0.05·fatigue − 0.08·overextension)` where
-   `advantage = max(0, bidder.activity − target.activity)` — on a **side RNG
-   stream** keyed `willing:{seed}:{turn}:{bidder}:{target}` so it never disturbs
+   `advantage = max(0, bidder.activity − target.activity)` — on a side RNG
+   stream keyed `willing:{seed}:{turn}:{bidder}:{target}` so it never disturbs
    the shared shuffle/refusal draw order (ADR-11 determinism, existing seeds
    preserved). A flush/eager type clamps to 1.0 and always bids; a marginal one
    often abstains, so a field of eligible neighbors can resolve to one, several,

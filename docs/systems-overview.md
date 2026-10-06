@@ -1,7 +1,7 @@
 # Permit Office — Systems Overview
 
-The canonical "how the whole thing works" reference. Read this first; the other
-docs drill into specific areas (`docket-items.md`, `arcpy-usage.md`,
+How the whole game works. Read this first; the other docs cover specific
+areas (`docket-items.md`, `arcpy-usage.md`,
 `writing-and-tone.md`, `decisions.md`).
 
 ## Concept
@@ -12,10 +12,10 @@ you shape a strange city by filing, approving, inspecting, denying, and
 explaining permits. Feature classes are the save file, map selections are the
 input device, and ArcPy geometry/selection operations are part of the rules.
 
-Design north star: a simple sim loop with **surprising but legible** city
-consequences — not a GIS demo and not a deduction puzzle. Information is partial
-(visible district traits + uncertain side effects); fun comes from event variety
-and watching the city react.
+The design aim is a simple sim loop whose city consequences are surprising
+but legible. It is neither a GIS demo nor a deduction puzzle.
+Information is partial (visible district traits, uncertain side effects); the
+fun comes from event variety and watching the city react.
 
 ## Two-Layer Architecture
 
@@ -56,8 +56,9 @@ The codebase is split so the game is testable without ArcGIS Pro.
 - `desk_view.py` / `desk_model.py` - canvas rendering and its pure data model.
 - `symbology_config.py`, `messages.py`, `rules_loader.py`, `_perf.py` - support.
 
-**Entry point — `toolbox/arcpy_permit_office.pyt`**: the GP tool. Stays thin —
-parameter definitions, schema setup, and launching the dashboard only.
+**Entry point — `toolbox/arcpy_permit_office.pyt`**: the GP tool. It stays
+thin: parameter definitions, schema setup, and launching the dashboard, nothing
+else.
 
 `toolbox/arcpy_permit_office_rules.py` is a compatibility facade re-exporting the
 pure rules so tests and the toolbox import the same `rules` module.
@@ -158,9 +159,9 @@ district, for an incident or a high grievance, service gap, hazard or
 displacement, and for each feature on it that is due for maintenance or
 degraded. Pressure feeds the unresolved-case step below and then resets.
 
-**Docket.** Two new cases a week (`DRAWN_CASES_PER_WEEK`), plus follow-up work, up to
-four in all, filled in this order: project steps that
-are due, carried cases, pending momentum follow-ups, one maintenance order, one
+**Docket.** Two new cases a week (`DRAWN_CASES_PER_WEEK`), plus follow-up
+work, up to four in all, filled in this order: project steps that are due,
+carried cases, pending momentum follow-ups, one maintenance order, one
 civic incident, one stakeholder-heat follow-up (at most once per stakeholder
 cooldown, recorded at week close), then two cases from a weighted draw over
 the twelve ordinary templates. The draw is weighted by district type, dominant
@@ -253,20 +254,24 @@ features, writes the state, generates the docket and re-adds the layers.
 A playable prototype: generated districts, seeded city detail, weighted docket
 templates, inspections, approvals/mitigation, no-AP denials, incidents,
 maintenance follow-ups, recurring economy, projects, audits, symbology, district
-identity/buyout pressure, start/help flow, exhibit controls, and an inline final
-audit receipt.
+identity/buyout pressure, a main menu (Continue, New Game, Help), exhibit
+controls, and an inline final audit receipt.
+
+Checked live for v0.97 on Pro 3.7 through the production tool: full seasons to
+the final audit, the main menu on a fresh save, Continue after closing the
+window and after restarting Pro, reopening a finished season, New Game moving
+to its own empty map, and the narrow pane at both sizes.
 
 Verified live during the v0.95 spike (ArcGIS Pro): district layers render on
-launch and **repaint their evolving state across decisions and End Week** through
-the promoted district-ring redraw path. Support feature rings now share the same
-display-ring strategy, with cheap visible-slot refresh before rehydrate fallback.
-A manual **End Week** control is available from the desk utility menu regardless
-of AP.
+launch and repaint their changing state across decisions and End Week through
+the promoted district-ring redraw path. Support feature rings use the same
+display-ring strategy: a cheap refresh of the visible slot first, rehydrate as
+the fallback. The desk utility menu has a manual End Week control that works
+regardless of AP.
 
-Outstanding evidence (not code): a fuller recorded **live ArcGIS Pro smoke test**
-on the target machine - support-ring repaint across points/lines/zones,
-cold-start resume, legacy field migration on an existing `.gdb`, and 12-week
-balance tuning toward a fair PASS.
+Still missing is evidence, not code: runs on Pro 3.3-3.6, legacy field
+migration on an existing `.gdb`, district colors at week close when the player
+adds a basemap back, and 12-week balance tuning toward a fair PASS.
 
 ## Validation
 
@@ -279,7 +284,8 @@ balance tuning toward a fair PASS.
   point/line/polygon approvals, inspect, deny, toggle exhibit, retarget, and End
   Week through week 12 — confirming exhibits draw, metrics/`display_state` update,
   reports file, and buyout/identity stays legible from map + text.
-- Refresh diagnostics: set `PERMIT_OFFICE_PERF=1` before starting Pro; output is a nested `[PERF] turn=... total=...` tree.
+- Refresh diagnostics: set `PERMIT_OFFICE_PERF=1` before starting Pro; the
+  output is a nested `[PERF] turn=... total=...` tree.
 - Probe runs: set `PERMIT_OFFICE_LOG_FILE=<path>` before launching Pro to append
   every tagged message (`PERF`, `REDRAW`, `SELECT`, warnings) to that file with
   a UTC timestamp. Pro can offload GP messages out of reach; the file stays.

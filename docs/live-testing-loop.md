@@ -2,8 +2,8 @@
 
 The map bugs that matter here are visual and short. A white flash lasts under a
 second. A layer blink lasts about a tenth of one. ArcPy logs cannot see either,
-and ArcGIS Pro only runs on Windows while development happens on Linux. This
-document describes the loop that catches them: a lead session on the Linux
+and ArcGIS Pro only runs on Windows while development happens on Linux. The
+loop that catches them has three parts: a lead session on the Linux
 host, an agent session inside a Windows VM that drives Pro by desktop control,
 and an external screen recorder that timestamps every frame it captures.
 

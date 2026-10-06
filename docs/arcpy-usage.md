@@ -1,7 +1,6 @@
 # How Permit Office Uses Stock arcpy
 
-A map of which ArcPy APIs we lean on, the params we pass, and the patterns we
-follow. All ArcPy lives in the adapter layer (`toolbox/permit_office_arcgis/` +
+Which ArcPy APIs we use, the parameters we pass, and the patterns we follow. All ArcPy lives in the adapter layer (`toolbox/permit_office_arcgis/` +
 the `.pyt`); the pure rules never import arcpy. For *why* the refresh/cursor
 choices were made, see `decisions.md`.
 
@@ -84,14 +83,14 @@ the dashboard must tolerate no open map).
 - **Refresh:** `arcpy.RefreshLayer(name)` per layer.
 
 **Refresh/redraw strategy.** `arcpy.RefreshLayer` only redraws a layer's cached
-renderer - it does **not** reliably reload changed GDB attributes by itself. So
-`rebuild_output_layers()` now defaults to a **district display ring** for
+renderer; by itself it does not reliably reload changed GDB attributes. So
+`rebuild_output_layers()` now defaults to a district display ring for
 district-dirty work: it keeps numeric `Permit Office Predrawn 0/1/2` district
 slots in the map, prepares one hidden slot from the authoritative
 `PermitDistricts` feature class, applies district symbology, swaps visibility
 after successful preparation, and leaves the old visible slot intact on failure.
-This keeps the district re-add correctness requirement without rebuilding the
-whole district family every decision.
+Districts are still re-added for correctness, but the whole district family is
+no longer rebuilt on every decision.
 
 On Pro 3.7 and newer (`QUERY_FLIP_MIN_PRO` in `map_layers.py`), a district-dirty
 redraw first flips the visible slot's `definitionQuery` between `1=1` and `2=2`.
@@ -158,6 +157,6 @@ overlays by `prosperity_band` and `identity_state`, support layers by
 - Cursors are always `with`-scoped, field-explicit, and where-narrowed for
   single-row ops (with a Python guard).
 - ArcPy calls that touch the live map are wrapped in try/except + a `messages`
-  warning, so a missing map or layer degrades gracefully instead of crashing.
+  warning, so a missing map or layer produces a warning instead of a crash.
 - We avoid Feature Set drawing and any ArcGIS Pro pane automation (see
   `decisions.md`); proposals are seeded geometry, retargeted from selections.

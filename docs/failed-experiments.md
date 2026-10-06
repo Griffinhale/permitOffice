@@ -1,7 +1,7 @@
 # Failed Experiments
 
-This log records probes that should not be reintroduced without new live ArcGIS
-evidence. Keep concise entries here; keep current decisions in `docs/decisions.md`.
+Probes that should not come back without new live ArcGIS evidence. Keep
+entries short; current decisions belong in `docs/decisions.md`.
 
 ## 2026-06 - Threaded ArcPy read probe
 
@@ -36,7 +36,7 @@ falls back narrowly to legacy remove/add/refresh.
 **Tried:** swap already-drawn district snapshots for very fast redraws.
 
 **Finding:** fast but not correctness-safe. District renderer-driving attributes
-can stale out, and `predrawn-swap-refresh` produced red/gray close-state map
+can go stale, and `predrawn-swap-refresh` produced red/gray close-state map
 corruption in live runs.
 
 **Decision:** rejected. Do not accept stale symbology or corrupted close-state
@@ -66,8 +66,8 @@ ArcPy unless a future live measurement proves the SDK burden buys enough.
 **Tried:** a standalone dependency-keyed `materialized.py` cache primitive from
 the precomputed-decision-cache spike.
 
-**Finding:** no active runtime caller after the spike. Keeping the file preserved
-an abstraction without leverage.
+**Finding:** no active runtime caller after the spike. Keeping the file only preserved
+an abstraction nothing used.
 
 **Decision:** removed. The one-ply decision-future cache (`futures.py`,
 `cache_keys.py`, `dirty.py`) was later removed too: each click resolved the

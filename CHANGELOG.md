@@ -6,9 +6,11 @@ behavior between minor versions.
 
 ## Unreleased
 
+## v0.97.0 - 2026-10-06
+
 Work since v0.95.0. The rules tests and dashboard previews pass. The ArcPy
-review items below were checked live in ArcGIS Pro; the loop and pane changes
-are waiting on their live check.
+review items, the new loop, the narrow pane and the main-menu start were
+checked live in ArcGIS Pro 3.7.
 
 ### Added
 - Season goals: New Game offers three goals drawn from the seed and the player
@@ -35,12 +37,13 @@ are waiting on their live check.
   build a full week of pressure at the close.
 - Stakeholder heat fades by one a week when nothing feeds it, and heat
   follow-ups respect their cooldown.
-- Layers load from shipped `.lyrx` styles; map redraws requery layers in place,
-  keep selections the next case replaces, and draw a district underlay, so a
-  week close drops each feature layer once with no white flash.
+- Layers load from shipped `.lyrx` styles. Map redraws requery layers in place,
+  keep the selections the next case replaces, and draw a district underlay, so
+  a week close drops each feature layer once with no white flash.
 - `geometry.py` is split by job into `proposals.py`, `city_features.py`,
   `map_layers.py`, and `symbology.py`; `geometry.py` re-exports them for one
-  release.
+  release. `symbology.py` was later removed when every layer moved to the
+  shipped `.lyrx` styles.
 
 ### Fixed
 - Approved cases stayed in the inbox and could be approved a second time,
@@ -73,16 +76,17 @@ are waiting on their live check.
 
 ## v0.95.0 - 2026-06-10
 
-Performance/refactor spike release. The gameplay rules and save format remain
-GDB-authoritative, but the redraw and decision-preview architecture has been
-reshaped around explicit cache primitives and reusable display layers.
+Performance/refactor spike release. The gameplay rules and save format stay
+GDB-authoritative; redraw and decision previews now run on explicit cache
+primitives and reusable display layers.
 
 ### Added
 - Pure cache primitives under `toolbox/permit_office/`: stable cache/state
   hashing, generation tokens, dirty district/layer bitsets, one-ply decision
   future nodes, and materialized-view cache structures.
-- Hydrated redraw planning in the ArcGIS adapter. Actual `DecisionResult` data is
-  combined with cache hints to pick precise district/support layer dirty scopes.
+- Hydrated redraw planning in the ArcGIS adapter: it combines the actual
+  `DecisionResult` data with cache hints to pick district/support layer dirty
+  scopes.
 - A three-slot district display ring (`Permit Office Predrawn 0/1/2`) and support
   rings for points, lines, and zones. The visible slot stays on screen while a
   prepare slot is refreshed or rehydrated.
@@ -122,23 +126,23 @@ civic season inside ArcGIS Pro.
   scorecards, audits) that runs and tests without ArcGIS.
 - ArcGIS adapter: geodatabase-backed save state, generated district geometry,
   proposal/activation, map repaint, and a Tkinter desk dashboard.
-- Content systems: weighted docket templates (shaped by district type **and**
+- Content systems: weighted docket templates (shaped by district type and
   citizen-culture mix), stakeholder heat, population mix and dissatisfaction,
   civic incidents, service gaps, housing, hazards, projects, maintenance,
   recurring economy, and deepened district identity / multi-bidder buyouts.
 - Deterministic seeded generation; seed `2026` is a locked 12-week balance route.
 
 ### Added
-- **District identity deepening (#6):** human-readable district names everywhere
+- District identity (#6): human-readable district names everywhere
   in player-facing text (audit findings, dashboard, reports, previews; `cell_id`
   stays the stable key); district type + citizen-culture distribution shape which
   proposals appear; multi-bidder buyout negotiation with per-bidder willingness
   rolls; a successful buyout shifts the district's type, culture, and resources
   with overextension risk. See ADR-14.
-- **Empty-map fresh start:** launching against a workspace whose `.gdb` holds a
+- Empty-map fresh start: launching against a workspace whose `.gdb` holds a
   save but whose map has no Permit Office layers now opens a New Game prompt
   instead of silently resuming the old board (the save is left untouched).
-- **ArcGIS Pro smoke checklist** (`docs/arcgis-pro-smoke-checklist.md`) for live
+- ArcGIS Pro smoke checklist (`docs/arcgis-pro-smoke-checklist.md`) for live
   beta validation.
 
 ### Changed
@@ -154,10 +158,10 @@ civic season inside ArcGIS Pro.
   2026-06-04). `arcpy.RefreshLayer` does not reload GDB attribute writes, so
   `rebuild_output_layers()` removes + re-adds the district family every rebuild
   (feature layers stay refresh-only). See ADR-4.
-- Resuming a save no longer crashes when a selected case targets several
-  aggrieved districts: grievance bands now aggregate by max (staying within the
-  label range) instead of summing — was an `IndexError` in
-  `target_population_hint`.
+- Resuming a save no longer crashes with an `IndexError` in
+  `target_population_hint` when a selected case targets several aggrieved
+  districts: grievance bands now aggregate by max (staying within the label
+  range) instead of summing.
 - A manual **End Week** control is always available from the desk utility menu
   (previously it only appeared once the queue was empty, trapping players out of
   AP with unaffordable cases queued).
@@ -168,14 +172,14 @@ civic season inside ArcGIS Pro.
   (reproduced on a 3.3.2 project whose active map had no coordinate system).
 
 ### Performance
-- Controller-side **audit-grade cache:** the scorecard (and its district
+- Controller-side audit-grade cache: the scorecard (and its district
   `deepcopy`) recomputes only on game-data writes, not on selection-only redraws.
 - Desk view caches per-model lookup maps and memoizes text-fit across redraws.
 - Fewer geodatabase cursor opens per action (batch proposal-visibility scan,
   read-once reload, memoized district geometry; `selected_cell_ids` reads the
   `cell_id` column directly, falling back to a field scan only on error).
 - A "skip the district re-add when no rendered field changed" experiment was
-  tried and **reverted**: `RefreshLayer` reloads neither symbology nor
+  tried and reverted: `RefreshLayer` reloads neither symbology nor
   attributes, and attribute tables change nearly every action, so the district
   family must re-add unconditionally (ADR-4).
 

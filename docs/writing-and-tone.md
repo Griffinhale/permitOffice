@@ -72,8 +72,8 @@ watching, annoyed, aggrieved, incident-ready.
 ## Practical rules
 
 - **Length:** previews 1–2 sentences; inspect hints 1 sentence; reports a compact
-  paragraph; status lines a clause. Report fields are GDB-truncated (e.g. 1024
-  chars) — keep copy well under.
+  paragraph; status lines a clause. Report fields are truncated by the GDB (e.g.
+  1024 chars), so keep copy well under the limit.
 - **Tense/voice:** present tense, mostly passive/impersonal ("the route is
   approved," "objections are on file") to keep the office register.
 - **Stakeholders are offices/groups**, not individuals: `transit_authority`,

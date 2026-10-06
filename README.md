@@ -9,18 +9,14 @@ The premise is a joke about bureaucracy. The rules are not: every permit is tied
 to map geometry, district state, stakeholder pressure and recurring costs, and
 its consequences show up on the map.
 
-> **Status: public beta.** v0.95.0 is the last tested release. The
-> `docs/presentation` branch reworks the loop (seeded goals, an audit ladder,
-> player initiatives, no real-time clock) and the dashboard (a narrow,
-> resizable pane); its live ArcGIS Pro check is pending. Running the game needs
-> ArcGIS Pro 3.3+ with ArcPy (tested on 3.6 and 3.7). The pure-Python rules and
-> tests run without it.
+> **Status: public beta.** v0.97.0 reworks the loop (seeded goals, an audit
+> ladder, player initiatives, no real-time clock) and the dashboard (a narrow,
+> resizable pane that opens on a main menu), and was played through full
+> seasons in ArcGIS Pro 3.7. The game needs ArcGIS Pro 3.3+ with ArcPy (tested
+> on 3.6 and 3.7). The pure-Python rules and tests run without it.
 
-![Permit Office running as a geoprocessing tool in ArcGIS Pro, with the labeled
-district grid and two districts selected from the active docket](docs/images/01-arcgis-engine-selection.png)
-
-![The district grid: each tile is a district, and approved permits add the point
-and line features drawn on it](docs/images/02-district-board.png)
+![Week 2 of a season: the district grid in ArcGIS Pro beside the Permit Office
+desk, with four open cases and a civic incident selected](docs/images/desk.png)
 
 ## How It Plays
 
@@ -92,16 +88,93 @@ official decisions.
   why each was dropped are in
   [`docs/failed-experiments.md`](docs/failed-experiments.md).
 
-## Quick Start
+## Install On A Fresh Project
+
+You need ArcGIS Pro 3.3 or later. The game was tested on Pro 3.6 and 3.7.
+
+1. **Get the game.** Download the source zip of the latest release from the
+   repository's Releases or Tags page and unzip it, or clone the repository.
+   Keep it in a folder you won't move, such as `Documents\permitOffice`.
+2. **Make a project.** In ArcGIS Pro, start a new project from the **Map**
+   template. Its map comes with a basemap; you can leave it, because New Game
+   moves the game to its own empty map.
+3. **Connect the folder.** In the **Catalog** pane, right-click **Folders** and
+   choose **Add Folder Connection**. Pick the `permitOffice` folder.
+4. **Open the tool.** Expand the folder connection, then `toolbox`, then
+   `arcpy_permit_office.pyt`, and double-click **Permit Office Prototype**. The
+   first time, Pro asks whether to trust the Python toolbox. Answer **Yes**.
+5. **Click Run.** The tool has no settings. The Permit Office window opens on
+   the main menu.
+
+![The main menu on a first run. The current map still has Pro's basemap, so the
+menu names those layers](docs/images/main-menu.png)
+
+6. **Start.** Click **New Game**, keep or change the seed, and click **Start**.
+   The game builds its city in a new, empty map named `Permit Office`. It
+   leaves the basemap out because a basemap under the districts makes them go
+   blank for a second at each week close.
+7. **Pick a goal** on the Desk tab (keys 1-3).
+
+The save is `data\permit_office.gdb` in the project folder, one per project.
+To come back later, open the project, run **Permit Office Prototype** again
+(it is under **Recent** in the Geoprocessing pane), and click **Continue**.
+New Game asks before it replaces a save. Don't commit the generated `.gdb`.
+
+For testing, set `PERMIT_OFFICE_WORKSPACE` to a folder or `.gdb` before
+starting Pro to use a throwaway save instead (a folder gets
+`permit_office.gdb` inside it). `PERMIT_OFFICE_PERF=1` logs refresh timings.
+
+## How To Play
+
+Keep the Permit Office window beside the map. It has three tabs: **Desk** for
+cases and the weekly initiative, **Reports** for everything the office has
+filed, and **City** for city stats and the change since the week began. Pro's
+**Contents** pane is the map key.
+
+**Work a case.** Click a case in the Desk list. Its proposed feature is drawn
+on the map and its target districts are selected. The case card shows the
+budget, what happens if you ignore it, and four actions with their AP and
+dollar cost:
+
+| Key | Action |
+|---|---|
+| I | Inspect the file (1 AP). Reveals risk and violations before you decide. |
+| A | Issue the permit. |
+| M | Issue it with conditions. Costs more and softens the downsides. |
+| D | Deny or defer it. |
+| V | Show or hide the proposed feature on the map. |
+| T | Retarget: select districts on the map, then press T to aim the case at them. |
+
+The button labels change with the case (a civic incident offers Respond,
+Settlement and Defer), but the keys stay the same.
+
+**Start the initiative.** Once a week, under the cases, earmark a district
+type, or fund a civic action or a market push on the districts selected on the
+map.
+
+**End the week.** Click **End Week** (W). The footer says what the close will
+do to the open cases. The week's report opens in Reports.
+
+![The Week Closed report: city effects, buyouts, economy and docket](docs/images/week-closed.png)
+
+**Other keys.** S files a scorecard, ? opens the rules card, and the ☰ menu has
+End Week, New Game, Scorecard, Help and End Game.
+
+The season ends after week 12 with a final audit. Reopening a finished game
+shows the last week's report and the audit again.
+
+![A finished season: 12/12 CLOSED and the final audit in Reports](docs/images/final-audit.png)
+
+## Development
 
 ### Requirements
 
-- **ArcGIS Pro with ArcPy** to run the game. Developed and tested on **ArcGIS
-  Pro 3.6 and 3.7**; **3.3+** is the practical floor. The only version-gated arcpy
-  call is `arcpy.RefreshLayer` (added at Pro 3.3, and already wrapped in a guard, so
-  older builds degrade gracefully rather than crash). The faster district redraw
-  (a definition-query flip) turns on only at Pro 3.7+, where it was tested; older
-  builds use the display ring. Everything else is Pro 2.x-era.
+- **ArcGIS Pro with ArcPy** to run the game. Developed and tested on ArcGIS
+  Pro 3.6 and 3.7; 3.3 is the practical floor. The only version-gated arcpy
+  call is `arcpy.RefreshLayer` (added at Pro 3.3, and wrapped in a guard, so
+  older builds log a warning instead of crashing). The faster district redraw
+  (a definition-query flip) turns on only at Pro 3.7+, where it was tested;
+  older builds use the display ring. Everything else is Pro 2.x-era.
 - **Python 3.11+** for the pure-rules test suite (this runs without ArcGIS).
   With [uv](https://docs.astral.sh/uv/):
 
@@ -115,37 +188,7 @@ official decisions.
   `python3 -m pytest -q`. pip and uv only set up the offline tests; the game
   itself runs on ArcGIS Pro's bundled Python and arcpy.
 
-### Run In ArcGIS Pro
-
-For a downloaded release, unzip the folder first. In ArcGIS Pro, add the
-unzipped folder to the project by dragging it into the **Contents** pane or by
-adding it as a folder connection from the Catalog pane. Then open the Python
-toolbox inside that folder.
-
-1. Open an ArcGIS Pro project. Play in a new map with every layer removed.
-   Pro's default new map adds World Topographic Map and World Hillshade; with
-   them on, the districts go blank for a second at each week close. If the
-   active map has other layers, New Game opens an empty map named
-   `Permit Office` for you.
-2. Add or open `toolbox/arcpy_permit_office.pyt` from the unzipped/repo folder.
-3. Run `Permit Office Prototype`. The tool has no settings; click **Run**.
-4. The main menu opens. **Continue** picks up the saved game where you left
-   it. **New Game** asks for a seed and, when a save exists, warns that it
-   will replace it. **Help** explains the season and the keys.
-5. In a new game, pick one of the three goals.
-6. Keep the dashboard beside the map: select cases, retarget them from map
-   selections, inspect, issue or deny, start the week's initiative, and end
-   the week.
-
-Each project has one save: `permit_office.gdb` in the project's `data/`
-folder. The geodatabase is the save file. The decision cache is rebuilt from
-it and never saved. Don't commit the generated `.gdb`.
-
-For testing, set `PERMIT_OFFICE_WORKSPACE` to a folder or `.gdb` before
-starting Pro to use a throwaway save instead (a folder gets
-`permit_office.gdb` inside it). `PERMIT_OFFICE_PERF=1` logs refresh timings.
-
-### Run Pure Python Tests
+### Run The Tests
 
 ```bash
 uv run pytest -q          # or: python3 -m pytest -q
@@ -195,20 +238,21 @@ stand-in for Segoe UI, so spacing is close, not exact.
 
 ## Current Status
 
-**Playable offline, pending live check:** seeded goals, the week 4/8/12 audit
-ladder, two cases a week, weekly initiatives, no real-time clock, and the
-narrow dashboard pane. The rules and the pane are covered by the offline tests
-and previews; the live ArcGIS Pro pass is the next step.
+Checked live in ArcGIS Pro 3.7 for v0.97: the main menu on a fresh save, New
+Game in its own empty map, seeded goals, the week 4/8/12 audit ladder, two
+cases a week, weekly initiatives, the narrow dashboard pane, full seasons to
+the final audit, and reopening a finished game.
 
-**Verified live (v0.95 and the ArcPy review):** generated districts and city
+Checked live earlier (v0.95 and the ArcPy review): generated districts and city
 detail, weighted dockets, inspections, approvals and denials, incidents,
 maintenance, recurring economy, projects, buyouts, the final audit, shipped
 `.lyrx` layer styles, and a week-close redraw that drops each feature layer
 once with no white flash. How those map bugs were caught is in
 [`docs/live-testing-loop.md`](docs/live-testing-loop.md).
 
-**Open:** a fair 12-week balance pass for the new goals and initiatives, and
-the week-close redraw batching probe.
+Open: a fair 12-week balance pass for the new goals and initiatives, runs on
+Pro 3.3-3.6, and whether district colors hold at week close when the player
+adds a basemap back to the game map.
 
 ## License
 
