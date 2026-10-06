@@ -45,6 +45,8 @@ are waiting on their live check.
 - The dashboard window no longer frees Tk on another thread (a Pro crash).
 - After the season ended, clicking Desk or a week report jumped straight back
   to the final audit.
+- A maintenance order for a line or zone feature never placed its map point,
+  and approving it failed until the player picked one district by hand.
 
 ### Removed
 - Office Standing, threat-track and other standalone meters; their causes now

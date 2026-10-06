@@ -1256,3 +1256,27 @@ def test_district_redraw_flips_base_districts_in_place_when_no_ring_slot(monkeyp
     assert [(layer.visible, layer.definitionQuery) for layer in overlays] == [(True, "1=1"), (True, "1=1")]
     assert any("path=district-flip" in text and "target='PermitDistricts'" in text for text in messages.messages)
     geometry._PRO_VERSION_CACHE.clear()
+
+
+def test_maintenance_point_exhibit_uses_one_district_of_line_feature(monkeypatch):
+    """Verify a maintenance order for a two-district feature still seeds and approves its point."""
+
+    placed = []
+    monkeypatch.setattr(proposals, "insert_or_replace_proposal", lambda paths, item, target_ids, messages: placed.append(list(target_ids)) or list(target_ids))
+    monkeypatch.setattr(proposals, "purge_proposed_features", lambda paths: None)
+    monkeypatch.setattr(proposals, "_district_records", lambda paths: {})
+    item = rules.DocketItem(
+        "T08-04-feature_maintenance_order-city",
+        rules.MAINTENANCE_TEMPLATE_ID,
+        "Maintenance Order",
+        "POINT",
+        8,
+        target_cell_ids=["D0200", "D0201"],
+        subject_feature_id="FEATURE-LINE",
+    )
+
+    proposals.seed_docket_proposals(_paths(), [item], 2034, FakeMessages())
+    proposals.ensure_case_proposal(_paths(), item, 2034, FakeMessages(), list(item.target_cell_ids))
+
+    assert placed == [["D0200"], ["D0200"]]
+    assert item.target_cell_ids == ["D0200", "D0201"]

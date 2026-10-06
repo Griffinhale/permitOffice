@@ -76,7 +76,7 @@ def ensure_case_proposal(paths, item, seed, messages, target_ids=None) -> list[s
     if item.status not in ("open", "inspected", "carried"):
         return list(item.target_cell_ids or ())
     if target_ids is not None:
-        return insert_or_replace_proposal(paths, item, list(target_ids), messages)
+        return insert_or_replace_proposal(paths, item, _exhibit_targets(item, target_ids), messages)
 
     existing = _case_proposal_targets(paths, item.item_id)
     if existing:
@@ -87,7 +87,19 @@ def ensure_case_proposal(paths, item, seed, messages, target_ids=None) -> list[s
 
     districts = _district_records(paths)
     targets = list(item.target_cell_ids or _suggest_targets(item, districts, seed))
-    return insert_or_replace_proposal(paths, item, targets, messages)
+    return insert_or_replace_proposal(paths, item, _exhibit_targets(item, targets), messages)
+
+
+def _exhibit_targets(item, target_ids):
+    """Pin a maintenance order's point exhibit to one district of its feature."""
+
+    # Maintenance orders copy every district of the subject feature, so a line
+    # or zone feature hands the point exhibit two targets. The decision resolves
+    # through subject_feature_id, so the first district is enough for the map.
+    targets = list(target_ids)
+    if item.template_id == rules.MAINTENANCE_TEMPLATE_ID and item.geometry_type == "POINT":
+        return targets[:1]
+    return targets
 
 
 def hide_case_proposal(paths, item_id) -> bool:
@@ -362,7 +374,7 @@ def seed_docket_proposals(paths, items, seed, messages):
             continue
         target_ids = item.target_cell_ids or _suggest_targets(item, districts, seed)
         try:
-            insert_or_replace_proposal(paths, item, target_ids, messages)
+            insert_or_replace_proposal(paths, item, _exhibit_targets(item, target_ids), messages)
         except Exception as exc:
             _warn(messages, "PREVIEW", f"could not seed proposal for {item.item_id}: {exc}")
 
