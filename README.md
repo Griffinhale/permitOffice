@@ -95,9 +95,12 @@ You need ArcGIS Pro 3.3 or later. The game was tested on Pro 3.6 and 3.7.
 1. **Get the game.** Download the source zip of the latest release from the
    repository's Releases or Tags page and unzip it, or clone the repository.
    Keep it in a folder you won't move, such as `Documents\permitOffice`.
-2. **Make a project.** In ArcGIS Pro, start a new project from the **Map**
-   template. Its map comes with a basemap; you can leave it, because New Game
-   moves the game to its own empty map.
+2. **Make a project and empty its map.** In ArcGIS Pro, start a new project
+   from the **Map** template. In the **Contents** pane, right-click each
+   basemap layer (**World Topographic Map** and **World Hillshade**) and choose
+   **Remove**, so the map has no layers at all. Play on this empty map and
+   don't add a basemap back: a basemap under the districts makes them go blank
+   for 1-2 seconds at every week close.
 3. **Connect the folder.** In the **Catalog** pane, right-click **Folders** and
    choose **Add Folder Connection**. Pick the `permitOffice` folder.
 4. **Open the tool.** Expand the folder connection, then `toolbox`, then
@@ -106,13 +109,13 @@ You need ArcGIS Pro 3.3 or later. The game was tested on Pro 3.6 and 3.7.
 5. **Click Run.** The tool has no settings. The Permit Office window opens on
    the main menu.
 
-![The main menu on a first run. The current map still has Pro's basemap, so the
-menu names those layers](docs/images/main-menu.png)
+![The main menu on a first run. This map still had Pro's basemap, so the menu
+names those layers and warns about them](docs/images/main-menu.png)
 
 6. **Start.** Click **New Game**, keep or change the seed, and click **Start**.
-   The game builds its city in a new, empty map named `Permit Office`. It
-   leaves the basemap out because a basemap under the districts makes them go
-   blank for a second at each week close.
+   The game builds its city in the empty map. If the map still has other
+   layers, such as a basemap you missed, New Game opens a new, empty map named
+   `Permit Office` and plays there instead.
 7. **Pick a goal** on the Desk tab (keys 1-3).
 
 The save is `data\permit_office.gdb` in the project folder, one per project.
@@ -251,8 +254,8 @@ drops each feature layer once with no whole-map white flash. How those map bugs 
 [`docs/live-testing-loop.md`](docs/live-testing-loop.md).
 
 Known issue: with a basemap in the game map, the district fills go blank for
-about 1-2 seconds at every week close. New Game plays in an empty map to avoid
-it.
+about 1-2 seconds at every week close. Play on an empty map with every other
+layer removed.
 
 Open: a fair 12-week balance pass for the new goals and initiatives, runs on
 Pro 3.3-3.6, and the save at the project's default path, which so far is

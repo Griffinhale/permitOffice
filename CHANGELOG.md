@@ -6,6 +6,10 @@ behavior between minor versions.
 
 ## Unreleased
 
+### Changed
+- The README's install steps now have the player remove Pro's basemap and play
+  on an empty map, the setup the redraw timings were measured on.
+
 ## v0.97.0 - 2026-10-06
 
 Work since v0.95.0. The rules tests and dashboard previews pass. The ArcPy
