@@ -173,9 +173,12 @@ lands and this check passes live.
       show the previous fill for a moment.
       Zones, lines and points each drop at most once, for well under a second.
 - [ ] (after AR21, Pro 3.7+) With `PERMIT_OFFICE_PERF=1`, close a week whose
-      new docket has point, line and zone cases. The log shows one
-      `feature-query` line per feature layer, all after `district-flip` with no
-      ring seed or `RefreshLayer` between them. On the recording, lines, points
+      `[REBUILD]` line names `PermitLines`, `PermitPoints` and `PermitZones`
+      (in seed 2034 only the week 12 close did). The log shows the district
+      flip's `feature-query target='PermitDistricts'` line, then one
+      `feature-query` line per feature layer, then the
+      `path=district-flip status=ok` summary that closes the block. No ring
+      seed or `RefreshLayer` appears in the block. On the recording, lines, points
       and zones each drop once, and the near-empty map lasts no longer than
       AR18 run11 D3's (about 1 s); district interiors never go white. Pro
       redraws the layers one after another, about 0.13 s apart, even though the
