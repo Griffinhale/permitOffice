@@ -97,7 +97,7 @@ def other_map_layers():
         return ()
 
 
-def use_game_map(messages, map_name=GAME_MAP_NAME):
+def use_game_map(messages, map_name=GAME_MAP_NAME, timeout=5.0):
     """Open an empty Permit Office map when the active map has other layers.
 
     Reuses a project map named ``map_name`` (or ``map_name 2`` and so on) that
@@ -119,17 +119,42 @@ def use_game_map(messages, map_name=GAME_MAP_NAME):
                 name = f"{map_name} {suffix}"
                 suffix += 1
             target = aprx.createMap(name)
+            # createMap adds the user's default basemap (seen live at e9b3c54).
+            # The map is new and ours, so clear it.
+            for layer in list(target.listLayers()):
+                try:
+                    target.removeLayer(layer)
+                except Exception:
+                    pass
             _log(messages, "MAP", f"created empty game map: {name}")
         _open_map_view(target, messages)
     except Exception as exc:
         _warn(messages, "MAP", f"could not open an empty game map: {exc}")
         return False
+    # openView returns before Pro makes the map active; layers added before then
+    # land in the old map.
+    target_name = getattr(target, "name", map_name)
+    deadline = time.perf_counter() + timeout
+    while _active_map_name() != target_name and time.perf_counter() < deadline:
+        time.sleep(0.1)
+    if _active_map_name() != target_name:
+        _warn(messages, "MAP", f"Pro did not make {target_name} the active map within {timeout:.0f} s")
+        return False
     leftover = other_map_layers()
     if leftover:
         _warn(messages, "MAP", f"active map still has other layers: {', '.join(leftover[:3])}")
         return False
-    _log(messages, "MAP", f"playing in map: {getattr(target, 'name', map_name)}")
+    _log(messages, "MAP", f"playing in map: {target_name}")
     return True
+
+
+def _active_map_name():
+    """Return the active map's name, or "" when Pro has none or cannot say."""
+
+    try:
+        return getattr(arcpy.mp.ArcGISProject("CURRENT").activeMap, "name", "") or ""
+    except Exception:
+        return ""
 
 
 def ensure_active_map(messages, map_name=GAME_MAP_NAME):

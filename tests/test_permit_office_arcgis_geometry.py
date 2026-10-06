@@ -1280,3 +1280,107 @@ def test_maintenance_point_exhibit_uses_one_district_of_line_feature(monkeypatch
 
     assert placed == [["D0200"], ["D0200"]]
     assert item.target_cell_ids == ["D0200", "D0201"]
+
+
+# ----- ND14 empty game map ----------------------------------------------------
+
+
+class _FakeMap:
+    """A map with named layers; openView makes it active after a delay like Pro does."""
+
+    def __init__(self, name, layers, project=None, activate_after=0):
+        self.name = name
+        self.layers = [SimpleNamespace(name=layer) for layer in layers]
+        self.project = project
+        self.activate_after = activate_after
+
+    def listLayers(self):
+        return list(self.layers)
+
+    def removeLayer(self, layer):
+        self.layers.remove(layer)
+
+    def openView(self):
+        self.project.pending = (self, self.activate_after)
+
+
+class _FakeProject:
+    """ArcGISProject('CURRENT') stand-in whose activeMap lags openView by some polls."""
+
+    def __init__(self, active, basemap=("World Topographic Map", "World Hillshade"), activate_after=2):
+        self.maps = [active]
+        self.active = active
+        self.pending = None
+        self.basemap = basemap
+        self.activate_after = activate_after
+        active.project = self
+
+    @property
+    def activeMap(self):
+        if self.pending is not None:
+            target, polls = self.pending
+            if polls <= 0:
+                self.active, self.pending = target, None
+            else:
+                self.pending = (target, polls - 1)
+        return self.active
+
+    def listMaps(self):
+        return list(self.maps)
+
+    def createMap(self, name):
+        # Pro's createMap adds the user's default basemap.
+        new = _FakeMap(name, self.basemap, self, self.activate_after)
+        self.maps.append(new)
+        return new
+
+
+def _install_project(monkeypatch, project):
+    monkeypatch.setattr(map_layers.arcpy, "mp", SimpleNamespace(ArcGISProject=lambda _name: project), raising=False)
+    monkeypatch.setattr(map_layers.time, "sleep", lambda _seconds: None)
+
+
+def test_use_game_map_clears_the_basemap_pro_adds_and_waits_for_the_switch(monkeypatch):
+    """Verify New Game's map is really empty and active before layers are added (live run e9b3c54)."""
+
+    project = _FakeProject(_FakeMap("Map3", ("World Topographic Map", "World Hillshade")))
+    _install_project(monkeypatch, project)
+
+    assert map_layers.use_game_map(None) is True
+    assert project.activeMap.name == "Permit Office"
+    assert project.activeMap.listLayers() == []
+    assert map_layers.other_map_layers() == ()
+
+
+def test_use_game_map_reuses_an_empty_permit_office_map(monkeypatch):
+    """Verify an existing Permit Office map with only game layers is reused, not duplicated."""
+
+    project = _FakeProject(_FakeMap("Map3", ("World Hillshade",)))
+    existing = _FakeMap("Permit Office", (map_layers.DISTRICTS,), project, activate_after=1)
+    project.maps.append(existing)
+    _install_project(monkeypatch, project)
+
+    assert map_layers.use_game_map(None) is True
+    assert project.activeMap is existing
+    assert [m.name for m in project.maps] == ["Map3", "Permit Office"]
+
+
+def test_use_game_map_reports_failure_when_pro_never_switches(monkeypatch):
+    """Verify a map view that never becomes active returns False so New Game warns instead."""
+
+    project = _FakeProject(_FakeMap("Map3", ("World Hillshade",)), activate_after=10**9)
+    _install_project(monkeypatch, project)
+    clock = iter(range(0, 10**6))
+    monkeypatch.setattr(map_layers.time, "perf_counter", lambda: next(clock))
+
+    assert map_layers.use_game_map(None) is False
+
+
+def test_use_game_map_leaves_a_clean_map_alone(monkeypatch):
+    """Verify nothing is created or opened when the active map has only game layers."""
+
+    project = _FakeProject(_FakeMap("Map1", (map_layers.DISTRICTS, "Permit Office Predrawn 1")))
+    _install_project(monkeypatch, project)
+
+    assert map_layers.use_game_map(None) is True
+    assert [m.name for m in project.maps] == ["Map1"]
