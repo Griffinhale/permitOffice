@@ -1215,8 +1215,8 @@ class DashboardController:
                     grade, final_report = self._record_final_audit_receipt(state, districts, active_features, items)
                     report = f"Final audit already filed. Scorecard: {grade}."
                     command_finish(self.paths, command_id, "applied", report)
-                    rebuild_output_layers(self.paths, self.messages, remove_scope_override={DISTRICTS})
-                    self.district_layer = DISTRICTS
+                    # Nothing was written, so the map stays as drawn. A rebuild here
+                    # ran RefreshLayer on every feature layer (v10 4e: ~6 s, map flash).
                     self.status_var.set(report)
                     return
                 with perf_block("resolve"):
@@ -1244,6 +1244,9 @@ class DashboardController:
                 self.district_layer = DISTRICTS
                 prefix = "Auto-close: " if auto else ""
                 if state.status == "complete":
+                    # The closing week's report carries the season verdict and
+                    # achievements; file it before the audit, which stays selected.
+                    self._record_week_report("Week Closed", report, state, districts)
                     _grade, final_report = self._record_final_audit_receipt(state, districts, active_features, items)
                     self.status_var.set(f"{prefix}{final_report}")
                 else:

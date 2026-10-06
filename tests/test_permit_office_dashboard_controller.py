@@ -1021,7 +1021,7 @@ def test_advance_turn_after_final_audit_is_idempotent(monkeypatch):
 
     controller.advance_turn()
 
-    assert order == ["command", "rebuild"]
+    assert order == ["command"]
     assert controller.status_text == "Final audit already filed. Scorecard: CONDITIONAL."
     assert controller.last_receipt is not None
     assert controller.last_receipt.title.startswith("Final Audit:")
@@ -1062,6 +1062,36 @@ def test_advance_turn_records_inline_final_audit_receipt(monkeypatch):
     assert controller.selected_desk_tab == "reports"
     assert controller.report_tabs[-1].kind == "scorecard"
     assert controller.report_tabs[-1].selected is True
+
+
+def test_final_close_files_its_own_week_report_with_the_season_verdict(monkeypatch):
+    """Verify week 12's report, not week 11's, sits beside the final audit (v10 4b)."""
+
+    controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda **kwargs: None
+    state = rules.CityState(turn=12)
+    districts = {"D0000": _profile("D0000")}
+    controller._record_week_report("Week Closed", "Advanced week. Week 11 closed.", rules.CityState(turn=12), districts)
+
+    for name in ("write_state", "write_projects", "write_district_updates", "write_active_features", "generate_docket_rows", "rebuild_output_layers", "command_finish"):
+        monkeypatch.setattr(dashboard, name, lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "command_insert", lambda paths, action, item_id, target_ids: "CMD-1")
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: districts)
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_projects", lambda paths: {})
+
+    controller.advance_turn()
+
+    weeks = [tab for tab in controller.report_tabs if tab.kind == "week"]
+    audits = [tab for tab in controller.report_tabs if tab.kind == "scorecard"]
+    assert len(weeks) == 1 and len(audits) == 1
+    assert "Week 11 closed" not in weeks[0].report
+    assert "Season lost" in weeks[0].report
+    assert controller.selected_report_id == audits[0].report_id
 
 
 def test_completed_game_reloads_inline_final_audit_receipt(monkeypatch):
