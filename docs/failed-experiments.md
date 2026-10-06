@@ -73,3 +73,18 @@ an abstraction without leverage.
 `cache_keys.py`, `dirty.py`) was later removed too: each click resolved the
 decision once for the cache and again for real, and the hint never changed what
 was redrawn. Redraw planning now comes from the actual result alone.
+
+## 2026-10 - Feature copies under lines, points and zones (AR24)
+
+**Tried:** an unlabeled, unselectable copy beneath each feature layer, its
+query toggled just before the live layers at every redraw (c5eace2, reverted).
+
+**Finding:** on the empty-map setup the copies kept lines and points drawn,
+but the extra ArcPy pass between the district flip and the live batch left
+district fills and the District Underlay white across ~93% of the board for
+~0.8-1.1 s at every close; without the copies, 11% for ~0.2 s. Week 12 close
+took 3.4 s instead of 1.4 s. Evidence: artifacts/ar24-ab-e0be924/empty and
+artifacts/ar24-ab-b4fa792/empty.
+
+**Decision:** reverted for 0.97. Retry only with a way to know when Pro has
+finished drawing (SDK draw events, AR25), not by adding more ArcPy calls.
