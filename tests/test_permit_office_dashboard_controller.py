@@ -1128,6 +1128,37 @@ def test_completed_game_reloads_inline_final_audit_receipt(monkeypatch):
     assert "Office Standing" not in rows_by_label
 
 
+def test_reopened_finished_save_restores_the_closing_week_report(monkeypatch):
+    """Verify reopening a finished game shows its Week Closed receipt beside the audit (v10 step 5)."""
+
+    controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    state = rules.CityState(turn=12, status="complete", audit_rung=0)
+    state.last_report = "Final week closed. Season lost: Quiet streets not met. Achievements: Balanced books."
+    districts = {"D0000": _profile("D0000")}
+
+    class FakeView:
+        def render(self, model):
+            self.model = model
+
+    controller.view = FakeView()
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: districts)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+
+    controller.reload()
+    controller.reload()
+
+    weeks = [tab for tab in controller.report_tabs if tab.kind == "week"]
+    audits = [tab for tab in controller.report_tabs if tab.kind == "scorecard"]
+    assert len(weeks) == 1 and len(audits) == 1
+    assert "Achievements: Balanced books" in weeks[0].report
+    assert controller.selected_report_id == audits[0].report_id
+
+
 def test_completed_game_desk_and_report_picks_stay_off_the_final_audit(monkeypatch):
     """Verify a finished season lets the player leave the final audit tab."""
 

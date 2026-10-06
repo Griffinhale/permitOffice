@@ -508,6 +508,10 @@ class DashboardController:
         )
         self._sync_report_week(state)
         if (state.status == "complete" or state.turn > state.max_turns) and not self._has_final_audit_tab():
+            # Reopening a finished save starts with no tabs; the closing week's
+            # report (season verdict, achievements) is saved as last_report.
+            if state.last_report and not any(tab.kind == "week" for tab in self.report_tabs):
+                self._record_week_report("Week Closed", state.last_report, state, districts)
             # File the audit once; re-filing it on every reload pulled the Desk
             # and other report picks back to it (AR21 v8 items 9.1, 13.6).
             self._record_final_audit_receipt(state, districts, active_features, items)

@@ -50,6 +50,11 @@ are waiting on their live check.
   to the final audit.
 - A maintenance order for a line or zone feature never placed its map point,
   and approving it failed until the player picked one district by hand.
+- After week 12, Reports showed week 11's report, so the season verdict and
+  achievements never appeared. Reopening a finished game now brings that
+  report back beside the final audit.
+- End Week on a finished season redrew the whole map for several seconds; it
+  now only says the final audit is already filed.
 
 ### Removed
 - Office Standing, threat-track and other standalone meters; their causes now
