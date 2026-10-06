@@ -22,13 +22,6 @@ DISTRICT_IDENTITY = "District Identity"
 # drops the fill for ~0.2 s; without this the interiors flash white (AR18).
 # Nothing requeries or selects it, so it may show a stale type color briefly.
 DISTRICT_UNDERLAY = "District Underlay"
-# The same idea for lines, points and zones (AR24): Pro redraws feature layers
-# one after another, so a week close left the map near-empty for ~0.5 s. Unlike
-# the district copy these are requeried just before their live layer, because
-# nothing covers them: a stale copy would keep showing removed proposals.
-LINES_UNDERLAY = "Lines Underlay"
-POINTS_UNDERLAY = "Points Underlay"
-ZONES_UNDERLAY = "Zones Underlay"
 PREDRAWN_LAYER_PREFIX = "Permit Office Predrawn"
 PREDRAWN_POINTS_PREFIX = "Permit Office Predrawn Points"
 PREDRAWN_LINES_PREFIX = "Permit Office Predrawn Lines"
@@ -129,7 +122,6 @@ def add_outputs_to_map(paths, messages, layer_names=None):
         # (layer name, .lyrx key, paths key); the overlays read the districts source.
         wanted = [(DISTRICTS, "districts", "districts"), (POINTS, "points", "points"), (LINES, "lines", "lines"), (ZONES, "zones", "zones")]
         wanted = [w for w in wanted if layer_names is None or w[0] in layer_names]
-        wanted += [(_feature_underlays()[name], key, path_key) for name, key, path_key in wanted if name in _feature_underlays()]
         if layer_names is None or DISTRICTS in layer_names:
             wanted += [
                 (DISTRICT_PROSPERITY, "district_prosperity", "districts"),
@@ -146,13 +138,11 @@ def add_outputs_to_map(paths, messages, layer_names=None):
                 _warn(messages, "MAP", f"add {name} failed: {exc}")
                 continue
             lyr.name = name
-            if name == DISTRICT_UNDERLAY or name in _feature_underlays().values():
+            if name == DISTRICT_UNDERLAY:
                 try:
                     lyr.showLabels = False
                 except Exception as exc:
                     _warn(messages, "MAP", f"{name} labels stay on: {exc}")
-            if name in _feature_underlays().values():
-                _turn_off_selection(lyr, name, messages)
             existing[name] = lyr
             _log(messages, "MAP", f"added {name}")
         _order_output_layers(active_map, existing)
@@ -219,15 +209,12 @@ def remove_outputs_from_map(messages, layer_names=None):
         # The district overlays are tied to the districts source, so they clear
         # whenever districts (or a full refresh) are being removed.
         overlay_outputs = {DISTRICT_PROSPERITY, DISTRICT_IDENTITY, DISTRICT_UNDERLAY}
-        underlays = _feature_underlays()
         if layer_names is None:
-            output_names = base_outputs | overlay_outputs | set(underlays.values())
+            output_names = base_outputs | overlay_outputs
         else:
             output_names = (base_outputs & set(layer_names))
             if DISTRICTS in layer_names:
                 output_names |= overlay_outputs
-            # A feature copy goes with its live layer, as the district one does.
-            output_names |= {underlays[name] for name in layer_names if name in underlays}
         removed = 0
         for layer in list(active_map.listLayers()):
             layer_name = getattr(layer, "name", None)
@@ -331,10 +318,6 @@ def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None, phas
     feature_scope = _feature_layer_scope(layer_names)
     if not feature_scope:
         return
-    # Copies first, whichever path the live layers take below (flip, ring,
-    # readd, refresh): they redraw while the live layers still show the old picture.
-    _requery_feature_underlays(paths, messages, feature_scope)
-    phase_marker("feature_underlays")
     readd_scope = feature_scope & set(remove_scope or ())
     fallback_readd = set()
     toggled = _toggle_feature_queries_together(paths, messages, readd_scope)
@@ -441,38 +424,6 @@ def _toggle_feature_queries_together(paths, messages, layer_names):
     return toggled
 
 
-def _requery_feature_underlays(paths, messages, layer_names):
-    """Toggle the query of each in-scope feature copy reading this save."""
-
-    try:
-        active_map = ensure_active_map(messages)
-        layers = {getattr(layer, "name", ""): layer for layer in active_map.listLayers()} if active_map is not None else {}
-    except Exception as exc:
-        _warn(messages, "REDRAW", f"feature underlays skipped: {exc}")
-        return
-    path_keys = _feature_path_keys()
-    for layer_name in sorted(layer_names):
-        copy = layers.get(_feature_underlays().get(layer_name, ""))
-        if copy is None or not _same_source(copy, paths[path_keys[layer_name]]):
-            continue
-        error = _flip_feature_query(copy)
-        if error is None:
-            _log(messages, "REDRAW", f"feature-query target={copy.name!r}")
-        else:
-            _warn(messages, "REDRAW", f"feature-query {copy.name} failed: {error}")
-
-
-def _turn_off_selection(layer, name, messages):
-    """Keep map clicks from selecting a copy layer's features."""
-
-    try:
-        cim = layer.getDefinition("V3")
-        cim.selectable = False
-        layer.setDefinition(cim)
-    except Exception as exc:
-        _warn(messages, "MAP", f"{name} stays selectable: {exc}")
-
-
 def _flip_feature_query(layer):
     """Toggle a no-op marker on a layer's query; return the error, or None."""
 
@@ -506,14 +457,6 @@ def _feature_ring_prefixes():
         POINTS: PREDRAWN_POINTS_PREFIX,
         LINES: PREDRAWN_LINES_PREFIX,
         ZONES: PREDRAWN_ZONES_PREFIX,
-    }
-
-
-def _feature_underlays():
-    return {
-        LINES: LINES_UNDERLAY,
-        POINTS: POINTS_UNDERLAY,
-        ZONES: ZONES_UNDERLAY,
     }
 
 
@@ -736,12 +679,8 @@ def _place_ring_slots_above_base(active_map):
 
 def _order_output_layers(active_map, existing):
     """Draw district colors as the base, identity/prosperity overlays just above
-    it, feature lines/points/zones on top, each over its copy, and the district
-    underlay beneath all."""
-    ordered_names = [
-        LINES, LINES_UNDERLAY, POINTS, POINTS_UNDERLAY, ZONES, ZONES_UNDERLAY,
-        DISTRICT_IDENTITY, DISTRICT_PROSPERITY, DISTRICTS, DISTRICT_UNDERLAY,
-    ]
+    it, feature lines/points/zones on top, and the district underlay beneath all."""
+    ordered_names = [LINES, POINTS, ZONES, DISTRICT_IDENTITY, DISTRICT_PROSPERITY, DISTRICTS, DISTRICT_UNDERLAY]
     if all(existing.get(name) for name in (LINES, POINTS, ZONES, DISTRICTS)):
         present = [existing[name] for name in ordered_names if existing.get(name) is not None]
         try:
@@ -751,10 +690,8 @@ def _order_output_layers(active_map, existing):
             pass
     # Above the fill the 90%-opaque underlay would hide the live colors, so it
     # goes directly beneath PermitDistricts even when the full order is skipped.
-    pairs = [(DISTRICTS, DISTRICT_UNDERLAY)] + list(_feature_underlays().items())
-    for live_name, copy_name in pairs:
-        if existing.get(live_name) is not None and existing.get(copy_name) is not None:
-            try:
-                active_map.moveLayer(existing[live_name], existing[copy_name], "AFTER")
-            except Exception:
-                pass
+    if existing.get(DISTRICTS) is not None and existing.get(DISTRICT_UNDERLAY) is not None:
+        try:
+            active_map.moveLayer(existing[DISTRICTS], existing[DISTRICT_UNDERLAY], "AFTER")
+        except Exception:
+            pass
