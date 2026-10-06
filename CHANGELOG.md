@@ -33,6 +33,9 @@ are waiting on their live check.
 - Layers load from shipped `.lyrx` styles; map redraws requery layers in place,
   keep selections the next case replaces, and draw a district underlay, so a
   week close drops each feature layer once with no white flash.
+- Lines, points and zones each draw over an unlabeled copy that shows the old
+  picture while the live layer redraws, so a week close no longer leaves the
+  map near-empty.
 - `geometry.py` is split by job into `proposals.py`, `city_features.py`,
   `map_layers.py`, and `symbology.py`; `geometry.py` re-exports them for one
   release.

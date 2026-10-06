@@ -106,6 +106,19 @@ darker; a converted district may show its old type color during a drop.
 The selection clear now runs after the redraw. Run ahead of it, the clear's
 repaint and the layer's requery landed back to back: zones gone ~1 s at week
 close, points twice on a decision.
+**October 5 follow-up (AR24):** AR21 v9 showed the remaining week-close gap is
+Pro drawing lines, points and zones one after another (queries written within
+4 ms, drops staggered over 0.54 s), which batching cannot remove. Each feature
+layer now has a copy directly beneath it (`Lines Underlay`, `Points Underlay`,
+`Zones Underlay`): same layer file, labels off, not selectable. Unlike the
+district copy, nothing opaque covers them, so a copy left alone would keep
+showing proposals the close removed. Every feature redraw therefore requeries
+the copies first, in their own pass before the live batch, so they redraw while
+the live layers still show the old picture. Costs: six feature layers in
+Contents, symbols stack where the live layer is semi-transparent, a removed
+feature may show for a moment if Pro draws a copy after its live layer, and the
+copy pass adds a lookup before the live toggles (`feature_underlays` phase).
+Pending the 0.97 VM recording.
 *(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
 reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
 later. Supersedes the earlier district-family remove+add default with a measured

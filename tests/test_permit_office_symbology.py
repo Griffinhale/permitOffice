@@ -284,6 +284,9 @@ class FakeLyrxLayer(FakeLayer):
         """Return a CIM-shaped double whose data connection mirrors the .lyrx export."""
 
         assert version == "V3"
+        if self.cim is not None:
+            # Pro hands back the definition as last set.
+            return self.cim
         connection = SimpleNamespace(
             workspaceConnectionString=r"DATABASE=..\..\docs\dags\spikes\fresh.gdb",
             workspaceFactory="FileGDB",
@@ -361,11 +364,13 @@ def test_add_outputs_loads_each_layer_from_its_lyrx_and_points_it_at_the_save(mo
 
     assert active_map.added_paths == []
     assert sorted(path.rsplit("/", 1)[-1] for path in active_map.added_layer_files) == [
-        "districts.lyrx", "districts.lyrx", "identity.lyrx", "lines.lyrx", "points.lyrx", "prosperity.lyrx", "zones.lyrx",
+        "districts.lyrx", "districts.lyrx", "identity.lyrx", "lines.lyrx", "lines.lyrx", "points.lyrx", "points.lyrx",
+        "prosperity.lyrx", "zones.lyrx", "zones.lyrx",
     ]
     by_name = {layer.name: layer for layer in active_map.layers}
     assert set(by_name) == {
         "PermitDistricts", "PermitPoints", "PermitLines", "PermitZones", "District Prosperity", "District Identity", "District Underlay",
+        "Lines Underlay", "Points Underlay", "Zones Underlay",
     }
     districts = by_name["PermitDistricts"]
     assert districts.connectionProperties["dataset"] == "PermitDistricts"
@@ -415,6 +420,49 @@ def test_remove_outputs_removes_the_district_underlay_with_districts(monkeypatch
 
     geometry.remove_outputs_from_map(FakeMessages(), layer_names={"PermitDistricts"})
     assert "District Underlay" in active_map.removed
+
+
+def test_add_outputs_puts_an_unlabeled_unselectable_copy_under_each_feature_layer(monkeypatch, tmp_path):
+    """Verify lines, points and zones each get a copy directly beneath them (AR24).
+
+    AR21 v9: Pro redraws the feature layers one after another, so a week close
+    left the map near-empty for ~0.5 s. A copy beneath shows the old picture.
+    """
+
+    from toolbox.permit_office_arcgis import geometry, symbology_config
+
+    monkeypatch.setattr(symbology_config, "LAYER_FILE_DIR", str(_write_layer_files(tmp_path)))
+    active_map = FakeLyrxMap()
+    _patch_split(monkeypatch, "arcpy", _fake_arcpy_with_layer_files(active_map))
+    paths = {key: f"/saves/game.gdb/Permit{key.title()}" for key in ("districts", "points", "lines", "zones")}
+
+    geometry.add_outputs_to_map(paths, FakeMessages())
+
+    names = [layer.name for layer in active_map.layers]
+    assert names[:6] == ["PermitLines", "Lines Underlay", "PermitPoints", "Points Underlay", "PermitZones", "Zones Underlay"]
+    by_name = {layer.name: layer for layer in active_map.layers}
+    for live, copy in (("PermitLines", "Lines Underlay"), ("PermitPoints", "Points Underlay"), ("PermitZones", "Zones Underlay")):
+        assert by_name[copy].connectionProperties["dataset"] == live
+        assert by_name[copy].dataSource == by_name[live].dataSource
+        assert by_name[copy].showLabels is False
+        assert by_name[copy].cim.selectable is False
+        assert getattr(by_name[live].cim, "selectable", True) is not False
+
+
+def test_remove_outputs_removes_a_feature_copy_with_its_feature_layer(monkeypatch):
+    """Verify a feature copy goes when its live layer is rebuilt, and only then."""
+
+    from toolbox.permit_office_arcgis import geometry
+
+    names = ("PermitPoints", "Points Underlay", "PermitLines", "Lines Underlay", "PermitDistricts", "District Underlay")
+    active_map = FakeMap([SimpleNamespace(name=name) for name in names])
+    _patch_split(monkeypatch, "arcpy", SimpleNamespace(mp=SimpleNamespace(ArcGISProject=lambda name: SimpleNamespace(activeMap=active_map))))
+
+    geometry.remove_outputs_from_map(FakeMessages(), layer_names={"PermitPoints"})
+    assert sorted(active_map.removed) == ["PermitPoints", "Points Underlay"]
+
+    geometry.remove_outputs_from_map(FakeMessages())
+    assert "Lines Underlay" in active_map.removed
 
 
 def test_ring_slot_styled_from_lyrx_without_update_renderer(monkeypatch, tmp_path):
@@ -567,9 +615,15 @@ def test_one_unpointable_lyrx_layer_does_not_stop_the_other_outputs(monkeypatch,
     geometry.add_outputs_to_map(paths, messages)
 
     names = [layer.name for layer in active_map.layers]
-    assert set(names) == {"PermitDistricts", "PermitLines", "PermitZones", "District Prosperity", "District Identity", "District Underlay"}
-    # Full ordering is skipped with points missing; the underlay must still sit under the fill.
+    assert set(names) == {
+        "PermitDistricts", "PermitLines", "PermitZones", "District Prosperity", "District Identity", "District Underlay",
+        "Lines Underlay", "Zones Underlay",
+    }
+    # Full ordering is skipped with points missing; each copy must still sit under its live layer.
     assert names.index("District Underlay") == names.index("PermitDistricts") + 1
-    assert len(messages.warnings) == 1
-    assert "could not point points.lyrx at /saves/game.gdb/PermitPoints" in messages.warnings[0]
-    assert "AttributeError" in messages.warnings[0]
+    assert names.index("Lines Underlay") == names.index("PermitLines") + 1
+    assert names.index("Zones Underlay") == names.index("PermitZones") + 1
+    # The points layer and its copy both fail on the same file.
+    assert len(messages.warnings) == 2
+    assert all("could not point points.lyrx at /saves/game.gdb/PermitPoints" in warning for warning in messages.warnings)
+    assert all("AttributeError" in warning for warning in messages.warnings)

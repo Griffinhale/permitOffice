@@ -166,8 +166,11 @@ class _RecordingLayer:
         self._query = value
 
 
-def _week_close_map(monkeypatch, *, lines_visible=True):
-    """Install a Pro 3.7 map: district slot, points ring slot, ringless lines and zones."""
+def _week_close_map(monkeypatch, *, lines_visible=True, underlays=(), version=(3, 7)):
+    """Install a Pro 3.7 map: district slot, points ring slot, ringless lines and zones.
+
+    ``underlays`` adds (copy name, source) feature copies beneath the live layers.
+    """
 
     events = []
     layers = [
@@ -177,7 +180,7 @@ def _week_close_map(monkeypatch, *, lines_visible=True):
         _RecordingLayer(events, redraw_plan.ZONES, "zones"),
         _RecordingLayer(events, "Permit Office Predrawn 0", "districts", query="1=1"),
         _RecordingLayer(events, redraw_plan.DISTRICTS, "districts", visible=False),
-    ]
+    ] + [_RecordingLayer(events, name, source) for name, source in underlays]
 
     def list_layers():
         events.append(("listLayers",))
@@ -191,12 +194,12 @@ def _week_close_map(monkeypatch, *, lines_visible=True):
     fake = SimpleNamespace(
         mp=SimpleNamespace(ArcGISProject=current_project),
         RefreshLayer=lambda name: events.append(("refresh", name)),
-        GetInstallInfo=lambda: {"Version": "3.7"},
+        GetInstallInfo=lambda: {"Version": ".".join(str(part) for part in version)},
         AddMessage=lambda text: None,
         AddWarning=lambda text: None,
     )
     monkeypatch.setattr(map_layers, "arcpy", fake)
-    monkeypatch.setitem(map_layers._PRO_VERSION_CACHE, "version", (3, 7))
+    monkeypatch.setitem(map_layers._PRO_VERSION_CACHE, "version", version)
     return events
 
 
@@ -236,6 +239,73 @@ def test_week_close_resolves_every_feature_layer_before_toggling_them_back_to_ba
         if event[0] in ("project", "listLayers") or (event[0] == "source" and event[1] in _FEATURE_TARGETS)
     ]
     assert feature_resolution and max(feature_resolution) < toggles[0]
+
+
+_UNDERLAYS = (("Lines Underlay", "lines"), ("Points Underlay", "points"), ("Zones Underlay", "zones"))
+
+
+def _underlay_toggle_indexes(events):
+    names = {name for name, _source in _UNDERLAYS}
+    return [i for i, event in enumerate(events) if event[0] == "query" and event[1] in names]
+
+
+def test_week_close_requeries_every_feature_copy_before_the_live_batch(monkeypatch):
+    """AR24: the copies redraw while the live layers still show the old picture.
+
+    A copy is never covered, so it must not keep showing proposals the close
+    removed; the live toggles stay back to back (AR21) and no RefreshLayer runs.
+    """
+
+    events = _week_close_map(monkeypatch, underlays=_UNDERLAYS)
+    monkeypatch.setattr(map_layers, "_rehydrate_feature_display_ring", lambda *args: pytest.fail("no rehydrate"))
+    scope = redraw_plan._week_close_redraw_layers([SimpleNamespace(geometry_type=kind) for kind in ("POINT", "LINE", "POLYGON")])
+
+    map_layers.apply_ring_redraw(
+        {"districts": "districts", "points": "points", "lines": "lines", "zones": "zones"},
+        None,
+        layer_names=set(scope),
+        remove_scope=set(scope),
+    )
+
+    copies = _underlay_toggle_indexes(events)
+    toggles = _feature_toggle_indexes(events)
+    assert sorted(events[i][1] for i in copies) == sorted(name for name, _source in _UNDERLAYS)
+    assert max(copies) < toggles[0]
+    assert toggles == list(range(toggles[0], toggles[0] + len(toggles)))
+    assert not any(event[0] == "refresh" for event in events)
+
+
+def test_feature_copy_reading_another_save_is_left_alone(monkeypatch):
+    """A copy left over from another workspace is not requeried as if it were this save's."""
+
+    events = _week_close_map(monkeypatch, underlays=(("Points Underlay", "old_save_points"),))
+    monkeypatch.setattr(map_layers, "_rehydrate_feature_display_ring", lambda *args: True)
+
+    map_layers.apply_ring_redraw(
+        {"districts": "districts", "points": "points", "lines": "lines", "zones": "zones"},
+        None,
+        layer_names={redraw_plan.DISTRICTS, redraw_plan.POINTS},
+        remove_scope={redraw_plan.DISTRICTS, redraw_plan.POINTS},
+    )
+
+    assert _underlay_toggle_indexes(events) == []
+
+
+def test_feature_copies_are_requeried_below_pro_3_7_too(monkeypatch):
+    """Older Pro skips the live query flip, but the copies still must not hold removed proposals."""
+
+    events = _week_close_map(monkeypatch, underlays=_UNDERLAYS, version=(3, 6))
+    monkeypatch.setattr(map_layers, "_rehydrate_feature_display_ring", lambda *args: True)
+
+    map_layers._refresh_feature_scope(
+        {"districts": "districts", "points": "points", "lines": "lines", "zones": "zones"},
+        None,
+        set(redraw_plan.WEEK_CLOSE_READD_LAYERS),
+        remove_scope=set(redraw_plan.WEEK_CLOSE_READD_LAYERS),
+    )
+
+    assert sorted(events[i][1] for i in _underlay_toggle_indexes(events)) == sorted(name for name, _source in _UNDERLAYS)
+    assert _feature_toggle_indexes(events) == []
 
 
 def test_week_close_rehydrates_an_unresolved_feature_layer_after_the_batched_toggles(monkeypatch):

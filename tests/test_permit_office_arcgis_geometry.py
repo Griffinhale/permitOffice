@@ -452,7 +452,7 @@ def test_refresh_feature_scope_marks_each_feature_layer_phase(monkeypatch):
         phase_marker=marks.append,
     )
 
-    assert marks == ["feature_PermitPoints_ring_rehydrate", "feature_PermitLines_refresh"]
+    assert marks == ["feature_underlays", "feature_PermitPoints_ring_rehydrate", "feature_PermitLines_refresh"]
 
 
 def test_refresh_feature_scope_falls_back_to_readd_when_feature_ring_fails(monkeypatch):

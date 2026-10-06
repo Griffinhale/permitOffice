@@ -176,7 +176,8 @@ lands and this check passes live.
       `[REBUILD]` line names `PermitLines`, `PermitPoints` and `PermitZones`
       (in seed 2034 only the week 12 close did). The log shows the district
       flip's `feature-query target='PermitDistricts'` line, then one
-      `feature-query` line per feature layer, then the
+      `feature-query` line per feature copy (after AR24), then one per feature
+      layer, then the
       `path=district-flip status=ok` summary that closes the block. No ring
       seed or `RefreshLayer` appears in the block. On the recording, lines, points
       and zones each drop once, and the near-empty map lasts no longer than
@@ -184,6 +185,14 @@ lands and this check passes live.
       redraws the layers one after another, about 0.13 s apart, even though the
       queries are written within 2 ms, so the drops need not overlap (AR21 v8:
       0.43 s gap).
+- [ ] (after AR24) Contents shows `Lines Underlay`, `Points Underlay` and
+      `Zones Underlay` each directly below its live layer, with no labels;
+      clicking a copy's feature with the Select tool selects nothing on it.
+      Record a week close and one decision: no frame shows the map with lines,
+      points or zones missing; once the close settles no removed proposal is
+      still drawn; symbols look the same as before the close apart from a
+      moment of stacking. The log's `feature_underlays` phase stays well under
+      the `turn=advance` total.
 - [ ] (after AR19, Pro 3.7) In `ar_probe.aprx` on `probe_save.gdb`, save,
       then restart Pro. Open the dashboard, close it right away with no
       decisions, then run one
