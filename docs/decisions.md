@@ -141,6 +141,10 @@ fallbacks so it works across Pro builds). **Why:** these channels keep workflow 
 identity readable now. **Rejected (deferred):** bivariate activity/exposure
 renderer and per-family support layers — overload the same visual channels before
 live ArcGIS evidence proves the need.
+**October 1 follow-up (AR6, ruling D7):** the unique-value renderers now ship as
+`.lyrx` files in `toolbox/layers/`, exported from Pro. The code-built renderer
+and its fallbacks were deleted (3a5eb91); a missing or unrepointable `.lyrx` is
+an error.
 
 ### ADR-9 — District identity & buyouts: legible first-pass
 **Decision:** deterministic refuse → contested → stabilize/convert; conversion
@@ -162,12 +166,19 @@ legible goals + rich docket/scorecard detail beat many shallow exposed systems;
 the same names are used in the rail, the audit report, and the help overlay.
 **Rejected:** keeping Services (or any granular support system) on the always-on
 rail; surfacing every internal system as a player-facing stat.
+**October 3 follow-up (narrow pane, e59ca17):** the rail and the folded City
+Health headline are gone. The header shows the goal, the next checkpoint audit
+and council patience; the City tab shows the four stats with their change since
+the week began, plus economy, heat, city services and incidents. The four
+vitals still drive the audit score.
 
 ### ADR-11 — Deterministic seeded generation
 **Decision:** boards and dockets are generated from an RNG keyed on
 `seed:turn:district-mix:stats`; docket sampling is weighted-without-replacement
-with reserved scenario-priority slots. **Why:** reproducible demos and locked
-regression routes (seed `2026`) while staying responsive to city state.
+with reserved scenario-priority slots. **Why:** reproducible demos and
+regression tests (unit tests use seed `2026`; the live smoke run uses seed
+`2034`) while staying responsive to city state. No seed is locked as a 12-week
+balance route yet.
 **Rejected:** unseeded randomness — untestable, unrepeatable demos.
 
 ### ADR-12 — File-size budget is a soft target
@@ -175,6 +186,9 @@ regression routes (seed `2026`) while staying responsive to city state.
 trips at a 1500 hard ceiling. **Why:** keep files reviewable without forcing
 premature splits or comment-stripping when the logic needs the length.
 **Rejected:** a hard 1050 cap — pushed against documentation and cohesive modules.
+**Note (v0.97):** the guardrail test is skipped by a waiver left from the v0.95
+decision-cache spike, whose cache was later removed. Every source file is under
+1500 lines (the largest, `dashboard.py`, is 1446).
 
 ### ADR-13 — Seeded proposals, not Feature Set drawing
 **Decision:** proposed geometry is generated from filed targets and replaced via

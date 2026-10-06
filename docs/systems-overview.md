@@ -259,19 +259,21 @@ controls, and an inline final audit receipt.
 
 Checked live for v0.97 on Pro 3.7 through the production tool: full seasons to
 the final audit, the main menu on a fresh save, Continue after closing the
-window and after restarting Pro, reopening a finished season, New Game moving
+window, reopening a finished season, New Game moving
 to its own empty map, and the narrow pane at both sizes.
 
 Verified live during the v0.95 spike (ArcGIS Pro): district layers render on
 launch and repaint their changing state across decisions and End Week through
 the promoted district-ring redraw path. Support feature rings use the same
-display-ring strategy: a cheap refresh of the visible slot first, rehydrate as
-the fallback. The desk utility menu has a manual End Week control that works
+display-ring strategy. On Pro 3.7+ both now requery the visible layer by
+toggling its definition query instead (see `arcpy-usage.md`). The desk utility menu has a manual End Week control that works
 regardless of AP.
 
 Still missing is evidence, not code: runs on Pro 3.3-3.6, legacy field
-migration on an existing `.gdb`, district colors at week close when the player
-adds a basemap back, and 12-week balance tuning toward a fair PASS.
+migration on an existing `.gdb`, the project-default save path live, and
+12-week balance tuning toward a fair PASS. Known issue: with a basemap in the
+game map, the district fills go blank for about 1-2 seconds at every week close
+(AR24 run, Pro 3.7).
 
 ## Validation
 

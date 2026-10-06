@@ -112,7 +112,7 @@ nothing closes a week inside a trial unless the operator does.
 ## Rules that keep the evidence honest
 
 - **One action per clip.** A clip with two operations cannot say which one
-  blinked. A combined clear in the AR18 probe is being rerun as single clears
+  blinked. A combined clear in the AR18 probe was rerun as single clears
   for this reason.
 - **Fresh frames only.** The AVI holds the last image across missed captures.
   The journal is the record. The map region captures about 15 fresh frames a

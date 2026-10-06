@@ -39,7 +39,8 @@ checked live in ArcGIS Pro 3.7.
   follow-ups respect their cooldown.
 - Layers load from shipped `.lyrx` styles. Map redraws requery layers in place,
   keep the selections the next case replaces, and draw a district underlay, so
-  a week close drops each feature layer once with no white flash.
+  on a map with no basemap a week close drops each feature layer once, without
+  the whole-map white flash.
 - `geometry.py` is split by job into `proposals.py`, `city_features.py`,
   `map_layers.py`, and `symbology.py`; `geometry.py` re-exports them for one
   release. `symbology.py` was later removed when every layer moved to the
@@ -53,6 +54,8 @@ checked live in ArcGIS Pro 3.7.
 - The dashboard window no longer frees Tk on another thread (a Pro crash).
 - After the season ended, clicking Desk or a week report jumped straight back
   to the final audit.
+- A converted district's new name was not saved, so the map label and later
+  reports went back to the old name.
 - A maintenance order for a line or zone feature never placed its map point,
   and approving it failed until the player picked one district by hand.
 - After week 12, Reports showed week 11's report, so the season verdict and
@@ -60,6 +63,11 @@ checked live in ArcGIS Pro 3.7.
   report back beside the final audit.
 - End Week on a finished season redrew the whole map for several seconds; it
   now only says the final audit is already filed.
+
+### Known issues
+- With a basemap in the game map, the district fills go blank for about 1-2
+  seconds at every week close (seen live on Pro 3.7). New Game avoids this by
+  playing in an empty map.
 
 ### Removed
 - The tool's **Game Workspace** and **Log Refresh Timings** parameters. Run

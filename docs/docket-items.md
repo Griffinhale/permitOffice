@@ -82,7 +82,7 @@ after targeting it adds a **target census note** from the selected districts;
 `Inspect File` reveals likely supporters, likely objectors, highest local
 grievance, and service-capacity wording, without exposing exact formulas.
 
-The three action buttons are reused across card kinds:
+Besides Inspect File, the three decision buttons are reused across card kinds:
 
 | Card kind | Approve | Approve + Mitigate | Deny |
 | --- | --- | --- | --- |
@@ -97,11 +97,9 @@ resources · education & parks · business/nonprofit/vendors · residential &
 building · public safety & departments · infrastructure upkeep · culture &
 branding.
 
-The locked seed-`2026` demo route uses ten normal templates (three/week):
-`connector_corridor`, `procession_route`, `utility_expansion_trench`,
-`natural_reserve_conversion`, `mixed_use_rezoning`, `child_development_park_annex`,
-`street_vendor_compact`, `contractor_renovation_waiver`, `fire_budget_escalation`,
-`public_art_museum_grant`.
+Each week the weighted draw adds two ordinary cases (`DRAWN_CASES_PER_WEEK` in
+`profiles.py`) on top of follow-up work. No seed is locked as a demo route; the
+live smoke run uses seed `2034`.
 
 ## Generated (non-authored) items
 

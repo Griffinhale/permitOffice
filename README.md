@@ -101,8 +101,8 @@ You need ArcGIS Pro 3.3 or later. The game was tested on Pro 3.6 and 3.7.
 3. **Connect the folder.** In the **Catalog** pane, right-click **Folders** and
    choose **Add Folder Connection**. Pick the `permitOffice` folder.
 4. **Open the tool.** Expand the folder connection, then `toolbox`, then
-   `arcpy_permit_office.pyt`, and double-click **Permit Office Prototype**. The
-   first time, Pro asks whether to trust the Python toolbox. Answer **Yes**.
+   `arcpy_permit_office.pyt`, and double-click **Permit Office Prototype**. If
+   Pro asks whether to trust the Python toolbox, answer **Yes**.
 5. **Click Run.** The tool has no settings. The Permit Office window opens on
    the main menu.
 
@@ -246,13 +246,17 @@ the final audit, and reopening a finished game.
 Checked live earlier (v0.95 and the ArcPy review): generated districts and city
 detail, weighted dockets, inspections, approvals and denials, incidents,
 maintenance, recurring economy, projects, buyouts, the final audit, shipped
-`.lyrx` layer styles, and a week-close redraw that drops each feature layer
-once with no white flash. How those map bugs were caught is in
+`.lyrx` layer styles, and, on a map with no basemap, a week-close redraw that
+drops each feature layer once with no whole-map white flash. How those map bugs were caught is in
 [`docs/live-testing-loop.md`](docs/live-testing-loop.md).
 
+Known issue: with a basemap in the game map, the district fills go blank for
+about 1-2 seconds at every week close. New Game plays in an empty map to avoid
+it.
+
 Open: a fair 12-week balance pass for the new goals and initiatives, runs on
-Pro 3.3-3.6, and whether district colors hold at week close when the player
-adds a basemap back to the game map.
+Pro 3.3-3.6, and the save at the project's default path, which so far is
+covered by tests only (live runs used `PERMIT_OFFICE_WORKSPACE`).
 
 ## License
 

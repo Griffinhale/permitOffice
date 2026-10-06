@@ -74,13 +74,16 @@ District board and proposals are built by hand from coordinates:
 Map access is via `arcpy.mp.ArcGISProject("CURRENT").activeMap` (None-checked —
 the dashboard must tolerate no open map).
 
-- **Add:** `active_map.addDataFromPath(path)` then set `.name`; idempotent —
-  guarded by `if name not in existing` over `active_map.listLayers()`. Layers are
-  tuned (`transparency`, labels via `showLabels`/`listLabelClasses`/
-  `label_class.expression`), symbolized, and ordered with
+- **Add:** `active_map.addLayer(arcpy.mp.LayerFile(lyrx))` from the shipped
+  style (see **Symbology** below), then set `.name`; idempotent — guarded by
+  `if name not in existing` over `active_map.listLayers()`. Layers are tuned
+  (`transparency`, labels via `showLabels`/`listLabelClasses`/
+  `label_class.expression`) and ordered with
   `active_map.moveLayer(ref, layer, "AFTER")`.
 - **Remove:** `active_map.removeLayer(layer)` for our known output names.
-- **Refresh:** `arcpy.RefreshLayer(name)` per layer.
+- **Refresh:** `arcpy.RefreshLayer(name)` per layer, only where a query toggle
+  cannot be used (below Pro 3.7, or as a fallback). On a visible layer it
+  repaints the whole map (AR15).
 
 **Refresh/redraw strategy.** `arcpy.RefreshLayer` only redraws a layer's cached
 renderer; by itself it does not reliably reload changed GDB attributes. So
@@ -95,16 +98,21 @@ no longer rebuilt on every decision.
 On Pro 3.7 and newer (`QUERY_FLIP_MIN_PRO` in `map_layers.py`), a district-dirty
 redraw first flips the visible slot's `definitionQuery` between `1=1` and `2=2`.
 A live probe on 3.7 showed this makes Pro show new attribute values in about
-0.5 s without flicker. `RefreshLayer` also updated the colors there but
-flickered. The flip only runs when the visible slot reads the current save's
+0.5 s. The flipped layer still drops its shapes for about 0.2 s (labels stay, no
+white flash), and a `District Underlay` copy drawn below it shows the old fill
+during the drop. `RefreshLayer` also updated the colors there but flashed the
+whole map white. The flip only runs when the visible slot reads the current save's
 `PermitDistricts`. Otherwise, and on older Pro, the ring rehydrate runs. The
 version check reads `arcpy.GetInstallInfo()` once per session.
 
-Support features use the same reusable-ring idea with
-`Permit Office Predrawn Points/Lines/Zones 0/1/2`. If a visible support ring slot
-already exists, the adapter first tries a cheap `RefreshLayer` on that slot; if
-ArcGIS does not repaint correctly or raises, it falls back to rehydrating a ring
-slot from the GDB, then to the legacy remove/add path. `force_readd=True` still
+Support features (points, lines, zones) use the same reusable-ring idea with
+`Permit Office Predrawn Points/Lines/Zones 0/1/2`. On Pro 3.7+, a redraw toggles
+a no-op marker (`AND 271828=271828`) on the visible slot's `definitionQuery`, or
+on the visible base layer when there is no slot yet, so Pro requeries only that
+layer (AR16). The toggles for all in-scope layers run back to back so their
+drops overlap. Below 3.7, or when no visible layer reads this save, the adapter
+rehydrates a ring slot from the GDB, then falls back to the legacy remove/add
+path and `RefreshLayer`. `force_readd=True` still
 does the full remove -> add -> refresh of every in-scope layer, used when the
 layer set or symbology changes (New Game) or when a ring path reports failure.
 Timings are visible under `PERMIT_OFFICE_PERF=1` as `ring_redraw`,

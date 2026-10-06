@@ -57,8 +57,9 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       failure the old visible slot should remain visible.
 
 ## 4. Symbology (#9) *
-- [ ] On a new game the log emits six `[SYM] styled ... from ....lyrx` lines,
-      one per layer (districts, points, lines, zones, prosperity, identity), and
+- [ ] On a new game the log emits seven `[SYM] styled ... from ....lyrx` lines,
+      one per layer (districts, points, lines, zones, prosperity, identity, and
+      the District Underlay, which reuses `districts.lyrx`), and
       no `could not point` or `missing toolbox/layers` warning.
 - [ ] District base renders by `district_type`; the Prosperity overlay by
       `prosperity_band`; the Identity overlay by `identity_state`.
@@ -158,8 +159,8 @@ lands and this check passes live.
       decision that changes a district's type, display state, prosperity, or
       identity: it logs `district-flip`. Every changed feature and district
       shows its new color, and nothing unchanged looks stale.
-- [ ] (after AR16) Show and hide the selected case's exhibit, then use Update
-      from Map. Each logs `feature-query` and no `RefreshLayer`; the map never
+- [ ] (after AR16) Show and hide the selected case's exhibit, then use Retarget
+      from map. Each logs `feature-query` and no `RefreshLayer`; the map never
       flashes white.
 - [ ] (after AR18, Pro 3.7+) With `PERMIT_OFFICE_PERF=1` and no other setup,
       close a week where the new docket has a line or zone case. The log shows `district-flip` and
