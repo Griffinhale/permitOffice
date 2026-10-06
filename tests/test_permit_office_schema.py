@@ -691,3 +691,38 @@ def test_district_codec_covers_every_schema_district_field():
 
     assert set(store.DISTRICT_FIELD_NAMES) | {"last_report"} == schema_names
     assert len(store.DISTRICT_FIELD_NAMES) == len(set(store.DISTRICT_FIELD_NAMES))
+
+
+def test_game_workspace_without_env_uses_project_default(monkeypatch):
+    """With no tool parameter and no env var, the save is <project home>/data/permit_office.gdb."""
+
+    monkeypatch.delenv(schema.WORKSPACE_ENV, raising=False)
+    monkeypatch.setattr(
+        arcpy, "mp", SimpleNamespace(ArcGISProject=lambda _name: SimpleNamespace(homeFolder="C:/proj")), raising=False
+    )
+    monkeypatch.setattr(arcpy, "env", SimpleNamespace(scratchWorkspace=None, scratchFolder=None), raising=False)
+
+    assert schema.resolve_game_workspace(None) == os.path.join("C:/proj", "data", schema.DEFAULT_GDB_NAME)
+
+
+def test_game_workspace_env_var_overrides_with_resolve_workspace_rules(monkeypatch):
+    """PERMIT_OFFICE_WORKSPACE wins over the project default: a .gdb verbatim, a folder gets permit_office.gdb."""
+
+    monkeypatch.setattr(arcpy, "mp", SimpleNamespace(ArcGISProject=_raise), raising=False)
+
+    monkeypatch.setenv(schema.WORKSPACE_ENV, "D:/throwaway/test.gdb")
+    assert schema.resolve_game_workspace(None) == "D:/throwaway/test.gdb"
+
+    monkeypatch.setenv(schema.WORKSPACE_ENV, "D:/throwaway")
+    assert schema.resolve_game_workspace(None) == os.path.join("D:/throwaway", schema.DEFAULT_GDB_NAME)
+
+
+def test_game_workspace_blank_env_var_falls_back_to_default(monkeypatch):
+    """A blank PERMIT_OFFICE_WORKSPACE counts as unset."""
+
+    monkeypatch.setenv(schema.WORKSPACE_ENV, "  ")
+    monkeypatch.setattr(
+        arcpy, "mp", SimpleNamespace(ArcGISProject=lambda _name: SimpleNamespace(homeFolder="C:/proj")), raising=False
+    )
+
+    assert schema.resolve_game_workspace(None) == os.path.join("C:/proj", "data", schema.DEFAULT_GDB_NAME)

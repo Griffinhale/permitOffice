@@ -41,11 +41,49 @@ class DeskCallbacks:
     select_desk_tab: Callable[[str], None] = lambda _tab_id: None
     select_report: Callable[[str], None] = lambda _report_id: None
     show_help: Callable[[], None] = lambda: None
+    continue_game: Callable[[], None] = lambda: None
     end_game: Callable[[], None] = lambda: None
     cancel_queue_autoclose: Callable[[], None] = lambda: None
     pause_queue_autoclose: Callable[[], None] = lambda: None
     choose_mandate: Callable[[str], None] = lambda _key: None
     start_initiative: Callable[..., None] = lambda _kind, _target=None: None
+
+
+@dataclass(frozen=True)
+class MainMenuModel:
+    """The card every Run opens on: what is saved, and how to start."""
+
+    entries: tuple[tuple[str, str], ...]
+    save_line: str
+    map_note: str
+    map_warning: str = ""
+
+
+# First-run map guidance (AR26): Pro's default basemap blanks the district
+# fills for a second or two at every week close.
+MAP_NOTE = (
+    "Play in a new map with every layer removed. New Game moves to an empty "
+    "Permit Office map when this one has other layers."
+)
+
+
+def build_main_menu(state, has_save, other_layers=()) -> MainMenuModel:
+    """Return the main menu: Continue only with a save, then New Game and Help."""
+
+    entries = (("new_game", "New Game"), ("help", "Help"))
+    if has_save and state is not None:
+        entries = (("continue", "Continue"),) + entries
+        if state.status == "complete" or state.turn > state.max_turns:
+            save_line = "Saved game: season over. The final audit is in Reports."
+        else:
+            save_line = f"Saved game: week {state.turn} of {state.max_turns}."
+    else:
+        save_line = "No saved game in this project yet."
+    warning = ""
+    if other_layers:
+        names = ", ".join(other_layers[:3]) + (" and more" if len(other_layers) > 3 else "")
+        warning = f"This map also has {names}. Remove them, or the districts go blank for a second at each week close."
+    return MainMenuModel(entries=entries, save_line=save_line, map_note=MAP_NOTE, map_warning=warning)
 
 
 @dataclass(frozen=True)
@@ -168,6 +206,7 @@ class DeskViewModel:
     selected_report_id: str = ""
     ticker_items: tuple[str, ...] = ()
     show_start_help: bool = False
+    main_menu: MainMenuModel | None = None
     selected_desk_tab: str = "applications"
     action_lanes: tuple[ActionLane, ...] = ()
     auto_close_active: bool = False
@@ -224,6 +263,7 @@ def build_desk_model(
     game_active=True,
     audit=None,
     week_start=None,
+    main_menu=None,
 ) -> DeskViewModel:
     """Format gameplay state into a presentation-only desk model.
 
@@ -284,6 +324,7 @@ def build_desk_model(
         selected_report_id=selected_report_id,
         ticker_items=ticker_items,
         show_start_help=bool(show_start_help),
+        main_menu=main_menu,
         selected_desk_tab=_resolve_desk_tab(selected_desk_tab, report_tabs),
         action_lanes=action_lanes,
         auto_close_active=bool(auto_close_active),

@@ -31,6 +31,8 @@ PREDRAWN_ZONES_PREFIX = "Permit Office Predrawn Zones"
 # to show new GDB attribute values without flicker (AR5 spike, Pro 3.7). Older
 # builds keep the ring rehydrate. Lower this only after the probe passes there.
 QUERY_FLIP_MIN_PRO = (3, 7)
+# The map New Game plays in when the active map holds other layers (ND14).
+GAME_MAP_NAME = "Permit Office"
 QUERY_FLIP_VALUES = ("1=1", "2=2")
 _PRO_VERSION_CACHE: dict = {}
 
@@ -67,7 +69,70 @@ def output_layers_present():
         return True
 
 
-def ensure_active_map(messages, map_name="Permit Office"):
+def _foreign_layer_names(map_obj):
+    """Return the names of layers on a map that Permit Office did not add."""
+
+    ours = {DISTRICTS, POINTS, LINES, ZONES, DISTRICT_PROSPERITY, DISTRICT_IDENTITY, DISTRICT_UNDERLAY}
+    names = []
+    for layer in map_obj.listLayers():
+        name = getattr(layer, "name", "") or ""
+        if name in ours or name.startswith(PREDRAWN_LAYER_PREFIX) or name in names:
+            continue
+        names.append(name)
+    return tuple(names)
+
+
+def other_map_layers():
+    """Return names of layers on the active map that Permit Office did not add.
+
+    A basemap blanks the district fills for a second or two at each week close
+    (AR26), so the main menu warns about anything listed here. Returns () when
+    the map cannot be read.
+    """
+
+    try:
+        active_map = arcpy.mp.ArcGISProject("CURRENT").activeMap
+        return () if active_map is None else _foreign_layer_names(active_map)
+    except Exception:
+        return ()
+
+
+def use_game_map(messages, map_name=GAME_MAP_NAME):
+    """Open an empty Permit Office map when the active map has other layers.
+
+    Reuses a project map named ``map_name`` (or ``map_name 2`` and so on) that
+    holds only Permit Office layers, else creates one. Returns True when the
+    active map afterwards has no other layers; False leaves the caller to warn.
+    """
+
+    if not other_map_layers():
+        return True
+    try:
+        aprx = arcpy.mp.ArcGISProject("CURRENT")
+        maps = list(aprx.listMaps())
+        taken = {getattr(m, "name", "") for m in maps}
+        target = next((m for m in maps if getattr(m, "name", "").startswith(map_name) and not _foreign_layer_names(m)), None)
+        if target is None:
+            name = map_name
+            suffix = 2
+            while name in taken:
+                name = f"{map_name} {suffix}"
+                suffix += 1
+            target = aprx.createMap(name)
+            _log(messages, "MAP", f"created empty game map: {name}")
+        _open_map_view(target, messages)
+    except Exception as exc:
+        _warn(messages, "MAP", f"could not open an empty game map: {exc}")
+        return False
+    leftover = other_map_layers()
+    if leftover:
+        _warn(messages, "MAP", f"active map still has other layers: {', '.join(leftover[:3])}")
+        return False
+    _log(messages, "MAP", f"playing in map: {getattr(target, 'name', map_name)}")
+    return True
+
+
+def ensure_active_map(messages, map_name=GAME_MAP_NAME):
     """Ensure the project has an open map for Permit Office layer operations."""
 
     try:

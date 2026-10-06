@@ -13,7 +13,15 @@ import arcpy
 
 from ._perf import perf_block, perf_session
 from .city_features import seed_city_features
-from .map_layers import add_outputs_to_map, ensure_active_map, output_layers_present, refresh_all, remove_outputs_from_map
+from .map_layers import (
+    add_outputs_to_map,
+    ensure_active_map,
+    other_map_layers,
+    output_layers_present,
+    refresh_all,
+    remove_outputs_from_map,
+    use_game_map,
+)
 from .proposals import (
     activate_proposal,
     case_proposal_visible,
@@ -249,6 +257,9 @@ class DashboardController:
         self._report_counter = 0
         self._report_week = 0
         self._show_help = False
+        # Every Run opens on the main menu (ND14); Continue or New Game closes it.
+        self._main_menu_open = True
+        self._map_other_layers = ()
         self._queue_autoclose_after_id = None
         self._queue_autoclose_active = False
         self._queue_autoclose_seconds = 0
@@ -336,6 +347,7 @@ class DashboardController:
                 self._run_pure_precompute_once(state, districts, items, active_features, saved_game)
             with perf_block("active_map"):
                 ensure_active_map(self.messages)
+                self._map_other_layers = other_map_layers()
             with perf_block("saved_game_probe"):
                 offer_fresh_start = has_saved_game(self.paths) and not output_layers_present()
             if offer_fresh_start:
@@ -345,6 +357,31 @@ class DashboardController:
                 return
             with perf_block("dashboard_session"):
                 self.seed = prepare_dashboard_session(self.paths, self.seed, self.messages, resume=True)
+            if self._map_other_layers and self._main_menu_open:
+                self.reload()
+
+    def continue_game(self):
+        """Leave the main menu for the saved game, putting its layers back on the map if needed."""
+
+        if not has_saved_game(self.paths):
+            self._set_status_text("No saved game in this project. Start a New Game.")
+            self.reload()
+            return
+        self.prepare_startup_session()
+        if self._offer_fresh_start:
+            try:
+                self.seed = prepare_dashboard_session(self.paths, self.seed, self.messages, resume=True)
+            except Exception as exc:
+                self._set_status_text(f"Continue failed: {exc}")
+                _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
+                self.reload()
+                return
+            self._offer_fresh_start = False
+            self._grade_dirty = True
+            self.status_text = ""
+        self._main_menu_open = False
+        self._show_help = False
+        self.reload()
 
     def open(self):
         try:
@@ -391,6 +428,7 @@ class DashboardController:
             select_desk_tab=self.select_desk_tab,
             select_report=self.select_report,
             show_help=self.show_help,
+            continue_game=self.continue_game,
             end_game=self.end_game,
             cancel_queue_autoclose=self.cancel_queue_autoclose,
             pause_queue_autoclose=self._pause_queue_autoclose,
@@ -515,9 +553,15 @@ class DashboardController:
             # File the audit once; re-filing it on every reload pulled the Desk
             # and other report picks back to it (AR21 v8 items 9.1, 13.6).
             self._record_final_audit_receipt(state, districts, active_features, items)
-        saved_game = has_saved_game(self.paths) and not offering_fresh
+        has_save = has_saved_game(self.paths)
+        saved_game = has_save and not offering_fresh
         if saved_game:
             self._sync_week_start(state)
+        main_menu = None
+        if self._main_menu_open:
+            # Behind a fresh-start desk the rows are defaults; the menu still names the save.
+            menu_state = read_state(self.paths) if offering_fresh else state
+            main_menu = desk_model.build_main_menu(menu_state, has_save, self._map_other_layers)
         if offering_fresh and not self.status_text:
             self.status_text = "Saved board found, but no Permit Office layers are on the map. Click New Game to start fresh."
         elif not saved_game and not self.status_text:
@@ -539,13 +583,14 @@ class DashboardController:
             receipt=self.last_receipt,
             report_tabs=tuple(self.report_tabs),
             selected_report_id=self.selected_report_id,
-            show_start_help=(not saved_game) or self._show_help,
+            show_start_help=self._show_help,
             selected_desk_tab=self.selected_desk_tab,
             auto_close_active=self._queue_autoclose_active,
             auto_close_seconds=self._queue_autoclose_seconds,
             game_active=saved_game,
             audit=audit,
             week_start=self._week_start if saved_game else None,
+            main_menu=main_menu,
         )
         self.selected_item_id = model.selected_item_id
         self.selected_report_id = model.selected_report_id
@@ -767,7 +812,7 @@ class DashboardController:
         self._newgame_overlay = frame
         tk.Label(frame, text="START NEW GAME", bg=pal.CONTENT, fg=pal.INK, font=desk_font(Type.TITLE, "bold")).pack(padx=24, pady=(16, 8), anchor="w")
         message = (
-            "Replace the current Permit Office game rows and map layers?"
+            "This replaces the saved game in this project. It cannot be undone."
             if has_saved_game(self.paths)
             else "Create Permit Office layers and start a new game."
         )
@@ -818,6 +863,7 @@ class DashboardController:
                 state.mandate = rules.offer_mandates(seed, read_districts(self.paths))
                 write_state(self.paths, state)
                 generate_docket_rows(self.paths, seed, self.messages)
+                empty_map = use_game_map(self.messages)
                 remove_outputs_from_map(self.messages)
                 add_outputs_to_map(self.paths, self.messages)
                 refresh_all(self.paths, self.messages)
@@ -835,7 +881,13 @@ class DashboardController:
                 self._report_counter = 0
                 self._report_week = 0
                 self._show_help = False
-                self.status_var.set(f"New game started with seed {seed}.")
+                self._main_menu_open = False
+                status = f"New game started with seed {seed}."
+                if not empty_map:
+                    self._map_other_layers = other_map_layers()
+                    if self._map_other_layers:
+                        status += f" This map also has {', '.join(self._map_other_layers[:3])}; remove them for a smooth week close."
+                self.status_var.set(status)
             except Exception as exc:
                 self.status_var.set(f"New game failed: {exc}")
                 _warn(self.messages, "NEW", traceback.format_exc().strip().splitlines()[-1])

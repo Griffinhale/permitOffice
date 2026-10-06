@@ -280,7 +280,8 @@ class PermitDeskView:
         """Run the enabled action whose hotkey is shown, or the help card's keys.
 
         Keys typed into another widget (the New Game seed entry) or held with
-        Control/Alt are ignored, and the start/help card answers only ``?``.
+        Control/Alt are ignored, the help card answers only ``?``, and the main
+        menu answers only its own keys (C continue, N new game, ? help).
         """
 
         if event.widget is not self.canvas and event.widget is not self.root:
@@ -290,6 +291,12 @@ class PermitDeskView:
         key = str(getattr(event, "char", "") or "").lower()
         if self.model.show_start_help and key != "?":
             return None
+        if self.model.main_menu is not None and not self.model.show_start_help:
+            callback = self._main_menu_keys().get(key)
+            if callback is None:
+                return None
+            callback()
+            return "break"
         callback = self._hotkey_targets.get(key)
         if callback is None:
             return None
@@ -346,7 +353,8 @@ class PermitDeskView:
         c.delete("all")
         self._click_targets = []
         self._hotkey_targets = {}
-        c.create_rectangle(0, 0, width, height, fill=Palette.FRAME, outline="")
+        # A full page, not a card: it covers the desk until the player picks.
+        c.create_rectangle(0, 0, width, height, fill=Palette.CONTENT, outline="")
 
         margin = Space.M
         header_h = HEADER_H
@@ -387,6 +395,8 @@ class PermitDeskView:
         self._register_global_hotkeys()
         if self._menu_open:
             self._draw_session_menu(c, width)
+        if self.model.main_menu is not None:
+            self._draw_main_menu(c, width, height)
         if self.model.show_start_help:
             self._draw_start_help_overlay(c, width, height)
 
@@ -1047,8 +1057,65 @@ class PermitDeskView:
         c.create_text((x0 + x1) // 2, (y0 + y1) // 2, text=label.upper(), anchor="center", fill=color, font=self._font(Type.SMALL, "bold"))
         self._add_target("session", label, (x0, y0, x1, y1), callback)
 
+    def _main_menu_actions(self):
+        """Map main-menu entry ids to their callbacks."""
+
+        return {
+            "continue": self.callbacks.continue_game,
+            "new_game": self.callbacks.new_game,
+            "help": self.callbacks.show_help,
+        }
+
+    def _main_menu_keys(self):
+        """Return the keys the main menu answers, limited to its shown entries."""
+
+        actions = self._main_menu_actions()
+        keys = {"continue": "c", "new_game": "n", "help": "?"}
+        return {keys[action]: actions[action] for action, _label in self.model.main_menu.entries}
+
+    def _draw_main_menu(self, c, width, height):
+        """Draw the card every Run opens on: save line, menu buttons, map guidance."""
+
+        menu = self.model.main_menu
+        # A full page, modal: the desk drawn underneath takes no clicks.
+        self._click_targets = []
+        c.create_rectangle(0, 0, width, height, fill=Palette.CONTENT, outline="")
+        ow = min(400, width - 2 * Space.L)
+        x0 = (width - ow) // 2
+        x1 = x0 + ow
+        y0 = max(Space.L, height // 8)
+        body_x0 = x0 + Space.L
+        body_x1 = x1 - Space.L
+        c.create_rectangle(x0, y0, x1, y0 + 40, fill=Palette.ACCENT, outline="")
+        c.create_text(body_x0, y0 + 20, text="PERMIT OFFICE", anchor="w", fill=Palette.CONTENT, font=self._font(Type.DISPLAY, "bold"))
+        yy = y0 + 40 + Space.M
+        yy = _text_bottom(c, body_x0, yy, "Run a city permit desk for twelve weeks. Meet your goal and pass the audits.", self._font(Type.BODY), Palette.INK, width=body_x1 - body_x0) + Space.S
+        yy = _text_bottom(c, body_x0, yy, menu.save_line, self._font(Type.BODY, "bold"), Palette.INK, width=body_x1 - body_x0) + Space.M
+        actions = self._main_menu_actions()
+        keys = {"continue": "C", "new_game": "N", "help": "?"}
+        for idx, (action, label) in enumerate(menu.entries):
+            primary = idx == 0
+            color = Palette.ACCENT if action != "help" else Palette.MUTED
+            hover = self._hover_key == f"main-menu:{action}"
+            fill = Palette.INK if primary and hover else color if primary else Palette.SELECT if hover else Palette.CONTENT
+            c.create_rectangle(body_x0, yy, body_x1, yy + 40, fill=fill, outline=color, width=1)
+            ink = Palette.CONTENT if primary else color
+            c.create_text(body_x0 + Space.M, yy + 20, text=label.upper(), anchor="w", fill=ink, font=self._font(Type.TITLE, "bold"))
+            c.create_text(body_x1 - Space.M, yy + 20, text=keys[action], anchor="e", fill=ink, font=self._font(Type.SMALL, "bold"))
+            self._add_target("main-menu", action, (body_x0, yy, body_x1, yy + 40), actions[action])
+            yy += 40 + Space.S
+        yy += Space.S
+        yy = _text_bottom(c, body_x0, yy, menu.map_note, self._font(Type.SMALL), Palette.MUTED, width=body_x1 - body_x0) + Space.S
+        if menu.map_warning:
+            _text_bottom(c, body_x0, yy, menu.map_warning, self._font(Type.SMALL, "bold"), Palette.WATCH, width=body_x1 - body_x0)
+
     def _draw_start_help_overlay(self, c, width, height):
-        """Draw the start/help card: how a season works and the keys."""
+        """Draw the start/help card: how a season works and the keys.
+
+        Modal like the menu: only the card's own buttons take clicks.
+        """
+
+        self._click_targets = []
 
         ow = min(460, width - 2 * Space.L)
         oh = min(520, height - 2 * Space.L)
@@ -1076,7 +1143,7 @@ class PermitDeskView:
             yy = _text_bottom(c, body_x0 + label_w, yy, text, self._font(Type.SMALL), Palette.MUTED, width=body_x1 - body_x0 - label_w) + Space.S
         bw = min(150, (body_x1 - body_x0 - Space.M) // 2)
         self._draw_session_button(c, body_x0, y1 - 50, body_x0 + bw, y1 - 16, "New Game", Palette.ACCENT, self.callbacks.new_game)
-        self._draw_session_button(c, body_x0 + bw + Space.M, y1 - 50, body_x0 + 2 * bw + Space.M, y1 - 16, "Help", Palette.MUTED, self.callbacks.show_help)
+        self._draw_session_button(c, body_x0 + bw + Space.M, y1 - 50, body_x0 + 2 * bw + Space.M, y1 - 16, "Close", Palette.MUTED, self.callbacks.show_help)
 
     # ----- measuring ---------------------------------------------------------
 

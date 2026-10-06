@@ -19,7 +19,7 @@ sys.modules.setdefault(
 
 from toolbox import arcpy_permit_office_rules as rules  # noqa: E402
 from toolbox.permit_office_arcgis import dashboard  # noqa: E402
-from toolbox.permit_office_arcgis.desk_model import ReportTab, build_desk_model  # noqa: E402
+from toolbox.permit_office_arcgis.desk_model import ReportTab, build_desk_model, build_main_menu  # noqa: E402
 from toolbox.permit_office_arcgis.desk_view import receipt_metrics  # noqa: E402
 
 
@@ -151,7 +151,24 @@ TICKER_OFFSETS = {
 }
 
 
+def main_menu_saved():
+    """The menu a Run opens on with a week-5 save, in a map that still has Pro's basemap."""
+
+    state, districts, items = _new_game()
+    state.turn = 5
+    menu = build_main_menu(state, True, ("World Topographic Map", "World Hillshade"))
+    return build_desk_model(state, districts, items, "", "", main_menu=menu)
+
+
+def main_menu_first_run():
+    """The menu in a project with no save yet."""
+
+    return build_desk_model(rules.CityState(), {}, [], "", "", main_menu=build_main_menu(None, False), game_active=False)
+
+
 SCENARIOS = {
+    "main-menu": main_menu_saved,
+    "main-menu-first-run": main_menu_first_run,
     "goal-picker": goal_picker,
     "applications": applications_mid_week,
     "city": city_tab,

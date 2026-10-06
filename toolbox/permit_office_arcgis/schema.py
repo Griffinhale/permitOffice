@@ -30,9 +30,10 @@ WEB_MERCATOR_WKID = 3857
 # widths, and store.encode_json warns instead of truncating on those.
 JSON_TEXT_LENGTH = 32768
 
-P_WORKSPACE = 0
-P_OUTPUT = 1
-P_PERF = 2
+# The tool shows no parameters (ND14); only the derived district layer output.
+P_OUTPUT = 0
+# Live testing points a run at a throwaway save; players never set it.
+WORKSPACE_ENV = "PERMIT_OFFICE_WORKSPACE"
 
 DISTRICT_FIELDS = [
     ("cell_id", "TEXT", "District ID", 32),
@@ -237,6 +238,19 @@ def resolve_workspace(value, messages):
     fallback = str(scratch) if str(scratch).lower().endswith(".gdb") else os.path.join(str(scratch), DEFAULT_GDB_NAME)
     _log(messages, "WORKSPACE", f"no workspace or project home; using scratch: {fallback}")
     return fallback
+
+
+def resolve_game_workspace(messages):
+    """Return the save for this run: PERMIT_OFFICE_WORKSPACE when set, else the project default.
+
+    The env var follows resolve_workspace's rules: a .gdb is used verbatim, a
+    folder gets permit_office.gdb, and blank counts as unset.
+    """
+
+    value = os.environ.get(WORKSPACE_ENV)
+    if value and value.strip():
+        _log(messages, "WORKSPACE", f"{WORKSPACE_ENV} is set")
+    return resolve_workspace(value, messages)
 
 
 def ensure_gdb(gdb_path, messages):

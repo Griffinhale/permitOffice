@@ -1513,3 +1513,96 @@ def test_case_brief_shows_the_case_description_and_its_budget():
     body = " ".join(str(text) for text in _text_values(canvas))
     assert model.case.preview.split()[0] in body
     assert "Budget:" in body
+
+
+# ----- ND14 main menu ---------------------------------------------------------
+
+from toolbox.permit_office_arcgis.desk_model import build_main_menu  # noqa: E402
+
+
+def test_main_menu_offers_continue_only_when_a_save_exists():
+    """Verify the menu lists Continue, New Game, Help with a save and drops Continue without one."""
+
+    with_save = build_main_menu(rules.CityState(turn=5), has_save=True)
+    without = build_main_menu(None, has_save=False)
+
+    assert [action for action, _label in with_save.entries] == ["continue", "new_game", "help"]
+    assert [action for action, _label in without.entries] == ["new_game", "help"]
+    assert "week 5" in with_save.save_line.lower()
+    assert "no saved game" in without.save_line.lower()
+
+
+def test_main_menu_names_a_finished_season():
+    """Verify a finished save says the season is over instead of naming a week past the last."""
+
+    menu = build_main_menu(rules.CityState(turn=13, status="complete"), has_save=True)
+
+    assert "season over" in menu.save_line.lower()
+
+
+def test_main_menu_tells_the_player_to_use_an_empty_map():
+    """Verify first-run map guidance is always shown and other layers become a warning."""
+
+    clean = build_main_menu(None, has_save=False)
+    busy = build_main_menu(None, has_save=False, other_layers=("World Topographic Map", "World Hillshade"))
+
+    assert "new map" in clean.map_note.lower()
+    assert "remove" in clean.map_note.lower()
+    assert clean.map_warning == ""
+    assert "World Topographic Map" in busy.map_warning
+    assert "World Hillshade" in busy.map_warning
+
+
+def test_main_menu_draws_its_buttons_and_wires_callbacks():
+    """Verify the menu card draws one button per entry and each click reaches its callback."""
+
+    menu = build_main_menu(rules.CityState(turn=3), has_save=True)
+    model = build_desk_model(rules.CityState(turn=3), {}, [], main_menu=menu)
+    view, callbacks, canvas = _pane(model, width=1120, height=900)
+
+    body = " ".join(str(text) for text in _text_values(canvas))
+    assert "CONTINUE" in body and "NEW GAME" in body and "HELP" in body
+    assert "new map" in body.lower()
+    for ident in ("continue", "new_game", "help"):
+        assert _click(view, "main-menu", ident)
+    assert [name for name, _args in callbacks.calls] == ["continue_game", "new_game", "show_help"]
+
+
+def test_main_menu_blocks_desk_hotkeys_but_answers_its_own():
+    """Verify W/S stay off under the menu while C, N and ? reach the menu actions."""
+
+    menu = build_main_menu(rules.CityState(turn=3), has_save=True)
+    model = build_desk_model(rules.CityState(turn=3), {}, [], main_menu=menu)
+    view, callbacks = _view_for_drawing(model)
+    view.canvas = _FakeCanvas()
+    view._draw(1120, 900)
+
+    for key in ("w", "s", "c", "n", "?"):
+        _key(view, key)
+
+    assert [name for name, _args in callbacks.calls] == ["continue_game", "new_game", "show_help"]
+
+
+def test_main_menu_without_save_ignores_continue_key():
+    """Verify C does nothing when there is no saved game to continue."""
+
+    model = build_desk_model(rules.CityState(), {}, [], main_menu=build_main_menu(None, has_save=False))
+    view, callbacks = _view_for_drawing(model)
+    view.canvas = _FakeCanvas()
+    view._draw(1120, 900)
+
+    _key(view, "c")
+
+    assert callbacks.calls == []
+
+
+def test_main_menu_and_help_card_take_no_clicks_for_the_desk_underneath():
+    """Verify only the menu (or help card) buttons are clickable while they cover the desk."""
+
+    item, districts = _vendor_case()
+    menu = build_main_menu(rules.CityState(turn=3), has_save=True)
+    view, _callbacks, _canvas = _pane(build_desk_model(rules.CityState(turn=3), districts, [item], item.item_id, main_menu=menu), width=1120, height=900)
+    assert {kind for kind, *_rest in view._click_targets} == {"main-menu"}
+
+    view, _callbacks, _canvas = _pane(build_desk_model(rules.CityState(turn=3), districts, [item], item.item_id, main_menu=menu, show_start_help=True), width=1120, height=900)
+    assert {kind for kind, *_rest in view._click_targets} == {"session"}

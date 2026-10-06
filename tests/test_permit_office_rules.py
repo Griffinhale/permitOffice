@@ -2648,9 +2648,10 @@ def test_arcpy_toolbox_hides_experiment_and_diagnostic_parameters():
     toolbox_text = (toolbox_dir / "arcpy_permit_office.pyt").read_text()
     schema_text = (toolbox_dir / "permit_office_arcgis" / "schema.py").read_text()
 
-    assert "P_WORKSPACE = 0" in schema_text
-    assert "P_OUTPUT = 1" in schema_text
-    assert "P_PERF = 2" in schema_text
+    # ND14: the release tool shows no parameters; only the derived output remains.
+    assert "P_OUTPUT = 0" in schema_text
+    assert "P_WORKSPACE" not in schema_text
+    assert "P_PERF" not in schema_text
     for option in (
         "P_REDRAW_EXPERIMENT",
         "P_REDRAW_BENCHMARK_RUNS",
@@ -2682,19 +2683,23 @@ def test_arcpy_toolbox_evicts_stale_permit_office_modules_before_reload():
     assert "sys.modules.pop(_module_name, None)" in toolbox_text
 
 
-def test_arcpy_toolbox_execute_uses_three_parameter_contract():
-    """Verify execute indexes only workspace/output/perf after cleanup."""
+def test_arcpy_toolbox_execute_has_no_visible_parameters():
+    """Verify Run needs no input: the save comes from the env var or project default (ND14)."""
 
     toolbox_dir = Path(__file__).parents[1] / "toolbox"
     toolbox_text = (toolbox_dir / "arcpy_permit_office.pyt").read_text()
 
-    assert "parameters[P_WORKSPACE]" in toolbox_text
-    assert "parameters[P_PERF]" in toolbox_text
+    assert "parameters[P_WORKSPACE]" not in toolbox_text
+    assert "parameters[P_PERF]" not in toolbox_text
+    assert "DEWorkspace" not in toolbox_text
+    assert "GPBoolean" not in toolbox_text
+    assert "resolve_game_workspace(messages)" in toolbox_text
     assert "P_OUTPUT" in toolbox_text
     assert "parameters[P_REDRAW_EXPERIMENT]" not in toolbox_text
     assert "parameters[P_REDRAW_BENCHMARK_RUNS]" not in toolbox_text
     assert "parameters[P_STARTUP_EXPERIMENT]" not in toolbox_text
-    assert "return [p_workspace, p_output, p_perf]" in toolbox_text
+    assert "return [p_output]" in toolbox_text
+    assert 'parameterType="Derived"' in toolbox_text
 
 
 def test_toolbox_reload_list_matches_modules_on_disk():

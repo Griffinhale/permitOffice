@@ -2561,3 +2561,152 @@ def test_dashboard_opens_as_a_small_resizable_pane():
     assert calls == [("minsize", 400, 560), ("geometry", "480x820+0+0"), ("resizable", True, True)]
     short = SimpleNamespace(winfo_screenheight=lambda: 600)
     assert dashboard._startup_geometry(short) == "480x560+0+0"
+
+
+# ----- ND14 main menu ---------------------------------------------------------
+
+
+def _menu_controller(monkeypatch, *, saved=True, layers=True, state=None):
+    """Return a controller with stubbed reads and a recording view for menu tests."""
+
+    controller = dashboard.DashboardController({"districts": "districts", "state": "state", "docket": "docket"}, "district_layer", 2026, object())
+    controller.status_var = dashboard._StatusProxy(controller)
+    rendered = []
+    calls = []
+
+    class FakeView:
+        def render(self, model):
+            rendered.append(model)
+
+    controller.view = FakeView()
+    state = state or rules.CityState(turn=5)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {"D0000": _profile("D0000")})
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "proposal_visible_map", lambda paths: {})
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: saved)
+    monkeypatch.setattr(dashboard, "ensure_active_map", lambda messages: None)
+    monkeypatch.setattr(dashboard, "output_layers_present", lambda: layers)
+    monkeypatch.setattr(dashboard, "other_map_layers", lambda: ())
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: calls.append("add"))
+    monkeypatch.setattr(dashboard, "_row_count", lambda path: 5)
+    return controller, rendered, calls
+
+
+def test_run_opens_on_the_main_menu_with_continue_for_a_save(monkeypatch):
+    """Verify every Run lands on the menu, and a save offers Continue naming its week."""
+
+    controller, rendered, _calls = _menu_controller(monkeypatch, saved=True)
+
+    controller.reload()
+
+    menu = rendered[-1].main_menu
+    assert menu is not None
+    assert [action for action, _label in menu.entries] == ["continue", "new_game", "help"]
+    assert "week 5" in menu.save_line.lower()
+    assert rendered[-1].show_start_help is False
+
+
+def test_main_menu_without_save_offers_new_game_and_help(monkeypatch):
+    """Verify a project with no save shows New Game and Help only."""
+
+    controller, rendered, _calls = _menu_controller(monkeypatch, saved=False)
+
+    controller.reload()
+
+    assert [action for action, _label in rendered[-1].main_menu.entries] == ["new_game", "help"]
+
+
+def test_continue_closes_the_menu_and_resumes_the_saved_game(monkeypatch):
+    """Verify Continue drops the menu and the desk shows the saved board."""
+
+    controller, rendered, _calls = _menu_controller(monkeypatch, saved=True)
+    controller.reload()
+
+    controller.continue_game()
+
+    assert rendered[-1].main_menu is None
+    assert rendered[-1].game_active is True
+    assert rendered[-1].week_label
+
+
+def test_continue_re_adds_layers_when_the_map_has_none(monkeypatch):
+    """Verify Continue on a map without Permit Office layers puts them back and reads the save."""
+
+    controller, rendered, calls = _menu_controller(monkeypatch, saved=True, layers=False)
+    controller.reload()
+    controller.prepare_startup_session()
+    assert controller._offer_fresh_start is True
+    assert "add" not in calls
+    # The menu still names the saved week even while the desk behind it is blank.
+    assert "week 5" in rendered[-1].main_menu.save_line.lower()
+
+    controller.continue_game()
+
+    assert calls == ["add"]
+    assert controller._offer_fresh_start is False
+    assert rendered[-1].main_menu is None
+    assert rendered[-1].game_active is True
+
+
+def test_continue_without_a_save_keeps_the_menu(monkeypatch):
+    """Verify Continue cannot leave the menu when nothing is saved."""
+
+    controller, rendered, _calls = _menu_controller(monkeypatch, saved=False)
+    controller.reload()
+
+    controller.continue_game()
+
+    assert rendered[-1].main_menu is not None
+
+
+def test_help_from_the_menu_returns_to_the_menu(monkeypatch):
+    """Verify Help opens the rules card over the menu and closing it shows the menu again."""
+
+    controller, rendered, _calls = _menu_controller(monkeypatch, saved=True)
+    controller.reload()
+
+    controller.show_help()
+    assert rendered[-1].show_start_help is True
+    assert rendered[-1].main_menu is not None
+
+    controller.show_help()
+    assert rendered[-1].show_start_help is False
+    assert rendered[-1].main_menu is not None
+
+
+def test_new_game_closes_the_menu(monkeypatch):
+    """Verify a started new game leaves the menu."""
+
+    controller, rendered, _calls = _menu_controller(monkeypatch, saved=True)
+    controller.reload()
+    for name in ("clear_game_rows", "write_state", "remove_outputs_from_map", "refresh_all"):
+        monkeypatch.setattr(dashboard, name, lambda *args, **kwargs: None)
+    for name in ("create_district_board", "seed_city_features", "generate_docket_rows"):
+        monkeypatch.setattr(dashboard, name, lambda paths, seed, messages: None)
+    monkeypatch.setattr(dashboard, "use_game_map", lambda messages: True)
+
+    controller.start_new_game(7)
+
+    assert rendered[-1].main_menu is None
+
+
+def test_new_game_moves_to_an_empty_map_and_warns_when_it_cannot(monkeypatch):
+    """Verify New Game asks for an empty game map first, and says so in the status when the switch fails."""
+
+    controller, rendered, _calls = _menu_controller(monkeypatch, saved=False)
+    order = []
+    for name in ("clear_game_rows", "write_state", "refresh_all"):
+        monkeypatch.setattr(dashboard, name, lambda *args, **kwargs: None)
+    for name in ("create_district_board", "seed_city_features", "generate_docket_rows"):
+        monkeypatch.setattr(dashboard, name, lambda paths, seed, messages: None)
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages: order.append("remove"))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: order.append("add"))
+    monkeypatch.setattr(dashboard, "use_game_map", lambda messages: order.append("map") or False)
+    monkeypatch.setattr(dashboard, "other_map_layers", lambda: ("World Hillshade",))
+
+    controller.start_new_game(7)
+
+    assert order == ["map", "remove", "add"]
+    assert "World Hillshade" in controller.status_text

@@ -60,13 +60,11 @@ from permit_office_arcgis.dashboard import (
 )
 from permit_office_arcgis.schema import (
     P_OUTPUT,
-    P_PERF,
-    P_WORKSPACE,
     DISTRICTS,
     TOOLBOX_ALIAS,
     TOOLBOX_LABEL,
     ensure_schema,
-    resolve_workspace,
+    resolve_game_workspace,
 )
 
 
@@ -88,19 +86,17 @@ class PermitOfficePrototype(object):
         """Configure static tool metadata displayed in ArcGIS Pro."""
 
         self.label = "Permit Office Prototype"
-        self.description = "Generated-district permit office dashboard prototype."
+        self.description = (
+            "Opens the Permit Office main menu: Continue, New Game, Help. "
+            "Play in a new map with every layer removed; a basemap makes the "
+            "districts go blank for a second at each week close. The game saves "
+            "to data\\permit_office.gdb in the project folder."
+        )
         self.canRunInBackground = False
 
     def getParameterInfo(self):
-        """Declare ArcGIS tool parameters for launching the dashboard."""
+        """Declare only the derived district layer; Run needs no input."""
 
-        p_workspace = arcpy.Parameter(
-            displayName="Game Workspace (optional)",
-            name="game_workspace",
-            datatype="DEWorkspace",
-            parameterType="Optional",
-            direction="Input",
-        )
         p_output = arcpy.Parameter(
             displayName="Output District Layer",
             name="output_district_layer",
@@ -108,23 +104,18 @@ class PermitOfficePrototype(object):
             parameterType="Derived",
             direction="Output",
         )
-        p_perf = arcpy.Parameter(
-            displayName="Log Refresh Timings",
-            name="enable_perf",
-            datatype="GPBoolean",
-            parameterType="Optional",
-            direction="Input",
-        )
-        p_perf.value = False
-        return [p_workspace, p_output, p_perf]
+        return [p_output]
 
     def execute(self, parameters, messages):
-        """Open the dashboard against the resolved saved-game geodatabase."""
+        """Open the main menu against the project's saved-game geodatabase.
 
-        _perf.set_enabled(bool(parameters[P_PERF].value))
+        PERMIT_OFFICE_WORKSPACE overrides the save for live testing, and
+        PERMIT_OFFICE_PERF turns on refresh timings.
+        """
+
         with _perf.perf_session("startup", messages):
             with _perf.perf_block("workspace"):
-                gdb_path = resolve_workspace(parameters[P_WORKSPACE].value, messages)
+                gdb_path = resolve_game_workspace(messages)
             with _perf.perf_block("schema"):
                 paths = ensure_schema(gdb_path, messages)
             seed = 2026
